@@ -9,6 +9,8 @@ namespace DbAccessManager.Services;
 
 public sealed class NotificationService(IDbContextFactory<ApplicationDbContext> factory, IConfiguration config, ILogger<NotificationService> logger)
 {
+    public event Action<string, int>? UnreadChanged;
+
     public async Task NotifyAsync(string userId, string title, string message, string? link = null)
     {
         try
@@ -17,6 +19,7 @@ public sealed class NotificationService(IDbContextFactory<ApplicationDbContext> 
             db.Notifications.Add(new Notification { UserId = userId, Title = title, Message = message, Link = link });
             var email = await db.Users.Where(u => u.Id == userId).Select(u => u.Email).FirstOrDefaultAsync();
             await db.SaveChangesAsync();
+            await PublishUnreadAsync(userId);
             if (!string.IsNullOrEmpty(email)) _ = Task.Run(() => SendEmailAsync(email, title, message));
         }
         catch (Exception ex)
@@ -52,6 +55,21 @@ public sealed class NotificationService(IDbContextFactory<ApplicationDbContext> 
     {
         await using var db = await factory.CreateDbContextAsync();
         await db.Notifications.Where(n => n.UserId == userId && !n.IsRead && (id == null || n.Id == id)).ExecuteUpdateAsync(s => s.SetProperty(n => n.IsRead, true));
+        await PublishUnreadAsync(userId);
+    }
+
+    private async Task PublishUnreadAsync(string userId)
+    {
+        if (UnreadChanged is null) return;
+        try
+        {
+            var unread = await UnreadCountAsync(userId);
+            UnreadChanged.Invoke(userId, unread);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Failed to publish unread count for {UserId}", userId);
+        }
     }
 
     private async Task SendEmailAsync(string to, string subject, string body)
@@ -116,9 +134,10 @@ public sealed class UserAdminService(
         var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         if (await users.FindByEmailAsync(email) is not null) return OpResult.Fail("A user with that email already exists.");
         var password = GeneratePassword();
+        var finalDisplayName = string.IsNullOrWhiteSpace(displayName) ? email.Split('@')[0] : displayName.Trim();
         var user = new ApplicationUser
         {
-            UserName = email, Email = email, EmailConfirmed = true, DisplayName = displayName, IsActive = true,
+            UserName = email, Email = email, EmailConfirmed = true, DisplayName = finalDisplayName, IsActive = true,
             MustChangePassword = true, ExpiresAt = expiresAt, CreatedBy = actor.UserName
         };
         var result = await users.CreateAsync(user, password);

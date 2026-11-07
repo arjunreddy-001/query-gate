@@ -4,10 +4,22 @@ Blazor Server (.NET 10) tool that brokers access to SQL Server databases with a 
 
 ## Run
 
+### PowerShell (Windows)
+
 ```powershell
 dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=...;Database=DbAccessManager;User Id=...;Password=...;TrustServerCertificate=True"
 $env:BootstrapAdmin__Email = "admin@example.com"
 $env:BootstrapAdmin__Password = "<unique password, 12+ chars>"
+dotnet ef database update
+dotnet run
+```
+
+### macOS / Linux (bash, zsh)
+
+```bash
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=...;Database=DbAccessManager;User Id=...;Password=...;TrustServerCertificate=True"
+export BootstrapAdmin__Email="admin@example.com"
+export BootstrapAdmin__Password="<unique password, 12+ chars>"
 dotnet ef database update
 dotnet run
 ```
@@ -18,13 +30,13 @@ Full usage documentation: [docs/USER-GUIDE.md](./docs/USER-GUIDE.md). Admin quic
 
 ## Configuration
 
-| Key | Purpose |
-|---|---|
-| `ConnectionStrings:DefaultConnection` | Application database |
-| `Encryption:Key` | Base64 32-byte key for managed connection strings (dev falls back to `App_Data/dev-encryption.key`; always set in production) |
-| `Jwt:Key` | JWT signing key (random per process if unset, which invalidates tokens on restart) |
-| `BootstrapAdmin__Email` / `__Password` | One-time first admin |
-| `Smtp:*` | Optional email notifications |
+| Key                                    | Purpose                                                                                                                       |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `ConnectionStrings:DefaultConnection`  | Application database                                                                                                          |
+| `Encryption:Key`                       | Base64 32-byte key for managed connection strings (dev falls back to `App_Data/dev-encryption.key`; always set in production) |
+| `Jwt:Key`                              | JWT signing key (random per process if unset, which invalidates tokens on restart)                                            |
+| `BootstrapAdmin__Email` / `__Password` | One-time first admin                                                                                                          |
+| `Smtp:*`                               | Optional email notifications                                                                                                  |
 
 ## What's included
 

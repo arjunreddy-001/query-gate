@@ -8,7 +8,10 @@
 
 <div class="page-head">
     <div><h1>Databases</h1><p>Register SQL Server targets. Connection strings are encrypted at rest.</p></div>
-    <div class="actions"><button class="btn btn-primary" @onclick="New"><Icon Name="plus" />Register database</button></div>
+    <div class="actions">
+        <label class="check small"><input type="checkbox" @bind="showDisabled" @bind:after="Load" />Show disabled</label>
+        <button class="btn btn-primary" @onclick="New"><Icon Name="plus" />Register database</button>
+    </div>
 </div>
 <Banner Text="@Flash" IsError="@FlashIsError" />
 
@@ -27,7 +30,10 @@
                     <td>@d.DefaultTimeoutSeconds s</td>
                     <td>@d.MaxRows</td>
                     <td>@if (d.IsActive) { <span class="badge ok">Enabled</span> } else { <span class="badge bad">Disabled</span> }</td>
-                    <td class="right"><button class="btn btn-sm" @onclick="() => Edit(d)">Edit</button></td>
+                    <td class="right">
+                        <button class="btn btn-sm" @onclick="() => TestRegistered(d.Id)">Test</button>
+                        <button class="btn btn-sm" @onclick="() => Edit(d)">Edit</button>
+                    </td>
                 </tr>
             }
             </tbody>
@@ -40,12 +46,9 @@
     <div class="modal-back"><div class="modal">
         <div class="modal-head"><h2>@(editId is null ? "Register database" : "Edit " + name)</h2></div>
         <div class="modal-body">
-            @if (editId is null)
-            {
-                <div class="field"><label>Name</label><input type="text" @bind="name" /></div>
-                <div class="field"><label>Environment</label>
-                    <select @bind="env"><option>Development</option><option>QA</option><option>Production</option></select></div>
-            }
+            <div class="field"><label>Name</label><input type="text" @bind="name" /></div>
+            <div class="field"><label>Environment</label>
+                <select @bind="env"><option>Development</option><option>QA</option><option>Production</option></select></div>
             <div class="field"><label>Description</label><input type="text" @bind="description" /></div>
             <div class="field"><label>Connection string @(editId is null ? "" : "(leave blank to keep current)")</label>
                 <textarea style="min-height:70px" autocomplete="off" @bind="connection"></textarea></div>
@@ -66,7 +69,7 @@
 
 @code {
     private List<ManagedDatabase> list = [];
-    private bool open, active = true, testOk;
+    private bool open, active = true, testOk, showDisabled;
     private Guid? editId;
     private string name = "", env = "Development", description = "", connection = "";
     private string? testMsg;
@@ -77,19 +80,27 @@
     private async Task Load()
     {
         await using var db = await DbFactory.CreateDbContextAsync();
-        list = await db.ManagedDatabases.AsNoTracking().OrderBy(d => d.Environment).ThenBy(d => d.Name).ToListAsync();
+        var query = db.ManagedDatabases.AsNoTracking().AsQueryable();
+        if (!showDisabled) query = query.Where(d => d.IsActive);
+        list = await query.OrderBy(d => d.Environment).ThenBy(d => d.Name).ToListAsync();
     }
 
     private void New() { editId = null; name = description = connection = ""; env = "Development"; timeout = 30; maxRows = 1000; active = true; testMsg = null; open = true; }
-    private void Edit(ManagedDatabase d) { editId = d.Id; name = d.Name; description = d.Description ?? ""; connection = ""; timeout = d.DefaultTimeoutSeconds; maxRows = d.MaxRows; active = d.IsActive; testMsg = null; open = true; }
+    private void Edit(ManagedDatabase d) { editId = d.Id; name = d.Name; env = d.Environment; description = d.Description ?? ""; connection = ""; timeout = d.DefaultTimeoutSeconds; maxRows = d.MaxRows; active = d.IsActive; testMsg = null; open = true; }
 
     private async Task Test() { (testOk, testMsg) = await DbAdmin.TestAsync(connection); }
+
+    private async Task TestRegistered(Guid id)
+    {
+        var (ok, message) = await DbAdmin.TestRegisteredAsync(id);
+        Say(message, !ok);
+    }
 
     private async Task Save()
     {
         var result = editId is null
             ? await DbAdmin.RegisterAsync(Me, name.Trim(), env, description, connection, timeout, maxRows)
-            : await DbAdmin.UpdateAsync(Me, editId.Value, description, string.IsNullOrWhiteSpace(connection) ? null : connection, timeout, maxRows, active);
+            : await DbAdmin.UpdateAsync(Me, editId.Value, name.Trim(), env, description, string.IsNullOrWhiteSpace(connection) ? null : connection, timeout, maxRows, active);
         Say(result, "Saved.");
         if (result.Ok) { open = false; await Load(); }
         else { testOk = false; testMsg = result.Error; }

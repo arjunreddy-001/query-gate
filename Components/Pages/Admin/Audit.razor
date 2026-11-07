@@ -5,46 +5,58 @@
 @inject AuditService AuditSvc
 @inject IJSRuntime Js
 
-<PageTitle>Audit log · Query Gate</PageTitle>
+<PageTitle>Audit logs · Query Gate</PageTitle>
 
 <div class="page-head">
-    <div><h1>Audit log</h1><p>Immutable record of queries, access and administration.</p></div>
+    <div><h1>Audit logs</h1><p>Immutable record of queries, access and administration.</p></div>
     <div class="actions"><button class="btn" @onclick="Export"><Icon Name="download" />Export CSV</button></div>
 </div>
 
 <div class="toolbar">
-    <input type="search" placeholder="User…" @bind="user" />
-    <select @bind="category"><option value="">All categories</option><option>Query</option><option>Auth</option><option>Request</option><option>User</option><option>Permission</option><option>Database</option><option>Settings</option><option>Export</option></select>
-    <select @bind="outcome"><option value="">All outcomes</option><option>Success</option><option>Failed</option><option>Denied</option><option>Cancelled</option><option>Timeout</option></select>
-    <input type="date" @bind="from" /><input type="date" @bind="to" />
-    <input class="grow" type="search" placeholder="Search SQL / details…" @bind="text" />
+    <div class="audit-key-filters">
+        <input type="search" placeholder="User…" @bind="user" @onkeydown="OnFilterKeyDown" />
+        <select @bind="category"><option value="">All categories</option><option>Query</option><option>Auth</option><option>Request</option><option>User</option><option>Permission</option><option>Database</option><option>Settings</option><option>Export</option></select>
+        <select @bind="outcome"><option value="">All outcomes</option><option>Success</option><option>Failed</option><option>Denied</option><option>Cancelled</option><option>Timeout</option></select>
+        <input type="date" @bind="from" /><input type="date" @bind="to" />
+    </div>
+    <input class="grow" type="search" placeholder="Search SQL / details…" @bind="text" @onkeydown="OnFilterKeyDown" />
     <button class="btn btn-primary" @onclick="Load">Filter</button>
 </div>
 
-<div class="card"><div class="table-wrap"><table>
-    <thead><tr><th>Time</th><th>User</th><th>Category</th><th>Action</th><th>Database</th><th>Outcome</th><th>Rows</th><th>ms</th><th>Detail</th></tr></thead>
-    <tbody>
-    @foreach (var a in rows)
+<div class="card">
+    @if (loading)
     {
-        <tr>
-            <td class="nowrap">@Local(a.Timestamp)</td><td>@a.UserName</td><td>@a.Category</td><td>@a.Action</td><td>@a.DatabaseName</td>
-            <td><span class="badge @OutcomeClass(a.Outcome)">@a.Outcome</span></td>
-            <td>@(a.RowsReturned ?? a.RowsAffected)</td><td>@a.DurationMs</td>
-            <td class="wrap">
-                @if (!string.IsNullOrEmpty(a.SqlText)) { <details><summary class="small muted">SQL</summary><pre class="small">@a.SqlText</pre></details> }
-                <span class="small muted">@a.Details</span>
-                <div class="faint small">@a.ClientIp @(a.Executor is null ? "" : "· exec: " + a.Executor)</div>
-            </td>
-        </tr>
+        <div class="empty"><span class="spinner"></span><div>Loading audit logs…</div></div>
     }
-    </tbody>
-</table></div></div>
+    else
+    {
+        <div class="table-wrap"><table>
+            <thead><tr><th>Time</th><th>User</th><th>Category</th><th>Action</th><th>Database</th><th>Outcome</th><th>Rows</th><th>ms</th><th>Detail</th></tr></thead>
+            <tbody>
+            @foreach (var a in rows)
+            {
+                <tr>
+                    <td class="nowrap">@Local(a.Timestamp)</td><td>@a.UserName</td><td>@a.Category</td><td>@a.Action</td><td>@a.DatabaseName</td>
+                    <td><span class="badge @OutcomeClass(a.Outcome)">@a.Outcome</span></td>
+                    <td>@(a.RowsReturned ?? a.RowsAffected)</td><td>@a.DurationMs</td>
+                    <td class="wrap">
+                        @if (!string.IsNullOrEmpty(a.SqlText)) { <details><summary class="small muted">SQL</summary><pre class="small">@a.SqlText</pre></details> }
+                        <span class="small muted">@a.Details</span>
+                        <div class="faint small">@a.ClientIp @(a.Executor is null ? "" : "· exec: " + a.Executor)</div>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table></div>
+    }
+</div>
 <p class="faint small">Showing the latest @rows.Count matching entries (max 500).</p>
 
 @code {
     private List<AuditLog> rows = [];
     private string user = "", category = "", outcome = "", text = "";
     private DateTime? from, to;
+    private bool loading;
 
     protected override async Task OnLoadAsync() => await Load();
 
@@ -62,8 +74,18 @@
 
     private async Task Load()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        rows = await Query(db).Take(500).ToListAsync();
+        loading = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            rows = await Query(db).Take(500).ToListAsync();
+        }
+        finally { loading = false; }
+    }
+
+    private async Task OnFilterKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter") await Load();
     }
 
     private async Task Export()

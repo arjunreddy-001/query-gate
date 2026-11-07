@@ -22,7 +22,7 @@ public sealed class DatabaseAdminService(IDbContextFactory<ApplicationDbContext>
         [("QA", Roles.Tester)] = [Perm.Select, Perm.SpHelpText]
     };
 
-    public static readonly string[] Environments = ["Development", "QA"];
+    public static readonly string[] Environments = ["Development", "QA", "Production"];
 
     public async Task<(bool Ok, string Message)> TestAsync(string connectionString)
     {
@@ -39,16 +39,26 @@ public sealed class DatabaseAdminService(IDbContextFactory<ApplicationDbContext>
         }
     }
 
+    public async Task<(bool Ok, string Message)> TestRegisteredAsync(Guid id)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        var database = await db.ManagedDatabases.AsNoTracking().FirstOrDefaultAsync(d => d.Id == id);
+        if (database is null) return (false, "Database not found.");
+        return await TestAsync(crypto.Decrypt(database.EncryptedConnectionString));
+    }
+
     public async Task<OpResult> RegisterAsync(Actor actor, string name, string environment, string? description, string connectionString, int timeout, int maxRows)
     {
         if (!Environments.Contains(environment)) return OpResult.Fail("Environment must be Development or QA.");
         try { _ = new SqlConnectionStringBuilder(connectionString); }
         catch (Exception) { return OpResult.Fail("The connection string is not valid."); }
         await using var db = await factory.CreateDbContextAsync();
-        if (await db.ManagedDatabases.AnyAsync(d => d.Name == name)) return OpResult.Fail("A database with that name is already registered.");
+        var trimmedName = name.Trim();
+        if (await db.ManagedDatabases.AnyAsync(d => d.Name == trimmedName && d.Environment == environment))
+            return OpResult.Fail("A database with that name and environment is already registered.");
         var entity = new ManagedDatabase
         {
-            Name = name.Trim(), Environment = environment, Description = description,
+            Name = trimmedName, Environment = environment, Description = description,
             EncryptedConnectionString = crypto.Encrypt(connectionString), DefaultTimeoutSeconds = timeout, MaxRows = maxRows
         };
         db.ManagedDatabases.Add(entity);
@@ -64,12 +74,24 @@ public sealed class DatabaseAdminService(IDbContextFactory<ApplicationDbContext>
         return OpResult.Success();
     }
 
-    public async Task<OpResult> UpdateAsync(Actor actor, Guid id, string? description, string? newConnectionString, int timeout, int maxRows, bool active)
+    public async Task<OpResult> UpdateAsync(Actor actor, Guid id, string name, string environment, string? description, string? newConnectionString, int timeout, int maxRows, bool active)
     {
+        if (!Environments.Contains(environment)) return OpResult.Fail("Environment must be Development, QA or Production.");
         await using var db = await factory.CreateDbContextAsync();
         var d = await db.ManagedDatabases.FindAsync(id);
         if (d is null) return OpResult.Fail("Not found.");
-        d.Description = description; d.DefaultTimeoutSeconds = timeout; d.MaxRows = maxRows; d.IsActive = active;
+
+        var trimmedName = name.Trim();
+        if (string.IsNullOrWhiteSpace(trimmedName)) return OpResult.Fail("Name is required.");
+        if (await db.ManagedDatabases.AnyAsync(x => x.Id != id && x.Name == trimmedName && x.Environment == environment))
+            return OpResult.Fail("A database with that name and environment is already registered.");
+
+        d.Name = trimmedName;
+        d.Environment = environment;
+        d.Description = description;
+        d.DefaultTimeoutSeconds = timeout;
+        d.MaxRows = maxRows;
+        d.IsActive = active;
         if (!string.IsNullOrWhiteSpace(newConnectionString))
         {
             try { _ = new SqlConnectionStringBuilder(newConnectionString); }
@@ -77,7 +99,7 @@ public sealed class DatabaseAdminService(IDbContextFactory<ApplicationDbContext>
             d.EncryptedConnectionString = crypto.Encrypt(newConnectionString);
         }
         await db.SaveChangesAsync();
-        await audit.TryWriteAsync(actor, "DatabaseAdmin", "Update", "Success", $"{d.Name} active={active}", d.Id, d.Name);
+        await audit.TryWriteAsync(actor, "DatabaseAdmin", "Update", "Success", $"{d.Name} ({d.Environment}) active={active}", d.Id, d.Name);
         return OpResult.Success();
     }
 }

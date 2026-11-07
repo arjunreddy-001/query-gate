@@ -80,6 +80,8 @@
         databases = await Permissions.GetAccessibleDatabasesAsync(UserId);
         unread = await Notifications.UnreadCountAsync(UserId);
         await using var db = await DbFactory.CreateDbContextAsync();
+        var preferredName = await db.Users.AsNoTracking().Where(u => u.Id == UserId).Select(u => u.DisplayName).FirstOrDefaultAsync();
+        if (!string.IsNullOrWhiteSpace(preferredName)) firstName = preferredName;
         var now = DateTimeOffset.UtcNow;
         activeGrants = await db.PermissionGrants.CountAsync(g => g.UserId == UserId && g.EndsAt > now && (g.StartsAt == null || g.StartsAt <= now));
         expiring = await db.PermissionGrants.CountAsync(g => g.UserId == UserId && g.EndsAt > now && g.EndsAt <= now.AddHours(24));
@@ -90,5 +92,11 @@
         recent = await db.QueryHistory.AsNoTracking().Where(h => h.UserId == UserId).OrderByDescending(h => h.Id).Take(6).ToListAsync();
     }
 
-    private static string Greeting() => DateTime.Now.Hour switch { < 12 => "Good morning", < 18 => "Good afternoon", _ => "Good evening" };
+    private static string Greeting()
+    {
+        var hour = DateTime.Now.Hour;
+        if (hour < 12) return "Good morning";
+        if (hour < 18) return "Good afternoon";
+        return "Good evening";
+    }
 }

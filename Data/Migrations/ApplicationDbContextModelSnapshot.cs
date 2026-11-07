@@ -338,7 +338,7 @@ namespace DbAccessManager.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Name")
+                    b.HasIndex("Name", "Environment")
                         .IsUnique();
 
                     b.ToTable("ManagedDatabases");

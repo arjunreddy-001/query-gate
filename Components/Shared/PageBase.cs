@@ -46,7 +46,12 @@ public abstract class PageBase : ComponentBase
         FlashIsError = !result.Ok;
     }
 
-    protected static string EnvClass(string env) => env == "Development" ? "env-dev" : "env-qa";
+    protected static string EnvClass(string env) => env switch
+    {
+        "Development" => "env-dev",
+        "Production" => "env-prod",
+        _ => "env-qa"
+    };
 
     protected static string OutcomeClass(string outcome) => outcome switch
     {

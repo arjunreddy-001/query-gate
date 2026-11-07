@@ -23,8 +23,13 @@
                 <label for="username" class="form-label">Username</label>
             </div>
             <div class="form-floating mb-3">
+                <InputText @bind-Value="Input.DisplayName" id="Input.DisplayName" class="form-control" placeholder="Enter your display name" />
+                <label for="Input.DisplayName" class="form-label">Display name (optional)</label>
+                <ValidationMessage For="() => Input.DisplayName" class="text-danger" />
+            </div>
+            <div class="form-floating mb-3">
                 <InputText @bind-Value="Input.PhoneNumber" id="Input.PhoneNumber" class="form-control" placeholder="Enter your phone number" />
-                <label for="Input.PhoneNumber" class="form-label">Phone number</label>
+                <label for="Input.PhoneNumber" class="form-label">Phone number (optional)</label>
                 <ValidationMessage For="() => Input.PhoneNumber" class="text-danger" />
             </div>
             <button type="submit" class="w-100 btn btn-lg btn-primary">Save</button>
@@ -36,6 +41,7 @@
     private ApplicationUser? user;
     private string? username;
     private string? phoneNumber;
+    private string? displayName;
 
     [CascadingParameter]
     private HttpContext HttpContext { get; set; } = default!;
@@ -56,8 +62,10 @@
 
         username = await UserManager.GetUserNameAsync(user);
         phoneNumber = await UserManager.GetPhoneNumberAsync(user);
+        displayName = user.DisplayName;
 
         Input.PhoneNumber ??= phoneNumber;
+        Input.DisplayName ??= displayName;
     }
 
     private async Task OnValidSubmitAsync()
@@ -68,12 +76,25 @@
             return;
         }
 
-        if (Input.PhoneNumber != phoneNumber)
+        var normalizedPhone = string.IsNullOrWhiteSpace(Input.PhoneNumber) ? null : Input.PhoneNumber;
+        if (normalizedPhone != phoneNumber)
         {
-            var setPhoneResult = await UserManager.SetPhoneNumberAsync(user, Input.PhoneNumber);
+            var setPhoneResult = await UserManager.SetPhoneNumberAsync(user, normalizedPhone);
             if (!setPhoneResult.Succeeded)
             {
                 RedirectManager.RedirectToCurrentPageWithStatus("Error: Failed to set phone number.", HttpContext);
+                return;
+            }
+        }
+
+        var normalizedDisplayName = (Input.DisplayName ?? string.Empty).Trim();
+        if (normalizedDisplayName != (displayName ?? string.Empty))
+        {
+            user.DisplayName = normalizedDisplayName;
+            var updateResult = await UserManager.UpdateAsync(user);
+            if (!updateResult.Succeeded)
+            {
+                RedirectManager.RedirectToCurrentPageWithStatus("Error: Failed to set display name.", HttpContext);
                 return;
             }
         }
@@ -84,7 +105,10 @@
 
     private sealed class InputModel
     {
-        [Phone]
+        [StringLength(200)]
+        [Display(Name = "Display name")]
+        public string? DisplayName { get; set; }
+
         [Display(Name = "Phone number")]
         public string? PhoneNumber { get; set; }
     }

@@ -19,7 +19,7 @@
 }
 else
 {
-<div class="ws @(sideOpen ? "" : "side-hidden")">
+<div id="query-ws" class="ws @(sideOpen ? "" : "side-hidden")">
     <aside class="card ws-side">
         <div class="tabs" style="margin:0;padding:0 8px">
             <button class="tab @(side == "explorer" ? "active" : "")" @onclick='() => side = "explorer"'>Objects</button>
@@ -29,7 +29,20 @@ else
         <div class="scroll">
             @if (side == "explorer")
             {
-                <div class="row-inline" style="margin-bottom:8px"><input type="search" placeholder="Filter objects…" @bind="filter" @bind:event="oninput" /><button class="icon-btn" title="Refresh" @onclick="() => LoadMetadata(true)" style="flex:none"><Icon Name="refresh" /></button></div>
+                <div class="stack" style="margin-bottom:8px">
+                    <div class="row-inline">
+                        <input type="search" placeholder="Filter objects…" @bind="filter" @bind:event="oninput" />
+                        <label class="check small" title="Use typo-tolerant fuzzy search"><input type="checkbox" @bind="fuzzySearch" />Fuzzy</label>
+                        <button class="icon-btn" title="Refresh" @onclick="() => LoadMetadata(true)" style="flex:none"><Icon Name="refresh" /></button>
+                    </div>
+                    <div class="row-inline obj-filters">
+                        <button class="icon-btn sm obj-filter @(objectTypeFilter == "All" ? "active" : "")" title="All" @onclick='() => objectTypeFilter = "All"'><Icon Name="list" /></button>
+                        <button class="icon-btn sm obj-filter @(objectTypeFilter == "Table" ? "active" : "")" title="Tables" @onclick='() => objectTypeFilter = "Table"'><Icon Name="table" /></button>
+                        <button class="icon-btn sm obj-filter @(objectTypeFilter == "View" ? "active" : "")" title="Views" @onclick='() => objectTypeFilter = "View"'><Icon Name="eye" /></button>
+                        <button class="icon-btn sm obj-filter @(objectTypeFilter == "Procedure" ? "active" : "")" title="Procedures" @onclick='() => objectTypeFilter = "Procedure"'><Icon Name="code" /></button>
+                        <button class="icon-btn sm obj-filter @(objectTypeFilter == "Function" ? "active" : "")" title="Functions" @onclick='() => objectTypeFilter = "Function"'><Icon Name="code" /></button>
+                    </div>
+                </div>
                 @if (metaLoading) { <div class="stack"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div> }
                 else if (metaError is not null) { <div class="alert bad small">@metaError</div> }
                 else
@@ -69,6 +82,7 @@ else
             }
         </div>
     </aside>
+    <div class="ws-side-split" title="Drag to resize object panel"></div>
 
     <section class="ws-main">
         <div class="ws-tabs">
@@ -84,8 +98,9 @@ else
 
         <div class="row-inline ws-bar">
             <select @bind="CurrentDbId" style="width:auto;min-width:200px">
-                @foreach (var d in databases) { <option value="@d.Id">@d.Name · @d.Environment</option> }
+                @foreach (var d in databases) { <option value="@d.Id">@d.Name · @d.Environment @(d.IsActive ? "" : "(Disabled)")</option> }
             </select>
+            <label class="check small" title="Include disabled databases in the list"><input type="checkbox" @bind="showDisabledDatabases" @bind:after="ReloadDatabases" />Show disabled</label>
             @if (Current is not null && databases.FirstOrDefault(d => d.Id == Current.DatabaseId) is { } cd) { <span class="badge @EnvClass(cd.Environment)">@cd.Environment</span> }
             @if (running) { <button class="btn btn-danger" @onclick="CancelRun"><Icon Name="stop" />Cancel</button> }
             else { <button class="btn btn-primary" title="Run (F5 or Ctrl+Enter). Runs the selection if any." @onclick="Run"><Icon Name="play" />Run</button> }
@@ -114,7 +129,7 @@ else
                         }
                         <button class="btn btn-sm @(activeResult == -1 ? "btn-primary" : "")" @onclick="() => activeResult = -1">Messages</button>
                         @if (last.ResultSets.Count > 0 && activeResult >= 0) { <button class="btn btn-sm" @onclick="ExportCsv"><Icon Name="download" />CSV</button> }
-                        <button class="btn btn-sm" title="@(maximized ? "Restore (Esc)" : "Maximize results")" @onclick="() => maximized = !maximized"><Icon Name="@(maximized ? "minimize" : "maximize")" />@(maximized ? "Restore" : "Maximize")</button>
+                        <button class="btn btn-sm" title="@(maximized ? "Minimize (Esc)" : "Maximize results")" @onclick="() => maximized = !maximized"><Icon Name="@(maximized ? "minimize" : "maximize")" />@(maximized ? "Minimize" : "Maximize")</button>
                     </div>
                 }
             </div>
@@ -204,7 +219,9 @@ else
     private int activeResult;
     private Guid runId;
     private List<string>? confirm;
-    private string side = "explorer", filter = "";
+    private string side = "explorer", filter = "", objectTypeFilter = "All";
+    private bool fuzzySearch = true;
+    private bool showDisabledDatabases;
     private List<DbObjectInfo> objects = [];
     private HashSet<string> expanded = [];
     private bool metaLoading;
@@ -215,8 +232,7 @@ else
     private DotNetObjectReference<Query>? self;
     private string? lastRunSql;
 
-    private IEnumerable<DbObjectInfo> FilteredObjects => objects
-        .Where(o => filter.Length == 0 || (o.Schema + "." + o.Name).Contains(filter, StringComparison.OrdinalIgnoreCase)).Take(300);
+    private IEnumerable<DbObjectInfo> FilteredObjects => BuildFilteredObjects();
 
     private Guid CurrentDbId
     {
@@ -226,7 +242,7 @@ else
 
     protected override async Task OnLoadAsync()
     {
-        databases = await Permissions.GetAccessibleDatabasesAsync(UserId);
+        await ReloadDatabases();
         loaded = true;
     }
 
@@ -248,6 +264,7 @@ else
         activeId = tabs[^1].Id;
 
         self = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("dbam.workspaceInit", "query-ws");
         await JS.InvokeAsync<bool>("dbam.editorInit", "main", "sql-editor", self, Current!.Sql);
         await OnDbChanged();
         StateHasChanged();
@@ -259,6 +276,13 @@ else
         await LoadSidePanels();
         await PersistAsync();
         StateHasChanged();
+    }
+
+    private async Task ReloadDatabases()
+    {
+        databases = await Permissions.GetAccessibleDatabasesAsync(UserId, showDisabledDatabases);
+        if (Current is not null && databases.All(d => d.Id != Current.DatabaseId) && databases.Count > 0)
+            Current.DatabaseId = databases[0].Id;
     }
 
     private async Task LoadMetadata(bool refresh)
@@ -367,6 +391,7 @@ else
         }
         finally { running = false; }
         await LoadSidePanels();
+        await InvokeAsync(StateHasChanged);
     }
 
     private void CancelRun() => Execution.Cancel(runId, UserId);
@@ -420,5 +445,76 @@ else
     {
         try { await JS.InvokeVoidAsync("dbam.editorDispose", "main"); } catch { }
         self?.Dispose();
+    }
+
+    private IEnumerable<DbObjectInfo> BuildFilteredObjects()
+    {
+        var source = objects.AsEnumerable();
+        if (objectTypeFilter != "All") source = source.Where(o => o.Type == objectTypeFilter);
+
+        if (string.IsNullOrWhiteSpace(filter)) return source.Take(300);
+        if (!fuzzySearch)
+            return source.Where(o => (o.Schema + "." + o.Name).Contains(filter, StringComparison.OrdinalIgnoreCase)).Take(300);
+
+        var query = Normalize(filter);
+        if (query.Length == 0) return source.Take(300);
+
+        return source
+            .Select(o => new { Obj = o, Score = FuzzyScore(query, Normalize(o.Schema + "." + o.Name), Normalize(o.Name)) })
+            .Where(x => x.Score >= 0)
+            .OrderByDescending(x => x.Score)
+            .ThenBy(x => x.Obj.Schema)
+            .ThenBy(x => x.Obj.Name)
+            .Select(x => x.Obj)
+            .Take(300);
+    }
+
+    private static string Normalize(string value) => new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    private static int FuzzyScore(string query, string fullName, string name)
+    {
+        var containsName = name.IndexOf(query, StringComparison.Ordinal);
+        if (containsName >= 0) return 1000 - containsName;
+
+        var containsFull = fullName.IndexOf(query, StringComparison.Ordinal);
+        if (containsFull >= 0) return 900 - containsFull;
+
+        if (IsSubsequence(query, name)) return 700 - Math.Max(0, name.Length - query.Length);
+
+        var threshold = Math.Max(1, query.Length / 3);
+        var distance = Levenshtein(query, name);
+        if (distance <= threshold) return 500 - (distance * 50);
+
+        return -1;
+    }
+
+    private static bool IsSubsequence(string query, string text)
+    {
+        var q = 0;
+        for (var i = 0; i < text.Length && q < query.Length; i++)
+            if (text[i] == query[q]) q++;
+        return q == query.Length;
+    }
+
+    private static int Levenshtein(string source, string target)
+    {
+        if (source.Length == 0) return target.Length;
+        if (target.Length == 0) return source.Length;
+
+        var matrix = new int[source.Length + 1, target.Length + 1];
+        for (var i = 0; i <= source.Length; i++) matrix[i, 0] = i;
+        for (var j = 0; j <= target.Length; j++) matrix[0, j] = j;
+
+        for (var i = 1; i <= source.Length; i++)
+        {
+            for (var j = 1; j <= target.Length; j++)
+            {
+                var cost = source[i - 1] == target[j - 1] ? 0 : 1;
+                matrix[i, j] = Math.Min(
+                    Math.Min(matrix[i - 1, j] + 1, matrix[i, j - 1] + 1),
+                    matrix[i - 1, j - 1] + cost);
+            }
+        }
+        return matrix[source.Length, target.Length];
     }
 }

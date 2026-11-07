@@ -32,7 +32,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         builder.Entity<ManagedDatabase>(entity =>
         {
             entity.HasKey(database => database.Id);
-            entity.HasIndex(database => database.Name).IsUnique();
+            entity.HasIndex(database => new { database.Name, database.Environment }).IsUnique();
             entity.Property(database => database.Name).HasMaxLength(128).IsRequired();
             entity.Property(database => database.Environment).HasMaxLength(32).IsRequired();
             entity.Property(database => database.Description).HasMaxLength(512);

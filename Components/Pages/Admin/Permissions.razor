@@ -14,7 +14,7 @@
         <option value="@Guid.Empty">Select database…</option>
         @foreach (var d in dbs) { <option value="@d.Id">@d.Name (@d.Environment)</option> }
     </select>
-    <button class="btn btn-primary" disabled="@(dbId == Guid.Empty)" @onclick="() => adding = true"><Icon Name="plus" />Add grant</button>
+    <button class="btn btn-primary" disabled="@(dbId == Guid.Empty)" @onclick="OpenAddGrant"><Icon Name="plus" />Add grant</button>
 </div>
 
 @if (dbId != Guid.Empty)
@@ -48,20 +48,30 @@
         <div class="modal-head"><h2>Add grant</h2></div>
         <div class="modal-body">
             <div class="field"><label>Applies to</label>
-                <select @bind="kind"><option value="role">Role</option><option value="user">User</option></select></div>
+                <select @bind="kind" @bind:after="ReloadSelectedPermissions"><option value="role">Role</option><option value="user">User</option></select></div>
             @if (kind == "role")
             {
-                <div class="field"><label>Role</label><select @bind="roleId">@foreach (var r in roles) { <option value="@r.Id">@r.Name</option> }</select></div>
+                <div class="field"><label>Role</label><select @bind="roleId" @bind:after="ReloadSelectedPermissions">@foreach (var r in roles) { <option value="@r.Id">@r.Name</option> }</select></div>
             }
             else
             {
-                <div class="field"><label>User</label><select @bind="userId">@foreach (var u in users) { <option value="@u.Id">@u.Email</option> }</select></div>
+                <div class="field"><label>User</label><select @bind="userId" @bind:after="ReloadSelectedPermissions">@foreach (var u in users) { <option value="@u.Id">@u.Email</option> }</select></div>
             }
-            <div class="field"><label>Permission</label>
-                <select @bind="code">@foreach (var c in Perm.Catalog) { <option value="@c">@Perm.Label(c)</option> }</select></div>
+            @if (permissionsLoading)
+            {
+                <div class="alert info small"><span class="spinner"></span> Loading existing permissions…</div>
+            }
+            <div class="field"><label>Permissions</label>
+                <div class="check-grid">
+                    @foreach (var c in Perm.Catalog)
+                    {
+                        <label class="check"><input type="checkbox" checked="@selectedCodes.Contains(c)" @onchange="e => ToggleCode(c, (bool)e.Value!)" />@Perm.Label(c)</label>
+                    }
+                </div>
+            </div>
             <div class="field"><label>Or system procedure (SYSPROC:name)</label><input type="text" @bind="customCode" placeholder="optional" /></div>
             <div class="field"><label>Effect</label>
-                <select @bind="effect"><option value="@PermissionEffect.Allow">Allow</option><option value="@PermissionEffect.Deny">Deny</option></select></div>
+                <select @bind="effect" @bind:after="ReloadSelectedPermissions"><option value="@PermissionEffect.Allow">Allow</option><option value="@PermissionEffect.Deny">Deny</option></select></div>
             <div class="grid-2">
                 <div class="field"><label>Starts (optional)</label><input type="datetime-local" @bind="starts" /></div>
                 <div class="field"><label>Ends (optional)</label><input type="datetime-local" @bind="ends" /></div>
@@ -78,7 +88,9 @@
     private List<ApplicationUser> users = [];
     private Guid dbId;
     private bool adding;
-    private string kind = "role", roleId = "", userId = "", code = Perm.Select, customCode = "";
+    private bool permissionsLoading;
+    private string kind = "role", roleId = "", userId = "", customCode = "";
+    private HashSet<string> selectedCodes = [Perm.Select];
     private PermissionEffect effect = PermissionEffect.Allow;
     private DateTime? starts, ends;
 
@@ -104,25 +116,67 @@
 
     private string DbName => dbs.FirstOrDefault(d => d.Id == dbId)?.Name ?? "";
 
+    private void ToggleCode(string permission, bool on)
+    {
+        if (on) selectedCodes.Add(permission);
+        else selectedCodes.Remove(permission);
+    }
+
+    private async Task OpenAddGrant()
+    {
+        adding = true;
+        customCode = "";
+        starts = null;
+        ends = null;
+        await ReloadSelectedPermissions();
+    }
+
+    private async Task ReloadSelectedPermissions()
+    {
+        if (!adding || dbId == Guid.Empty) return;
+
+        permissionsLoading = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var q = db.PermissionGrants.AsNoTracking().Where(g => g.DatabaseId == dbId && g.Effect == effect);
+            if (kind == "role") q = q.Where(g => g.RoleId == roleId);
+            else q = q.Where(g => g.UserId == userId);
+
+            var codes = await q.Select(g => g.PermissionCode).ToListAsync();
+            selectedCodes = codes.Where(Perm.IsValid).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (selectedCodes.Count == 0) selectedCodes = [Perm.Select];
+        }
+        finally { permissionsLoading = false; }
+    }
+
     private async Task Add()
     {
-        var finalCode = string.IsNullOrWhiteSpace(customCode) ? code : customCode.Trim().ToUpperInvariant();
-        if (!Perm.IsValid(finalCode)) { Say("Invalid permission code.", true); return; }
+        var finalCodes = selectedCodes.ToList();
+        if (!string.IsNullOrWhiteSpace(customCode)) finalCodes.Add(customCode.Trim().ToUpperInvariant());
+        finalCodes = finalCodes.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (finalCodes.Count == 0) { Say("Select at least one permission code.", true); return; }
+        if (finalCodes.Any(c => !Perm.IsValid(c))) { Say("Invalid permission code.", true); return; }
         if (starts is not null && ends is not null && ends <= starts) { Say("End must be after start.", true); return; }
         await using (var db = await DbFactory.CreateDbContextAsync())
         {
-            db.PermissionGrants.Add(new PermissionGrant
+            foreach (var finalCode in finalCodes)
             {
-                DatabaseId = dbId, PermissionCode = finalCode, Effect = effect,
-                UserId = kind == "user" ? userId : null, RoleId = kind == "role" ? roleId : null,
-                StartsAt = starts is null ? null : new DateTimeOffset(starts.Value),
-                EndsAt = ends is null ? null : new DateTimeOffset(ends.Value)
-            });
+                db.PermissionGrants.Add(new PermissionGrant
+                {
+                    DatabaseId = dbId, PermissionCode = finalCode, Effect = effect,
+                    UserId = kind == "user" ? userId : null, RoleId = kind == "role" ? roleId : null,
+                    StartsAt = starts is null ? null : new DateTimeOffset(starts.Value),
+                    EndsAt = ends is null ? null : new DateTimeOffset(ends.Value)
+                });
+            }
             await db.SaveChangesAsync();
         }
-        await AuditSvc.TryWriteAsync(Me, "Permission", "GrantAdded", "Success", $"{effect} {finalCode} to {kind}", dbId, DbName);
-        adding = false; customCode = "";
-        Say("Grant added.");
+        await AuditSvc.TryWriteAsync(Me, "Permission", "GrantAdded", "Success", $"{effect} {string.Join(',', finalCodes)} to {kind}", dbId, DbName);
+        adding = false;
+        customCode = "";
+        selectedCodes = [Perm.Select];
+        Say($"Added {finalCodes.Count} grant(s).");
         await Load();
     }
 

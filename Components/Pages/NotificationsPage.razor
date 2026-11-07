@@ -26,7 +26,7 @@
                     <div class="muted small">@n.Message</div>
                 </div>
                 <div class="actions"><span class="faint small">@Ago(n.CreatedAt)</span>
-                    @if (!string.IsNullOrEmpty(n.Link)) { <a class="btn btn-sm" href="@n.Link" @onclick="() => Read(n.Id)">Open</a> }
+                    @if (!string.IsNullOrEmpty(n.Link)) { <a class="btn btn-sm" href="@n.Link" @onclick:preventDefault="true" @onclick="() => Open(n)">Open</a> }
                 </div>
             </div>
         }
@@ -44,6 +44,11 @@
         items = await Notifier.ListAsync(UserId);
     }
 
-    private async Task Read(long id) => await Notifier.MarkReadAsync(UserId, id);
+    private async Task Open(Notification notification)
+    {
+        await Notifier.MarkReadAsync(UserId, notification.Id);
+        items = await Notifier.ListAsync(UserId);
+        Nav.NavigateTo(notification.Link!);
+    }
 }
 

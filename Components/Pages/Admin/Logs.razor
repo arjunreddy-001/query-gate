@@ -7,38 +7,58 @@
 
 <div class="page-head"><div><h1>Application logs</h1><p>Errors and warnings, correlated by request ID.</p></div></div>
 
-<div class="toolbar">
-    <select @bind="level" @bind:after="Load"><option value="">All levels</option><option>Error</option><option>Warning</option><option>Information</option></select>
-    <input class="grow" type="search" placeholder="Search message or correlation ID…" @bind="search" @bind:after="Load" />
+<div class="toolbar logs-toolbar">
+    <select class="logs-level" @bind="level" @bind:after="Load"><option value="">All levels</option><option>Error</option><option>Warning</option><option>Information</option></select>
+    <input class="logs-search" type="search" placeholder="Search message or correlation ID…" @bind="search" @onkeydown="OnSearchKeyDown" />
 </div>
 
-<div class="card"><div class="table-wrap"><table>
-    <thead><tr><th>Time</th><th>Level</th><th>Message</th><th>User</th><th>Endpoint</th><th>Correlation</th></tr></thead>
-    <tbody>
-    @foreach (var l in logs)
+<div class="card">
+    @if (loading)
     {
-        <tr>
-            <td class="nowrap">@Local(l.Timestamp)</td>
-            <td><span class="badge @(l.Level == "Error" ? "bad" : l.Level == "Warning" ? "warn" : "info")">@l.Level</span></td>
-            <td class="wrap">@l.Message @if (!string.IsNullOrEmpty(l.Exception)) { <details><summary class="small muted">Details</summary><pre class="small">@l.Exception</pre></details> }</td>
-            <td>@l.UserName</td><td class="small">@l.Endpoint</td><td class="small mono">@l.CorrelationId</td>
-        </tr>
+        <div class="empty"><span class="spinner"></span><div>Loading application logs…</div></div>
     }
-    </tbody>
-</table></div></div>
+    else
+    {
+        <div class="table-wrap"><table>
+            <thead><tr><th>Time</th><th>Level</th><th>Message</th><th>User</th><th>Endpoint</th><th>Correlation</th></tr></thead>
+            <tbody>
+            @foreach (var l in logs)
+            {
+                <tr>
+                    <td class="nowrap">@Local(l.Timestamp)</td>
+                    <td><span class="badge @(l.Level == "Error" ? "bad" : l.Level == "Warning" ? "warn" : "info")">@l.Level</span></td>
+                    <td class="wrap">@l.Message @if (!string.IsNullOrEmpty(l.Exception)) { <details><summary class="small muted">Details</summary><pre class="small">@l.Exception</pre></details> }</td>
+                    <td>@l.UserName</td><td class="small">@l.Endpoint</td><td class="small mono">@l.CorrelationId</td>
+                </tr>
+            }
+            </tbody>
+        </table></div>
+    }
+</div>
 
 @code {
     private List<AppLog> logs = [];
     private string level = "", search = "";
+    private bool loading;
 
     protected override async Task OnLoadAsync() => await Load();
 
     private async Task Load()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var q = db.AppLogs.AsNoTracking().AsQueryable();
-        if (level != "") q = q.Where(l => l.Level == level);
-        if (!string.IsNullOrWhiteSpace(search)) q = q.Where(l => l.Message.Contains(search) || l.CorrelationId == search);
-        logs = await q.OrderByDescending(l => l.Id).Take(200).ToListAsync();
+        loading = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var q = db.AppLogs.AsNoTracking().AsQueryable();
+            if (level != "") q = q.Where(l => l.Level == level);
+            if (!string.IsNullOrWhiteSpace(search)) q = q.Where(l => l.Message.Contains(search) || l.CorrelationId == search);
+            logs = await q.OrderByDescending(l => l.Id).Take(200).ToListAsync();
+        }
+        finally { loading = false; }
+    }
+
+    private async Task OnSearchKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter") await Load();
     }
 }

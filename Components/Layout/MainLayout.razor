@@ -15,7 +15,7 @@
     <aside class="sidebar">
         <a class="brand" href="/" style="text-decoration:none">
             <span class="brand-mark"><Icon Name="db" /></span>
-            <span class="lbl">Query<small>Gate</small></span>
+            <span class="lbl">Query Gate</span>
         </a>
 
         <nav>
@@ -37,7 +37,7 @@
                     <NavLink class="nav-item" href="admin/permissions"><Icon Name="shield" /><span class="lbl">Permissions</span></NavLink>
                 }
                 <NavLink class="nav-item" href="admin/matrix"><Icon Name="grid" /><span class="lbl">Access matrix</span></NavLink>
-                <NavLink class="nav-item" href="admin/audit"><Icon Name="list" /><span class="lbl">Audit log</span></NavLink>
+                <NavLink class="nav-item" href="admin/audit"><Icon Name="list" /><span class="lbl">Audit logs</span></NavLink>
                 @if (isAdmin)
                 {
                     <NavLink class="nav-item" href="admin/logs"><Icon Name="activity" /><span class="lbl">Application logs</span></NavLink>
@@ -117,7 +117,7 @@
 
         await using var db = await DbFactory.CreateDbContextAsync();
         var record = await db.Users.AsNoTracking().Where(u => u.Id == userId).Select(u => new { u.DisplayName, u.MustChangePassword }).FirstOrDefaultAsync();
-        displayName = string.IsNullOrWhiteSpace(record?.DisplayName) ? email.Split('@')[0] : record!.DisplayName!;
+        displayName = ResolveDisplayName(record?.DisplayName, email);
         initials = string.Concat(displayName.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpperInvariant(p[0])));
         if (initials.Length == 0) initials = "?";
 
@@ -129,6 +129,7 @@
         }
 
         unread = await Notifications.UnreadCountAsync(userId!);
+        Notifications.UnreadChanged += OnUnreadChanged;
         if (RendererInfo.IsInteractive)
         {
             timer = new Timer(async _ =>
@@ -141,6 +142,21 @@
                 catch { }
             }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
         }
+    }
+
+    private void OnUnreadChanged(string changedUserId, int count)
+    {
+        if (userId is null || changedUserId != userId) return;
+        unread = count;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private static string ResolveDisplayName(string? preferred, string email)
+    {
+        if (!string.IsNullOrWhiteSpace(preferred)) return preferred;
+        if (string.IsNullOrWhiteSpace(email)) return "User";
+        var at = email.IndexOf('@');
+        return at > 0 ? email[..at] : email;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -159,6 +175,7 @@
     public void Dispose()
     {
         timer?.Dispose();
+        Notifications.UnreadChanged -= OnUnreadChanged;
         self?.Dispose();
     }
 }

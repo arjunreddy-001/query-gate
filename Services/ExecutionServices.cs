@@ -41,13 +41,14 @@ public sealed class PermissionService(IDbContextFactory<ApplicationDbContext> fa
         return _resolver.Resolve(code, rules, DateTimeOffset.UtcNow).IsAllowed;
     }
 
-    public async Task<List<ManagedDatabase>> GetAccessibleDatabasesAsync(string userId)
+    public async Task<List<ManagedDatabase>> GetAccessibleDatabasesAsync(string userId, bool includeDisabled = false)
     {
         await using var db = await factory.CreateDbContextAsync();
-        var all = await db.ManagedDatabases.AsNoTracking().Where(d => d.IsActive).OrderBy(d => d.Name).ToListAsync();
+        var all = await db.ManagedDatabases.AsNoTracking().OrderBy(d => d.Name).ToListAsync();
         var result = new List<ManagedDatabase>();
         foreach (var d in all)
         {
+            if (!includeDisabled && !d.IsActive) continue;
             var rules = await GetRulesAsync(db, userId, d.Id);
             if (Perm.Catalog.Any(c => _resolver.Resolve(c, rules, DateTimeOffset.UtcNow).IsAllowed)) result.Add(d);
         }

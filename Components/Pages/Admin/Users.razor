@@ -65,7 +65,7 @@
         <div class="modal-head"><h2>New user</h2></div>
         <div class="modal-body">
             <div class="field"><label>Email</label><input type="email" @bind="newEmail" /></div>
-            <div class="field"><label>Display name</label><input type="text" @bind="newName" /></div>
+            <div class="field"><label>Display name (optional)</label><input type="text" @bind="newName" /></div>
             <div class="field"><label>Role</label><select @bind="newRole">@foreach (var r in AllRoles) { <option value="@r">@r</option> }</select></div>
             <div class="field"><label>Account expires (optional)</label><input type="datetime-local" @bind="newExpiry" /></div>
         </div>
