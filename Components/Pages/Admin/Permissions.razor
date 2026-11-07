@@ -1,0 +1,139 @@
+@page "/admin/permissions"
+@attribute [Authorize(Roles = Roles.Admin)]
+@inherits PageBase
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject AuditService AuditSvc
+
+<PageTitle>Permissions · Query Gate</PageTitle>
+
+<div class="page-head"><div><h1>Permissions</h1><p>Role and user grants per database. User rules override role rules; deny wins.</p></div></div>
+<Banner Text="@Flash" IsError="@FlashIsError" />
+
+<div class="toolbar">
+    <select @bind="dbId" @bind:after="Load" style="min-width:240px">
+        <option value="@Guid.Empty">Select database…</option>
+        @foreach (var d in dbs) { <option value="@d.Id">@d.Name (@d.Environment)</option> }
+    </select>
+    <button class="btn btn-primary" disabled="@(dbId == Guid.Empty)" @onclick="() => adding = true"><Icon Name="plus" />Add grant</button>
+</div>
+
+@if (dbId != Guid.Empty)
+{
+    <div class="card">
+        @if (grants.Count == 0) { <div class="empty"><Icon Name="shield" /><div>No grants for this database.</div></div> }
+        else
+        {
+            <div class="table-wrap"><table>
+                <thead><tr><th>Subject</th><th>Permission</th><th>Effect</th><th>Window</th><th></th></tr></thead>
+                <tbody>
+                @foreach (var g in grants)
+                {
+                    <tr>
+                        <td>@Subject(g)</td>
+                        <td><span class="badge @(Perm.IsDangerous(g.PermissionCode) ? "bad" : "brand")">@Perm.Label(g.PermissionCode)</span></td>
+                        <td><span class="badge @(g.Effect == PermissionEffect.Allow ? "ok" : "bad")">@g.Effect</span></td>
+                        <td class="small muted">@(g.StartsAt is null && g.EndsAt is null ? "Always" : $"{Local(g.StartsAt)} → {Local(g.EndsAt)}")</td>
+                        <td class="right"><button class="btn btn-sm btn-danger" @onclick="() => Remove(g)">Remove</button></td>
+                    </tr>
+                }
+                </tbody>
+            </table></div>
+        }
+    </div>
+}
+
+@if (adding)
+{
+    <div class="modal-back"><div class="modal">
+        <div class="modal-head"><h2>Add grant</h2></div>
+        <div class="modal-body">
+            <div class="field"><label>Applies to</label>
+                <select @bind="kind"><option value="role">Role</option><option value="user">User</option></select></div>
+            @if (kind == "role")
+            {
+                <div class="field"><label>Role</label><select @bind="roleId">@foreach (var r in roles) { <option value="@r.Id">@r.Name</option> }</select></div>
+            }
+            else
+            {
+                <div class="field"><label>User</label><select @bind="userId">@foreach (var u in users) { <option value="@u.Id">@u.Email</option> }</select></div>
+            }
+            <div class="field"><label>Permission</label>
+                <select @bind="code">@foreach (var c in Perm.Catalog) { <option value="@c">@Perm.Label(c)</option> }</select></div>
+            <div class="field"><label>Or system procedure (SYSPROC:name)</label><input type="text" @bind="customCode" placeholder="optional" /></div>
+            <div class="field"><label>Effect</label>
+                <select @bind="effect"><option value="@PermissionEffect.Allow">Allow</option><option value="@PermissionEffect.Deny">Deny</option></select></div>
+            <div class="grid-2">
+                <div class="field"><label>Starts (optional)</label><input type="datetime-local" @bind="starts" /></div>
+                <div class="field"><label>Ends (optional)</label><input type="datetime-local" @bind="ends" /></div>
+            </div>
+        </div>
+        <div class="modal-foot"><button class="btn" @onclick="() => adding = false">Cancel</button><button class="btn btn-primary" @onclick="Add">Add</button></div>
+    </div></div>
+}
+
+@code {
+    private List<ManagedDatabase> dbs = [];
+    private List<PermissionGrant> grants = [];
+    private List<Microsoft.AspNetCore.Identity.IdentityRole> roles = [];
+    private List<ApplicationUser> users = [];
+    private Guid dbId;
+    private bool adding;
+    private string kind = "role", roleId = "", userId = "", code = Perm.Select, customCode = "";
+    private PermissionEffect effect = PermissionEffect.Allow;
+    private DateTime? starts, ends;
+
+    protected override async Task OnLoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        dbs = await db.ManagedDatabases.AsNoTracking().OrderBy(d => d.Name).ToListAsync();
+        roles = await db.Roles.AsNoTracking().OrderBy(r => r.Name).ToListAsync();
+        users = await db.Users.AsNoTracking().OrderBy(u => u.Email).ToListAsync();
+        roleId = roles.FirstOrDefault()?.Id ?? "";
+        userId = users.FirstOrDefault()?.Id ?? "";
+    }
+
+    private async Task Load()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        grants = await db.PermissionGrants.AsNoTracking().Where(g => g.DatabaseId == dbId).OrderBy(g => g.UserId == null ? 0 : 1).ThenBy(g => g.PermissionCode).ToListAsync();
+    }
+
+    private string Subject(PermissionGrant g) => g.UserId is not null
+        ? "User: " + (users.FirstOrDefault(u => u.Id == g.UserId)?.Email ?? "unknown")
+        : "Role: " + (roles.FirstOrDefault(r => r.Id == g.RoleId)?.Name ?? "unknown");
+
+    private string DbName => dbs.FirstOrDefault(d => d.Id == dbId)?.Name ?? "";
+
+    private async Task Add()
+    {
+        var finalCode = string.IsNullOrWhiteSpace(customCode) ? code : customCode.Trim().ToUpperInvariant();
+        if (!Perm.IsValid(finalCode)) { Say("Invalid permission code.", true); return; }
+        if (starts is not null && ends is not null && ends <= starts) { Say("End must be after start.", true); return; }
+        await using (var db = await DbFactory.CreateDbContextAsync())
+        {
+            db.PermissionGrants.Add(new PermissionGrant
+            {
+                DatabaseId = dbId, PermissionCode = finalCode, Effect = effect,
+                UserId = kind == "user" ? userId : null, RoleId = kind == "role" ? roleId : null,
+                StartsAt = starts is null ? null : new DateTimeOffset(starts.Value),
+                EndsAt = ends is null ? null : new DateTimeOffset(ends.Value)
+            });
+            await db.SaveChangesAsync();
+        }
+        await AuditSvc.TryWriteAsync(Me, "Permission", "GrantAdded", "Success", $"{effect} {finalCode} to {kind}", dbId, DbName);
+        adding = false; customCode = "";
+        Say("Grant added.");
+        await Load();
+    }
+
+    private async Task Remove(PermissionGrant g)
+    {
+        await using (var db = await DbFactory.CreateDbContextAsync())
+        {
+            await db.PermissionGrants.Where(x => x.Id == g.Id).ExecuteDeleteAsync();
+        }
+        await AuditSvc.TryWriteAsync(Me, "Permission", "GrantRemoved", "Success", $"{g.Effect} {g.PermissionCode} from {Subject(g)}", dbId, DbName);
+        Say("Grant removed.");
+        await Load();
+    }
+}

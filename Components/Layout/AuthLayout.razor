@@ -1,0 +1,20 @@
+@inherits LayoutComponentBase
+
+<div class="auth">
+    <section class="auth-art">
+        <div class="brand"><span class="brand-mark"><Icon Name="db" /></span><span>Query Gate</span></div>
+        <div>
+            <h2>Database access, with guardrails.</h2>
+            <p>One governed doorway to Development and QA databases. Every query is checked and every action is recorded.</p>
+            <div class="feature"><span class="ic"><Icon Name="shield" /></span><div><b>Permission-gated SQL</b><span>Statements are analysed before they ever reach a server.</span></div></div>
+            <div class="feature"><span class="ic"><Icon Name="list" /></span><div><b>Audit-first execution</b><span>No audit record, no execution. That is by design.</span></div></div>
+            <div class="feature"><span class="ic"><Icon Name="clock" /></span><div><b>Time-boxed access</b><span>Request what you need; it expires when you don't.</span></div></div>
+        </div>
+        <span class="small" style="opacity:.6">Internal tool · authorised use only</span>
+    </section>
+    <section class="auth-form">
+        <div class="auth-card">
+            @Body
+        </div>
+    </section>
+</div>

@@ -1,4 +1,3 @@
-[SKILL.md](https://github.com/user-attachments/files/34457361/SKILL.md)
 ---
 name: sql-gate-and-permissions
 description: 'Work on the Query Gate SQL gate, permission model, execution pipeline and audit trail. Use when adding a permission, changing which SQL statements are allowed or denied, editing SqlGate, ExecutionService, PermissionResolver, audit logging, approved scripts, or the metadata cache.'

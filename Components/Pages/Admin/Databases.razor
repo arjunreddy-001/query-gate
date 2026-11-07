@@ -1,0 +1,97 @@
+@page "/admin/databases"
+@attribute [Authorize(Roles = Roles.Admin)]
+@inherits PageBase
+@inject DatabaseAdminService DbAdmin
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<PageTitle>Databases · Query Gate</PageTitle>
+
+<div class="page-head">
+    <div><h1>Databases</h1><p>Register SQL Server targets. Connection strings are encrypted at rest.</p></div>
+    <div class="actions"><button class="btn btn-primary" @onclick="New"><Icon Name="plus" />Register database</button></div>
+</div>
+<Banner Text="@Flash" IsError="@FlashIsError" />
+
+<div class="card">
+    @if (list.Count == 0) { <div class="empty"><Icon Name="db" /><div>No databases registered.</div></div> }
+    else
+    {
+        <div class="table-wrap"><table>
+            <thead><tr><th>Name</th><th>Environment</th><th>Timeout</th><th>Max rows</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+            @foreach (var d in list)
+            {
+                <tr>
+                    <td><b>@d.Name</b><div class="faint small">@d.Description</div></td>
+                    <td><span class="badge @EnvClass(d.Environment)">@d.Environment</span></td>
+                    <td>@d.DefaultTimeoutSeconds s</td>
+                    <td>@d.MaxRows</td>
+                    <td>@if (d.IsActive) { <span class="badge ok">Enabled</span> } else { <span class="badge bad">Disabled</span> }</td>
+                    <td class="right"><button class="btn btn-sm" @onclick="() => Edit(d)">Edit</button></td>
+                </tr>
+            }
+            </tbody>
+        </table></div>
+    }
+</div>
+
+@if (open)
+{
+    <div class="modal-back"><div class="modal">
+        <div class="modal-head"><h2>@(editId is null ? "Register database" : "Edit " + name)</h2></div>
+        <div class="modal-body">
+            @if (editId is null)
+            {
+                <div class="field"><label>Name</label><input type="text" @bind="name" /></div>
+                <div class="field"><label>Environment</label>
+                    <select @bind="env"><option>Development</option><option>QA</option><option>Production</option></select></div>
+            }
+            <div class="field"><label>Description</label><input type="text" @bind="description" /></div>
+            <div class="field"><label>Connection string @(editId is null ? "" : "(leave blank to keep current)")</label>
+                <textarea style="min-height:70px" autocomplete="off" @bind="connection"></textarea></div>
+            <div class="grid-2">
+                <div class="field"><label>Default timeout (s)</label><input type="number" min="1" @bind="timeout" /></div>
+                <div class="field"><label>Max rows</label><input type="number" min="1" @bind="maxRows" /></div>
+            </div>
+            @if (editId is not null) { <label class="check"><input type="checkbox" @bind="active" />Enabled</label> }
+            @if (testMsg is not null) { <div class="alert @(testOk ? "success" : "error")" style="margin-top:10px">@testMsg</div> }
+        </div>
+        <div class="modal-foot">
+            <button class="btn" @onclick="() => open = false">Cancel</button>
+            <button class="btn" disabled="@string.IsNullOrWhiteSpace(connection)" @onclick="Test">Test connection</button>
+            <button class="btn btn-primary" @onclick="Save">Save</button>
+        </div>
+    </div></div>
+}
+
+@code {
+    private List<ManagedDatabase> list = [];
+    private bool open, active = true, testOk;
+    private Guid? editId;
+    private string name = "", env = "Development", description = "", connection = "";
+    private string? testMsg;
+    private int timeout = 30, maxRows = 1000;
+
+    protected override async Task OnLoadAsync() => await Load();
+
+    private async Task Load()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        list = await db.ManagedDatabases.AsNoTracking().OrderBy(d => d.Environment).ThenBy(d => d.Name).ToListAsync();
+    }
+
+    private void New() { editId = null; name = description = connection = ""; env = "Development"; timeout = 30; maxRows = 1000; active = true; testMsg = null; open = true; }
+    private void Edit(ManagedDatabase d) { editId = d.Id; name = d.Name; description = d.Description ?? ""; connection = ""; timeout = d.DefaultTimeoutSeconds; maxRows = d.MaxRows; active = d.IsActive; testMsg = null; open = true; }
+
+    private async Task Test() { (testOk, testMsg) = await DbAdmin.TestAsync(connection); }
+
+    private async Task Save()
+    {
+        var result = editId is null
+            ? await DbAdmin.RegisterAsync(Me, name.Trim(), env, description, connection, timeout, maxRows)
+            : await DbAdmin.UpdateAsync(Me, editId.Value, description, string.IsNullOrWhiteSpace(connection) ? null : connection, timeout, maxRows, active);
+        Say(result, "Saved.");
+        if (result.Ok) { open = false; await Load(); }
+        else { testOk = false; testMsg = result.Error; }
+    }
+}

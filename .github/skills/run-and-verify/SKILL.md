@@ -1,4 +1,3 @@
-[SKILL.md](https://github.com/user-attachments/files/34457333/SKILL.md)
 ---
 name: run-and-verify
 description: 'Build, test, run and browser-verify the Query Gate app. Use when asked to run the project, build, run tests, start the site, check a UI change in a browser, or when dotnet build fails with a locked DbAccessManager.exe or the site will not load.'

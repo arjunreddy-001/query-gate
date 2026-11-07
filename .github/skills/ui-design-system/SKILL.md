@@ -1,4 +1,3 @@
-[SKILL.md](https://github.com/user-attachments/files/34457382/SKILL.md)
 ---
 name: ui-design-system
 description: 'Style and edit the Query Gate UI: app.css design system, compact sidebar, theme, density, query workspace layout, Monaco editor, favicon and branding. Use when changing CSS, colours, spacing, dark or light theme, sidebar behaviour, the results grid, or copy and wording shown to users.'

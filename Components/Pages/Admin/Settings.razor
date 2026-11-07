@@ -1,0 +1,165 @@
+@page "/admin/settings"
+@attribute [Authorize(Roles = Roles.Admin)]
+@inherits PageBase
+@inject SettingsService Cfg
+@inject AuditService AuditSvc
+@inject MetadataService Metadata
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<PageTitle>Settings · Query Gate</PageTitle>
+
+<div class="page-head"><div><h1>Settings</h1><p>Global defaults and limits.</p></div></div>
+<Banner Text="@Flash" IsError="@FlashIsError" />
+
+@if (!ready)
+{
+    <div class="stack"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>
+}
+else
+{
+    <div class="grid g2" style="align-items:start">
+        <div class="card">
+            <div class="card-head"><h3>General</h3></div>
+            <div class="card-pad">
+                @foreach (var (key, def) in SettingsService.Definitions)
+                {
+                    <div class="field">
+                        <label>@def.Label</label>
+                        @if (def.Default is "true" or "false")
+                        {
+                            <select value="@Get(key)" @onchange="e => values[key] = e.Value?.ToString() ?? def.Default"><option value="true">Yes</option><option value="false">No</option></select>
+                        }
+                        else
+                        {
+                            <input type="text" value="@Get(key)" @onchange="e => values[key] = e.Value?.ToString() ?? def.Default" />
+                        }
+                    </div>
+                }
+                <button class="btn btn-primary" @onclick="Save">Save settings</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-head">
+                <h3>Object metadata cache</h3>
+                <span class="badge @(cacheEnabled ? "ok" : "warn")">@(cacheEnabled ? "Enabled" : "Disabled")</span>
+                <div class="actions">
+                    <button class="btn btn-sm" @onclick="ToggleCache">@(cacheEnabled ? "Disable" : "Enable")</button>
+                    <button class="btn btn-sm" @onclick="ClearAll">Clear all</button>
+                    <button class="btn btn-sm btn-primary" disabled="@busy" @onclick="ReloadAll"><Icon Name="refresh" />Reload all</button>
+                </div>
+            </div>
+            <div class="card-pad">
+                <p class="muted small">The object explorer and autocomplete read table, view and procedure names from this cache (shared by all users, expires after the TTL above). When disabled, every workspace load queries the database directly.</p>
+                <div class="table-wrap"><table>
+                    <thead><tr><th>Database</th><th>Cached</th><th>Objects</th><th></th></tr></thead>
+                    <tbody>
+                    @foreach (var d in dbs)
+                    {
+                        var info = status.FirstOrDefault(s => s.DatabaseId == d.Id);
+                        <tr>
+                            <td>@d.Name <span class="badge @EnvClass(d.Environment)">@d.Environment</span></td>
+                            <td>@(info is null ? "-" : Ago(info.LoadedAt))</td>
+                            <td>@(info?.ObjectCount.ToString() ?? "-")</td>
+                            <td class="right nowrap">
+                                <button class="btn btn-sm" disabled="@(busy || !d.IsActive)" @onclick="() => Reload(d)">Reload</button>
+                                <button class="btn btn-sm" disabled="@(info is null)" @onclick="() => Clear(d)">Clear</button>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table></div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private Dictionary<string, string> values = [];
+    private List<ManagedDatabase> dbs = [];
+    private IReadOnlyList<MetadataCacheEntry> status = [];
+    private bool ready, cacheEnabled, busy;
+
+    protected override async Task OnLoadAsync()
+    {
+        values = await Cfg.GetAllAsync();
+        await LoadCache();
+        ready = true;
+    }
+
+    private string Get(string key) => values.GetValueOrDefault(key) ?? SettingsService.Definitions[key].Default;
+
+    private async Task LoadCache()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        dbs = await db.ManagedDatabases.AsNoTracking().OrderBy(d => d.Name).ToListAsync();
+        cacheEnabled = await Metadata.IsEnabledAsync();
+        status = Metadata.Status();
+    }
+
+    private async Task Save()
+    {
+        foreach (var (key, value) in values)
+        {
+            var isBool = SettingsService.Definitions[key].Default is "true" or "false";
+            if (isBool) continue;
+            if (!int.TryParse(value, out var n) || n < 0) { Say($"'{SettingsService.Definitions[key].Label}' must be a non-negative number.", true); return; }
+        }
+        foreach (var (key, value) in values) await Cfg.SetAsync(key, value);
+        if (Get("MetadataCacheEnabled") == "false") Metadata.Clear();
+        await AuditSvc.TryWriteAsync(Me, "Settings", "Updated", "Success");
+        await LoadCache();
+        Say("Settings saved.");
+    }
+
+    private async Task ToggleCache()
+    {
+        var next = !cacheEnabled;
+        await Cfg.SetAsync("MetadataCacheEnabled", next ? "true" : "false");
+        values["MetadataCacheEnabled"] = next ? "true" : "false";
+        if (!next) Metadata.Clear();
+        await AuditSvc.TryWriteAsync(Me, "Settings", next ? "MetadataCacheEnabled" : "MetadataCacheDisabled", "Success");
+        await LoadCache();
+        Say(next ? "Metadata cache enabled." : "Metadata cache disabled and cleared.");
+    }
+
+    private async Task Reload(ManagedDatabase d)
+    {
+        busy = true; StateHasChanged();
+        try
+        {
+            var objects = await Metadata.GetAsync(d.Id, refresh: true);
+            await AuditSvc.TryWriteAsync(Me, "Settings", "MetadataCacheReload", "Success", $"{objects.Count} objects", d.Id, d.Name);
+            Say($"Reloaded {d.Name}: {objects.Count} objects.");
+        }
+        catch (Exception ex) { Say($"Could not reload {d.Name}: {ex.Message}", true); }
+        busy = false;
+        await LoadCache();
+    }
+
+    private async Task ReloadAll()
+    {
+        busy = true; StateHasChanged();
+        Metadata.Clear();
+        var ok = 0; var failed = new List<string>();
+        foreach (var d in dbs.Where(d => d.IsActive))
+        {
+            try { await Metadata.GetAsync(d.Id, refresh: true); ok++; }
+            catch { failed.Add(d.Name); }
+        }
+        await AuditSvc.TryWriteAsync(Me, "Settings", "MetadataCacheReloadAll", failed.Count == 0 ? "Success" : "Failed", $"{ok} reloaded, {failed.Count} failed");
+        busy = false;
+        await LoadCache();
+        if (failed.Count == 0) Say($"Reloaded {ok} database(s)."); else Say($"Reloaded {ok}; failed: {string.Join(", ", failed)}.", true);
+    }
+
+    private async Task Clear(ManagedDatabase d) { Metadata.Clear(d.Id); await LoadCache(); Say($"Cleared cache for {d.Name}."); }
+
+    private async Task ClearAll()
+    {
+        Metadata.Clear();
+        await AuditSvc.TryWriteAsync(Me, "Settings", "MetadataCacheCleared", "Success");
+        await LoadCache();
+        Say("Cache cleared.");
+    }
+}

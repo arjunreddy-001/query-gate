@@ -1,0 +1,77 @@
+@page "/admin/matrix"
+@attribute [Authorize(Roles = Roles.AdminOrAuditor)]
+@inherits PageBase
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject PermissionService Permissions
+@inject AuditService Audit
+@inject IJSRuntime Js
+
+<PageTitle>Access matrix · Query Gate</PageTitle>
+
+<div class="page-head">
+    <div><h1>Access matrix</h1><p>Effective permissions per user and database.</p></div>
+    <div class="actions"><button class="btn" disabled="@(rows.Count == 0)" @onclick="Export"><Icon Name="download" />Export CSV</button></div>
+</div>
+
+<div class="toolbar">
+    <select @bind="dbId" @bind:after="Load" style="min-width:240px">
+        <option value="@Guid.Empty">Select database…</option>
+        @foreach (var d in dbs) { <option value="@d.Id">@d.Name (@d.Environment)</option> }
+    </select>
+</div>
+
+@if (rows.Count > 0)
+{
+    <div class="card"><div class="table-wrap"><table>
+        <thead><tr><th>User</th><th>Status</th>@foreach (var c in Perm.Catalog) { <th class="small">@Perm.Label(c)</th> }</tr></thead>
+        <tbody>
+        @foreach (var r in rows)
+        {
+            <tr>
+                <td><b>@r.User.Email</b></td>
+                <td>@if (r.User.IsActive) { <span class="badge ok">Active</span> } else { <span class="badge bad">Inactive</span> }</td>
+                @foreach (var c in Perm.Catalog)
+                {
+                    var allowed = r.Allowed.Contains(c);
+                    <td>@if (allowed) { <span class="badge @(Perm.IsDangerous(c) ? "warn" : "ok")">✓</span> } else { <span class="faint">-</span> }</td>
+                }
+            </tr>
+        }
+        </tbody>
+    </table></div></div>
+}
+
+@code {
+    private sealed record Row(ApplicationUser User, HashSet<string> Allowed);
+    private List<ManagedDatabase> dbs = [];
+    private List<Row> rows = [];
+    private Guid dbId;
+
+    protected override async Task OnLoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        dbs = await db.ManagedDatabases.AsNoTracking().OrderBy(d => d.Name).ToListAsync();
+    }
+
+    private async Task Load()
+    {
+        rows = [];
+        if (dbId == Guid.Empty) return;
+        List<ApplicationUser> users;
+        await using (var db = await DbFactory.CreateDbContextAsync()) users = await db.Users.AsNoTracking().OrderBy(u => u.Email).ToListAsync();
+        foreach (var u in users)
+        {
+            var eff = await Permissions.GetEffectiveAsync(u.Id, dbId);
+            rows.Add(new Row(u, eff.Where(e => e.IsAllowed).Select(e => e.PermissionCode).ToHashSet(StringComparer.OrdinalIgnoreCase)));
+        }
+    }
+
+    private async Task Export()
+    {
+        var sb = new System.Text.StringBuilder("User,Active," + string.Join(',', Perm.Catalog) + "\r\n");
+        foreach (var r in rows)
+            sb.AppendLine(string.Join(',', new[] { Csv.Cell(r.User.Email), r.User.IsActive.ToString() }.Concat(Perm.Catalog.Select(c => r.Allowed.Contains(c) ? "Y" : "N"))));
+        await Audit.TryWriteAsync(Me, "Export", "AccessMatrixExport", "Success", null, dbId, dbs.FirstOrDefault(d => d.Id == dbId)?.Name);
+        await Js.InvokeVoidAsync("dbam.download", $"access-matrix-{DateTime.UtcNow:yyyyMMdd}.csv", sb.ToString(), "text/csv");
+    }
+}

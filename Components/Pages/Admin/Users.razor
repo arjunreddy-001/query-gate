@@ -1,0 +1,137 @@
+@page "/admin/users"
+@attribute [Authorize(Roles = Roles.Admin)]
+@inherits PageBase
+@inject UserAdminService UserAdmin
+
+<PageTitle>Users · Query Gate</PageTitle>
+
+<div class="page-head">
+    <div><h1>Users</h1><p>Create accounts, assign roles and control lifecycle.</p></div>
+    <div class="actions">
+        <button class="btn" disabled="@(selected.Count == 0)" @onclick="BulkDeactivate"><Icon Name="lock" />Deactivate selected (@selected.Count)</button>
+        <button class="btn btn-primary" @onclick="() => creating = true"><Icon Name="plus" />New user</button>
+    </div>
+</div>
+<Banner Text="@Flash" IsError="@FlashIsError" />
+
+@if (secret is not null)
+{
+    <div class="alert info">
+        <b>Temporary password for @secretFor</b>, shown once. The user must change it at first sign-in.
+        <div class="secret" style="margin-top:8px">@secret</div>
+        <button class="btn btn-sm" style="margin-top:8px" @onclick="() => secret = null">Dismiss</button>
+    </div>
+}
+
+<div class="toolbar"><input class="grow" type="search" placeholder="Search by name or email…" @bind="search" @bind:event="oninput" @bind:after="Load" /></div>
+
+<div class="card">
+    <div class="table-wrap"><table>
+        <thead><tr><th></th><th>User</th><th>Role</th><th>Status</th><th>Expires</th><th>Timeout</th><th></th></tr></thead>
+        <tbody>
+        @foreach (var (u, roles) in list)
+        {
+            <tr>
+                <td><input type="checkbox" checked="@selected.Contains(u.Id)" disabled="@(u.Id == UserId)" @onchange="e => Select(u.Id, (bool)e.Value!)" /></td>
+                <td><b>@(u.DisplayName ?? u.Email)</b><div class="faint small">@u.Email</div></td>
+                <td>
+                    <select value="@(roles.FirstOrDefault() ?? "")" @onchange="e => ChangeRole(u.Id, e.Value?.ToString() ?? string.Empty)" style="min-width:130px">
+                        @foreach (var r in AllRoles) { <option value="@r">@r</option> }
+                    </select>
+                </td>
+                <td>
+                    @if (!u.IsActive) { <span class="badge bad">Inactive</span> }
+                    else if (u.ExpiresAt < DateTimeOffset.UtcNow) { <span class="badge warn">Expired</span> }
+                    else if (u.LockoutEnd > DateTimeOffset.UtcNow) { <span class="badge warn">Locked</span> }
+                    else { <span class="badge ok">Active</span> }
+                    @if (u.MustChangePassword) { <span class="badge info">must change pwd</span> }
+                </td>
+                <td>@Local(u.ExpiresAt)</td>
+                <td>@(u.TimeoutOverrideSeconds?.ToString() ?? "default")</td>
+                <td class="right nowrap">
+                    <button class="btn btn-sm" @onclick="() => Edit(u)">Edit</button>
+                    <button class="btn btn-sm" @onclick="() => Reset(u)">Reset pwd</button>
+                    @if (u.Id != UserId) { <button class="btn btn-sm @(u.IsActive ? "btn-danger" : "btn-primary")" @onclick="() => Toggle(u)">@(u.IsActive ? "Deactivate" : "Activate")</button> }
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table></div>
+</div>
+
+@if (creating)
+{
+    <div class="modal-back"><div class="modal">
+        <div class="modal-head"><h2>New user</h2></div>
+        <div class="modal-body">
+            <div class="field"><label>Email</label><input type="email" @bind="newEmail" /></div>
+            <div class="field"><label>Display name</label><input type="text" @bind="newName" /></div>
+            <div class="field"><label>Role</label><select @bind="newRole">@foreach (var r in AllRoles) { <option value="@r">@r</option> }</select></div>
+            <div class="field"><label>Account expires (optional)</label><input type="datetime-local" @bind="newExpiry" /></div>
+        </div>
+        <div class="modal-foot"><button class="btn" @onclick="() => creating = false">Cancel</button><button class="btn btn-primary" @onclick="Create">Create</button></div>
+    </div></div>
+}
+
+@if (editing is not null)
+{
+    <div class="modal-back"><div class="modal">
+        <div class="modal-head"><h2>Edit @editing.Email</h2></div>
+        <div class="modal-body">
+            <div class="field"><label>Account expires (blank = never)</label><input type="datetime-local" @bind="editExpiry" /></div>
+            <div class="field"><label>Query timeout override (seconds, blank = default)</label><input type="number" min="1" max="600" @bind="editTimeout" /></div>
+        </div>
+        <div class="modal-foot"><button class="btn" @onclick="() => editing = null">Cancel</button><button class="btn btn-primary" @onclick="SaveEdit">Save</button></div>
+    </div></div>
+}
+
+@code {
+    private static readonly string[] AllRoles = [Roles.Developer, Roles.Tester, Roles.Auditor, Roles.Admin];
+    private List<(ApplicationUser User, string[] Roles)> list = [];
+    private HashSet<string> selected = [];
+    private string search = "", newEmail = "", newName = "", newRole = Roles.Developer, secretFor = "";
+    private string? secret;
+    private DateTime? newExpiry, editExpiry;
+    private int? editTimeout;
+    private bool creating;
+    private ApplicationUser? editing;
+
+    protected override async Task OnLoadAsync() => await Load();
+    private async Task Load() => list = await UserAdmin.ListAsync(search);
+    private void Select(string id, bool on) { if (on) selected.Add(id); else selected.Remove(id); }
+
+    private async Task Create()
+    {
+        var result = await UserAdmin.CreateAsync(Me, newEmail.Trim(), newName.Trim(), newRole, newExpiry is null ? null : new DateTimeOffset(newExpiry.Value));
+        Say(result, "User created.");
+        if (result.Ok) { secret = result.Value; secretFor = newEmail; creating = false; newEmail = newName = ""; newExpiry = null; await Load(); }
+    }
+
+    private async Task Reset(ApplicationUser u)
+    {
+        var result = await UserAdmin.ResetPasswordAsync(Me, u.Id);
+        Say(result, "Password reset.");
+        if (result.Ok) { secret = result.Value; secretFor = u.Email ?? ""; }
+        await Load();
+    }
+
+    private async Task Toggle(ApplicationUser u) { Say(await UserAdmin.SetActiveAsync(Me, u.Id, !u.IsActive), u.IsActive ? "User deactivated. Sessions and running queries were terminated." : "User activated."); await Load(); }
+    private async Task ChangeRole(string id, string role) { Say(await UserAdmin.SetRoleAsync(Me, id, role), "Role updated."); await Load(); }
+
+    private async Task BulkDeactivate()
+    {
+        foreach (var id in selected.ToList()) await UserAdmin.SetActiveAsync(Me, id, false);
+        Say($"Deactivated {selected.Count} user(s).");
+        selected.Clear();
+        await Load();
+    }
+
+    private void Edit(ApplicationUser u) { editing = u; editExpiry = u.ExpiresAt?.LocalDateTime; editTimeout = u.TimeoutOverrideSeconds; }
+
+    private async Task SaveEdit()
+    {
+        Say(await UserAdmin.SetExpiryAsync(Me, editing!.Id, editExpiry is null ? null : new DateTimeOffset(editExpiry.Value), editTimeout), "User updated.");
+        editing = null;
+        await Load();
+    }
+}

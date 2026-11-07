@@ -1,0 +1,51 @@
+@* Minimal stroke icon set (Feather-style paths), drawn inline so no icon font or CDN is needed. *@
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    @((MarkupString)Path)
+</svg>
+
+@code {
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+
+    private static readonly Dictionary<string, string> Paths = new()
+    {
+        ["db"] = "<ellipse cx='12' cy='5' rx='8' ry='3'/><path d='M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5'/><path d='M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6'/>",
+        ["home"] = "<path d='M3 11l9-8 9 8'/><path d='M5 10v10h14V10'/>",
+        ["terminal"] = "<path d='M4 17l6-6-6-6'/><path d='M12 19h8'/>",
+        ["key"] = "<circle cx='8' cy='15' r='4'/><path d='M10.8 12.2L20 3'/><path d='M16 7l3 3'/>",
+        ["file"] = "<path d='M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z'/><path d='M14 3v5h5'/><path d='M9 13h6M9 17h6'/>",
+        ["bell"] = "<path d='M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9'/><path d='M13.7 21a2 2 0 01-3.4 0'/>",
+        ["users"] = "<path d='M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 00-3-3.9'/><path d='M16 3.1a4 4 0 010 7.8'/>",
+        ["shield"] = "<path d='M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z'/><path d='M9 12l2 2 4-4'/>",
+        ["check"] = "<path d='M5 12l5 5L20 7'/>",
+        ["list"] = "<path d='M8 6h13M8 12h13M8 18h13'/><circle cx='3.5' cy='6' r='1'/><circle cx='3.5' cy='12' r='1'/><circle cx='3.5' cy='18' r='1'/>",
+        ["grid"] = "<rect x='3' y='3' width='7' height='7' rx='1'/><rect x='14' y='3' width='7' height='7' rx='1'/><rect x='3' y='14' width='7' height='7' rx='1'/><rect x='14' y='14' width='7' height='7' rx='1'/>",
+        ["cog"] = "<circle cx='12' cy='12' r='3'/><path d='M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 010-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 010 4h-.1a1.7 1.7 0 00-1.5 1z'/>",
+        ["activity"] = "<path d='M22 12h-4l-3 9L9 3l-3 9H2'/>",
+        ["sun"] = "<circle cx='12' cy='12' r='4'/><path d='M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4'/>",
+        ["moon"] = "<path d='M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z'/>",
+        ["logout"] = "<path d='M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4'/><path d='M16 17l5-5-5-5'/><path d='M21 12H9'/>",
+        ["user"] = "<path d='M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2'/><circle cx='12' cy='7' r='4'/>",
+        ["play"] = "<path d='M6 4l14 8-14 8z'/>",
+        ["stop"] = "<rect x='5' y='5' width='14' height='14' rx='2'/>",
+        ["plus"] = "<path d='M12 5v14M5 12h14'/>",
+        ["maximize"] = "<path d='M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7'/>",
+        ["minimize"] = "<path d='M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7'/>",
+        ["x"] = "<path d='M18 6L6 18M6 6l12 12'/>",
+        ["download"] = "<path d='M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4'/><path d='M7 10l5 5 5-5'/><path d='M12 15V3'/>",
+        ["save"] = "<path d='M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z'/><path d='M17 21v-8H7v8M7 3v5h8'/>",
+        ["refresh"] = "<path d='M23 4v6h-6'/><path d='M1 20v-6h6'/><path d='M3.5 9a9 9 0 0114.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0020.5 15'/>",
+        ["table"] = "<rect x='3' y='3' width='18' height='18' rx='2'/><path d='M3 9h18M3 15h18M9 3v18'/>",
+        ["code"] = "<path d='M16 18l6-6-6-6M8 6l-6 6 6 6'/>",
+        ["clock"] = "<circle cx='12' cy='12' r='9'/><path d='M12 7v5l3 2'/>",
+        ["star"] = "<path d='M12 2l3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z'/>",
+        ["alert"] = "<path d='M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z'/><path d='M12 9v4M12 17h.01'/>",
+        ["inbox"] = "<path d='M22 12h-6l-2 3h-4l-2-3H2'/><path d='M5.5 5.1L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.5-6.9A2 2 0 0016.8 4H7.2a2 2 0 00-1.7 1.1z'/>",
+        ["lock"] = "<rect x='3' y='11' width='18' height='11' rx='2'/><path d='M7 11V7a5 5 0 0110 0v4'/>",
+        ["format"] = "<path d='M3 6h18M3 12h12M3 18h18'/>",
+        ["chevron"] = "<path d='M9 18l6-6-6-6'/>",
+        ["panel"] = "<rect x='3' y='4' width='18' height='16' rx='2'/><path d='M9 4v16'/>",
+        ["eye"] = "<path d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z'/><circle cx='12' cy='12' r='3'/>"
+    };
+
+    private string Path => Paths.GetValueOrDefault(Name, "");
+}

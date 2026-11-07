@@ -1,0 +1,184 @@
+@page "/admin/approvals"
+@attribute [Authorize(Roles = Roles.Admin)]
+@inherits PageBase
+@inject RequestService Requests
+@inject SqlGate Gate
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<PageTitle>Approvals · Query Gate</PageTitle>
+
+<div class="page-head"><div><h1>Approvals</h1><p>Review access and script requests.</p></div></div>
+<Banner Text="@Flash" IsError="@FlashIsError" />
+
+<div class="tabs">
+    <button class="tab @(tab == "access" ? "active" : "")" @onclick='() => tab = "access"'>Access (@access.Count(a => a.Status == RequestStatus.Pending))</button>
+    <button class="tab @(tab == "scripts" ? "active" : "")" @onclick='() => tab = "scripts"'>Scripts (@scripts.Count(s => s.Status == RequestStatus.Pending || (s.Status == RequestStatus.Approved)))</button>
+</div>
+
+@if (tab == "access")
+{
+    <div class="card">
+        @if (access.Count == 0) { <div class="empty"><Icon Name="check" /><div>No access requests.</div></div> }
+        else
+        {
+            <div class="table-wrap"><table>
+                <thead><tr><th>Requester</th><th>Database</th><th>Permissions</th><th>For</th><th>Justification</th><th>Status</th><th></th></tr></thead>
+                <tbody>
+                @foreach (var r in access)
+                {
+                    <tr>
+                        <td>@Name(r.RequesterId)<div class="faint small">@Ago(r.CreatedAt)</div></td>
+                        <td>@DbName(r.DatabaseId)</td>
+                        <td class="wrap">@r.Permissions @(r.IsExtension ? "· extension" : "")</td>
+                        <td>@r.DurationHours h</td>
+                        <td class="wrap">@r.Justification @if (!string.IsNullOrEmpty(r.Ticket)) { <div class="faint small">Ticket: @r.Ticket</div> }</td>
+                        <td><span class="badge @OutcomeClass(r.Status)">@r.Status</span></td>
+                        <td class="right nowrap">
+                            @if (r.Status == RequestStatus.Pending) { <button class="btn btn-sm btn-primary" @onclick="() => OpenAccess(r)">Review</button> }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table></div>
+        }
+    </div>
+}
+else
+{
+    <div class="card">
+        @if (scripts.Count == 0) { <div class="empty"><Icon Name="file" /><div>No script requests.</div></div> }
+        else
+        {
+            <div class="table-wrap"><table>
+                <thead><tr><th>Requester</th><th>Title</th><th>Database</th><th>Status</th><th>Result</th><th></th></tr></thead>
+                <tbody>
+                @foreach (var s in scripts)
+                {
+                    <tr>
+                        <td>@Name(s.RequesterId)<div class="faint small">@Ago(s.CreatedAt)</div></td>
+                        <td><b>@s.Title</b></td>
+                        <td>@DbName(s.DatabaseId)</td>
+                        <td><span class="badge @OutcomeClass(s.Status)">@s.Status</span> @if (s.AutoRun && s.Status == RequestStatus.Approved) { <span class="badge info">auto-run queued</span> }</td>
+                        <td class="wrap small muted">@s.ResultSummary</td>
+                        <td class="right nowrap">
+                            @if (s.Status == RequestStatus.Pending) { <button class="btn btn-sm btn-primary" @onclick="() => OpenScript(s)">Review</button> }
+                            @if (s.Status == RequestStatus.Approved && !s.AutoRun) { <button class="btn btn-sm btn-primary" disabled="@busy" @onclick="() => RunScript(s)"><Icon Name="play" />Run now</button> }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table></div>
+        }
+    </div>
+}
+
+@if (reviewAccess is not null)
+{
+    <div class="modal-back">
+        <div class="modal">
+            <div class="modal-head"><h2>Review access request</h2></div>
+            <div class="modal-body">
+                <p><b>@Name(reviewAccess.RequesterId)</b> requests <b>@reviewAccess.Permissions</b> on <b>@DbName(reviewAccess.DatabaseId)</b>.</p>
+                <p class="muted">@reviewAccess.Justification</p>
+                <div class="field"><label>Grant duration (hours)</label><input type="number" min="1" @bind="hoursOverride" /></div>
+                <div class="field"><label>Comment (required to reject)</label><textarea @bind="comment"></textarea></div>
+            </div>
+            <div class="modal-foot">
+                <button class="btn" @onclick="() => reviewAccess = null">Close</button>
+                <button class="btn btn-danger" @onclick="() => DecideAccess(false)">Reject</button>
+                <button class="btn btn-primary" @onclick="() => DecideAccess(true)">Approve</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (reviewScript is not null)
+{
+    <div class="modal-back">
+        <div class="modal wide">
+            <div class="modal-head"><h2>@reviewScript.Title</h2></div>
+            <div class="modal-body">
+                <p class="muted">@Name(reviewScript.RequesterId) on <b>@DbName(reviewScript.DatabaseId)</b>: @reviewScript.Justification</p>
+                @if (analysis is not null)
+                {
+                    <div class="row-inline" style="margin-bottom:10px">
+                        <span class="label">Gate analysis:</span>
+                        @foreach (var r in analysis.Requirements) { <span class="badge @(Perm.IsDangerous(r) ? "bad" : "brand")">@Perm.Label(r)</span> }
+                        @if (analysis.HasHardDenial) { <span class="badge bad">Blocked: @string.Join("; ", analysis.ParseErrors.Concat(analysis.HardDenials))</span> }
+                        @if (analysis.UnfilteredWrites.Count > 0) { <span class="badge warn">Unfiltered write</span> }
+                    </div>
+                }
+                <div class="field"><label>Script (edit to modify; auto-run is disabled for modified scripts)</label>
+                    <textarea style="font-family:var(--mono);min-height:240px" spellcheck="false" @bind="editedScript" @bind:after="Reanalyse"></textarea></div>
+                <label class="check"><input type="checkbox" @bind="autoRun" />Run automatically after approval (as System)</label>
+                <div class="field" style="margin-top:12px"><label>Comment (required to reject)</label><textarea @bind="comment"></textarea></div>
+            </div>
+            <div class="modal-foot">
+                <button class="btn" @onclick="() => reviewScript = null">Close</button>
+                <button class="btn btn-danger" @onclick="() => DecideScript(false)">Reject</button>
+                <button class="btn btn-primary" @onclick="() => DecideScript(true)">Approve</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string tab = "access";
+    private List<AccessRequest> access = [];
+    private List<ScriptRequest> scripts = [];
+    private Dictionary<string, string> users = [];
+    private Dictionary<Guid, string> dbs = [];
+    private AccessRequest? reviewAccess;
+    private ScriptRequest? reviewScript;
+    private GateAnalysis? analysis;
+    private string? comment, editedScript;
+    private int hoursOverride = 24;
+    private bool autoRun, busy;
+
+    protected override async Task OnLoadAsync() => await Refresh();
+
+    private async Task Refresh()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        access = await db.AccessRequests.AsNoTracking().OrderBy(r => r.Status == RequestStatus.Pending ? 0 : 1).ThenByDescending(r => r.CreatedAt).Take(100).ToListAsync();
+        scripts = await db.ScriptRequests.AsNoTracking().OrderBy(r => r.Status == RequestStatus.Pending ? 0 : 1).ThenByDescending(r => r.CreatedAt).Take(100).ToListAsync();
+        users = await db.Users.AsNoTracking().ToDictionaryAsync(u => u.Id, u => u.Email ?? u.UserName ?? u.Id);
+        dbs = await db.ManagedDatabases.AsNoTracking().ToDictionaryAsync(d => d.Id, d => d.Name);
+    }
+
+    private string Name(string id) => users.GetValueOrDefault(id, "unknown");
+    private string DbName(Guid id) => dbs.GetValueOrDefault(id, "-");
+
+    private void OpenAccess(AccessRequest r) { reviewAccess = r; hoursOverride = r.DurationHours ?? 24; comment = null; }
+
+    private async Task DecideAccess(bool approve)
+    {
+        Say(await Requests.ReviewAccessAsync(Me, reviewAccess!.Id, approve, comment, approve ? hoursOverride : null), approve ? "Request approved." : "Request rejected.");
+        reviewAccess = null;
+        await Refresh();
+    }
+
+    private void OpenScript(ScriptRequest s)
+    {
+        reviewScript = s; editedScript = s.ScriptText; comment = null; autoRun = false;
+        analysis = Gate.Analyze(s.ScriptText);
+    }
+
+    private void Reanalyse() => analysis = Gate.Analyze(editedScript ?? "");
+
+    private async Task DecideScript(bool approve)
+    {
+        Say(await Requests.ReviewScriptAsync(Me, reviewScript!.Id, approve, comment, editedScript, autoRun, Gate), approve ? "Script approved." : "Script rejected.");
+        reviewScript = null;
+        await Refresh();
+    }
+
+    private async Task RunScript(ScriptRequest s)
+    {
+        busy = true; StateHasChanged();
+        var result = await Requests.RunApprovedScriptAsync(Me, s.Id, "Admin");
+        Say(result.Ok ? $"Executed. {result.RowsAffected} row(s) affected." : $"{result.Outcome}: {result.Error}", !result.Ok);
+        busy = false;
+        await Refresh();
+    }
+}

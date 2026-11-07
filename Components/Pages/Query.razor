@@ -1,0 +1,424 @@
+@page "/query"
+@attribute [Authorize]
+@implements IAsyncDisposable
+@inherits PageBase
+@inject PermissionService Permissions
+@inject ExecutionService Execution
+@inject MetadataService Metadata
+@inject WorkspaceService Workspace
+@inject SqlGate Gate
+@inject Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage.ProtectedLocalStorage Storage
+@using System.Text
+@using System.Text.Json
+
+<PageTitle>Query workspace · Query Gate</PageTitle>
+
+@if (databases.Count == 0 && loaded)
+{
+    <div class="card empty"><Icon Name="lock" /><h3>No databases available</h3><p>You haven't been granted access to any database yet.</p><a class="btn btn-primary" href="access">Request access</a></div>
+}
+else
+{
+<div class="ws @(sideOpen ? "" : "side-hidden")">
+    <aside class="card ws-side">
+        <div class="tabs" style="margin:0;padding:0 8px">
+            <button class="tab @(side == "explorer" ? "active" : "")" @onclick='() => side = "explorer"'>Objects</button>
+            <button class="tab @(side == "saved" ? "active" : "")" @onclick='() => SwitchSide("saved")'>Saved</button>
+            <button class="tab @(side == "history" ? "active" : "")" @onclick='() => SwitchSide("history")'>History</button>
+        </div>
+        <div class="scroll">
+            @if (side == "explorer")
+            {
+                <div class="row-inline" style="margin-bottom:8px"><input type="search" placeholder="Filter objects…" @bind="filter" @bind:event="oninput" /><button class="icon-btn" title="Refresh" @onclick="() => LoadMetadata(true)" style="flex:none"><Icon Name="refresh" /></button></div>
+                @if (metaLoading) { <div class="stack"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div> }
+                else if (metaError is not null) { <div class="alert bad small">@metaError</div> }
+                else
+                {
+                    @foreach (var o in FilteredObjects)
+                    {
+                        var key = o.Schema + "." + o.Name;
+                        <div class="tree-item" @onclick="() => InsertSelect(o)" @ondblclick="() => Toggle(key)" title="Click: insert SELECT · Double-click: columns">
+                            <Icon Name="@(o.Type == "Table" ? "table" : o.Type == "View" ? "eye" : "code")" /><span>@key</span><span class="faint small" style="margin-left:auto">@o.Type</span>
+                        </div>
+                        @if (expanded.Contains(key)) { @foreach (var c in o.Columns) { <div class="tree-col">@c</div> } }
+                    }
+                    @if (!FilteredObjects.Any()) { <div class="muted small" style="padding:8px">No objects.</div> }
+                }
+            }
+            else if (side == "saved")
+            {
+                @foreach (var s in saved)
+                {
+                    <div class="tree-item" @onclick="() => LoadSql(s.SqlText, s.Name)">
+                        <Icon Name="star" /><div style="min-width:0"><div>@s.Name</div>@if (!string.IsNullOrEmpty(s.Tags)) { <div class="faint small">@s.Tags</div> }</div>
+                        <button class="btn-ghost btn btn-sm" style="margin-left:auto" @onclick:stopPropagation @onclick="() => DeleteSaved(s.Id)"><Icon Name="x" /></button>
+                    </div>
+                }
+                @if (saved.Count == 0) { <div class="muted small" style="padding:8px">Nothing saved for this database. Use Save (Ctrl+S).</div> }
+            }
+            else
+            {
+                @foreach (var h in history)
+                {
+                    <div class="tree-item" style="flex-direction:column;align-items:stretch" @onclick="() => LoadSql(h.SqlText, null)">
+                        <div class="row-inline"><span class="badge @OutcomeClass(h.Outcome)">@h.Outcome</span><span class="faint small">@Ago(h.ExecutedAt) · @h.DurationMs ms</span></div>
+                        <div class="cell-sql" style="max-width:100%">@h.SqlText</div>
+                    </div>
+                }
+                @if (history.Count == 0) { <div class="muted small" style="padding:8px">No history yet.</div> }
+            }
+        </div>
+    </aside>
+
+    <section class="ws-main">
+        <div class="ws-tabs">
+            <button class="icon-btn sm" type="button" title="@(sideOpen ? "Hide panel" : "Show panel")" @onclick="() => sideOpen = !sideOpen"><Icon Name="list" /></button>
+            @foreach (var t in tabs)
+            {
+                <div class="ws-tab @(t.Id == activeId ? "active" : "")" @onclick="() => Activate(t.Id)">
+                    <span>@t.Name</span><button title="Close" @onclick:stopPropagation @onclick="() => CloseTab(t.Id)">×</button>
+                </div>
+            }
+            <button class="btn btn-sm btn-ghost" @onclick="NewTab"><Icon Name="plus" />New</button>
+        </div>
+
+        <div class="row-inline ws-bar">
+            <select @bind="CurrentDbId" style="width:auto;min-width:200px">
+                @foreach (var d in databases) { <option value="@d.Id">@d.Name · @d.Environment</option> }
+            </select>
+            @if (Current is not null && databases.FirstOrDefault(d => d.Id == Current.DatabaseId) is { } cd) { <span class="badge @EnvClass(cd.Environment)">@cd.Environment</span> }
+            @if (running) { <button class="btn btn-danger" @onclick="CancelRun"><Icon Name="stop" />Cancel</button> }
+            else { <button class="btn btn-primary" title="Run (F5 or Ctrl+Enter). Runs the selection if any." @onclick="Run"><Icon Name="play" />Run</button> }
+            <button class="btn" title="Format (Shift+Alt+F)" @onclick="FormatSql"><Icon Name="format" />Format</button>
+            <button class="btn" title="Save (Ctrl+S)" @onclick="OpenSave"><Icon Name="save" />Save</button>
+            <label class="check small" title="Run inside a transaction and roll back"><input type="checkbox" @bind="dryRun" />Dry run</label>
+            <label class="check small">Timeout <input type="number" min="1" max="600" style="width:64px" @bind="timeout" placeholder="def" />s</label>
+        </div>
+
+        <div id="sql-editor" class="editor-box"></div>
+        <div class="ws-split" title="Drag to resize"></div>
+        <Banner Text="@Flash" IsError="@FlashIsError" />
+
+        <div class="card results @(maximized ? "maximized" : "")" @onkeydown='e => { if (e.Key == "Escape") maximized = false; }' tabindex="-1">
+            <div class="card-head" style="padding:5px 10px">
+                @if (last is null) { <span class="muted">Results appear here.</span> }
+                else
+                {
+                    <span class="badge @OutcomeClass(last.Outcome)">@last.Outcome</span>
+                    <span class="muted small">@last.DurationMs ms · @last.RowsReturned row(s) returned@(last.RowsAffected > 0 ? $" · {last.RowsAffected} affected" : "")</span>
+                    <div class="actions">
+                        @for (var i = 0; i < last.ResultSets.Count; i++)
+                        {
+                            var idx = i;
+                            <button class="btn btn-sm @(activeResult == idx ? "btn-primary" : "")" @onclick="() => activeResult = idx">Result @(idx + 1)</button>
+                        }
+                        <button class="btn btn-sm @(activeResult == -1 ? "btn-primary" : "")" @onclick="() => activeResult = -1">Messages</button>
+                        @if (last.ResultSets.Count > 0 && activeResult >= 0) { <button class="btn btn-sm" @onclick="ExportCsv"><Icon Name="download" />CSV</button> }
+                        <button class="btn btn-sm" title="@(maximized ? "Restore (Esc)" : "Maximize results")" @onclick="() => maximized = !maximized"><Icon Name="@(maximized ? "minimize" : "maximize")" />@(maximized ? "Restore" : "Maximize")</button>
+                    </div>
+                }
+            </div>
+            @if (last is not null)
+            {
+                @if (last.Error is not null)
+                {
+                    <div class="alert bad" style="margin:12px"><b>@last.Error</b>@if (last.ErrorLine is not null) { <span> (line @last.ErrorLine)</span> }
+                        @foreach (var d in last.Denials.Where(d => d != last.Error)) { <div class="small">@d</div> }</div>
+                }
+                @if (activeResult >= 0 && activeResult < last.ResultSets.Count)
+                {
+                    var rs = last.ResultSets[activeResult];
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th class="num">#</th>@foreach (var c in rs.Columns) { <th>@c</th> }</tr></thead>
+                            <tbody>
+                                @for (var r = 0; r < rs.Rows.Count; r++)
+                                {
+                                    <tr><td class="num faint">@(r + 1)</td>@foreach (var v in rs.Rows[r]) { <td>@if (v is null) { <span class="null">NULL</span> } else { @Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture) }</td> }</tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    @if (rs.Truncated) { <div class="alert warn" style="margin:10px 14px">Showing the first @rs.Rows.Count rows. The row limit for this database was reached.</div> }
+                }
+                else if (activeResult == -1)
+                {
+                    <div class="card-pad mono small">
+                        @foreach (var m in last.Messages) { <div>@m</div> }
+                        @if (last.Messages.Count == 0) { <span class="muted">No messages.</span> }
+                    </div>
+                }
+            }
+        </div>
+    </section>
+</div>
+}
+
+@if (confirm is not null)
+{
+    <div class="modal-back">
+        <div class="modal">
+            <div class="modal-head"><h2>Confirm destructive statement</h2></div>
+            <div class="modal-body">
+                <div class="alert warn">These statements have no WHERE clause and affect every row:</div>
+                <ul>@foreach (var s in confirm) { <li><code>@s</code></li> }</ul>
+            </div>
+            <div class="modal-foot"><button class="btn" @onclick="() => confirm = null">Cancel</button><button class="btn btn-danger" @onclick="ConfirmRun">Run anyway</button></div>
+        </div>
+    </div>
+}
+
+@if (saving)
+{
+    <div class="modal-back">
+        <div class="modal">
+            <div class="modal-head"><h2>Save query</h2></div>
+            <div class="modal-body">
+                <div class="field"><label>Name</label><input type="text" @bind="saveName" maxlength="120" /></div>
+                <div class="field"><label>Tags (comma separated)</label><input type="text" @bind="saveTags" maxlength="200" /></div>
+                <div class="field"><label>Description</label><textarea @bind="saveDesc" maxlength="500"></textarea></div>
+            </div>
+            <div class="modal-foot"><button class="btn" @onclick="() => saving = false">Cancel</button><button class="btn btn-primary" @onclick="DoSave">Save</button></div>
+        </div>
+    </div>
+}
+
+@code {
+    private sealed class QueryTab
+    {
+        public string Id { get; set; } = Guid.NewGuid().ToString("N");
+        public string Name { get; set; } = "Query 1";
+        public Guid DatabaseId { get; set; }
+        public string Sql { get; set; } = "";
+    }
+
+    [SupplyParameterFromQuery(Name = "db")] public Guid? DbParam { get; set; }
+
+    private List<ManagedDatabase> databases = [];
+    private List<QueryTab> tabs = [];
+    private string activeId = "";
+    private QueryTab? Current => tabs.FirstOrDefault(t => t.Id == activeId);
+    private bool loaded, running, dryRun, saving, initialized, maximized, sideOpen = true;
+    private int? timeout;
+    private ExecutionResult? last;
+    private int activeResult;
+    private Guid runId;
+    private List<string>? confirm;
+    private string side = "explorer", filter = "";
+    private List<DbObjectInfo> objects = [];
+    private HashSet<string> expanded = [];
+    private bool metaLoading;
+    private string? metaError;
+    private List<SavedQuery> saved = [];
+    private List<QueryHistory> history = [];
+    private string saveName = "", saveTags = "", saveDesc = "";
+    private DotNetObjectReference<Query>? self;
+    private string? lastRunSql;
+
+    private IEnumerable<DbObjectInfo> FilteredObjects => objects
+        .Where(o => filter.Length == 0 || (o.Schema + "." + o.Name).Contains(filter, StringComparison.OrdinalIgnoreCase)).Take(300);
+
+    private Guid CurrentDbId
+    {
+        get => Current?.DatabaseId ?? Guid.Empty;
+        set { if (Current is not null && Current.DatabaseId != value) { Current.DatabaseId = value; _ = OnDbChanged(); } }
+    }
+
+    protected override async Task OnLoadAsync()
+    {
+        databases = await Permissions.GetAccessibleDatabasesAsync(UserId);
+        loaded = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Blazor renders (and fires firstRender) before the async load finishes, so initialise once data is available.
+        if (initialized || !loaded || databases.Count == 0) return;
+        initialized = true;
+        try
+        {
+            var stored = await Storage.GetAsync<string>("dbam-tabs-" + UserId);
+            if (stored.Success && stored.Value is not null)
+                tabs = JsonSerializer.Deserialize<List<QueryTab>>(stored.Value)?.Where(t => databases.Any(d => d.Id == t.DatabaseId)).ToList() ?? [];
+        }
+        catch { tabs = []; }
+
+        if (tabs.Count == 0) tabs.Add(new QueryTab { DatabaseId = DbParam ?? databases[0].Id, Sql = "SELECT TOP 10 * FROM sys.objects;" });
+        else if (DbParam is { } p && databases.Any(d => d.Id == p)) tabs.Add(new QueryTab { Name = "Query " + (tabs.Count + 1), DatabaseId = p });
+        activeId = tabs[^1].Id;
+
+        self = DotNetObjectReference.Create(this);
+        await JS.InvokeAsync<bool>("dbam.editorInit", "main", "sql-editor", self, Current!.Sql);
+        await OnDbChanged();
+        StateHasChanged();
+    }
+
+    private async Task OnDbChanged()
+    {
+        await LoadMetadata(false);
+        await LoadSidePanels();
+        await PersistAsync();
+        StateHasChanged();
+    }
+
+    private async Task LoadMetadata(bool refresh)
+    {
+        if (Current is null) return;
+        metaLoading = true; metaError = null; StateHasChanged();
+        try
+        {
+            objects = await Metadata.GetAsync(Current.DatabaseId, refresh);
+            await JS.InvokeVoidAsync("dbam.setMetadata", objects);
+        }
+        catch (Exception ex) { objects = []; metaError = "Could not load objects: " + ex.Message; }
+        metaLoading = false;
+    }
+
+    private async Task LoadSidePanels()
+    {
+        if (Current is null) return;
+        saved = await Workspace.SavedAsync(UserId, Current.DatabaseId);
+        history = await Workspace.HistoryAsync(UserId, Current.DatabaseId);
+    }
+
+    private async Task SwitchSide(string tab) { side = tab; await LoadSidePanels(); }
+
+    [JSInvokable] public Task OnChanged(string value) { if (Current is not null) Current.Sql = value; return Task.CompletedTask; }
+    [JSInvokable] public Task OnRun() => InvokeAsync(Run);
+    [JSInvokable] public Task OnFormat() => InvokeAsync(FormatSql);
+    [JSInvokable] public Task OnSave() => InvokeAsync(() => { OpenSave(); StateHasChanged(); });
+
+    private async Task PersistAsync()
+    {
+        try { await Storage.SetAsync("dbam-tabs-" + UserId, JsonSerializer.Serialize(tabs)); } catch { }
+    }
+
+    private async Task Activate(string id)
+    {
+        if (id == activeId) return;
+        await SyncCurrent();
+        activeId = id;
+        await JS.InvokeVoidAsync("dbam.editorSet", "main", Current!.Sql);
+        await OnDbChanged();
+    }
+
+    private async Task SyncCurrent()
+    {
+        if (Current is not null) Current.Sql = await JS.InvokeAsync<string>("dbam.editorGet", "main");
+    }
+
+    private async Task NewTab()
+    {
+        await SyncCurrent();
+        tabs.Add(new QueryTab { Name = "Query " + (tabs.Count + 1), DatabaseId = Current?.DatabaseId ?? databases[0].Id });
+        activeId = tabs[^1].Id;
+        await JS.InvokeVoidAsync("dbam.editorSet", "main", "");
+        await PersistAsync();
+    }
+
+    private async Task CloseTab(string id)
+    {
+        if (tabs.Count == 1) { Current!.Sql = ""; await JS.InvokeVoidAsync("dbam.editorSet", "main", ""); return; }
+        var wasActive = id == activeId;
+        tabs.RemoveAll(t => t.Id == id);
+        if (wasActive) { activeId = tabs[^1].Id; await JS.InvokeVoidAsync("dbam.editorSet", "main", Current!.Sql); await OnDbChanged(); }
+        else await PersistAsync();
+    }
+
+    private async Task LoadSql(string sql, string? name)
+    {
+        await JS.InvokeVoidAsync("dbam.editorSet", "main", sql);
+        if (Current is not null) { Current.Sql = sql; if (name is not null) Current.Name = name; }
+        await PersistAsync();
+    }
+
+    private async Task InsertSelect(DbObjectInfo o)
+    {
+        var sql = o.Type is "Table" or "View" ? $"SELECT TOP 100 * FROM [{o.Schema}].[{o.Name}];" : $"EXEC [{o.Schema}].[{o.Name}];";
+        await LoadSql(sql, null);
+    }
+
+    private void Toggle(string key) { if (!expanded.Remove(key)) expanded.Add(key); }
+
+    private async Task Run() => await RunCore(false);
+    private async Task ConfirmRun() { confirm = null; await RunCore(true); }
+
+    private async Task RunCore(bool confirmed)
+    {
+        if (running || Current is null) return;
+        await SyncCurrent();
+        var selection = await JS.InvokeAsync<string>("dbam.editorSelection", "main");
+        var sql = string.IsNullOrWhiteSpace(selection) ? Current.Sql : selection;
+        if (string.IsNullOrWhiteSpace(sql)) { Say("Nothing to run.", true); return; }
+
+        running = true; Flash = null; runId = Guid.NewGuid(); lastRunSql = sql;
+        await JS.InvokeVoidAsync("dbam.editorMarker", "main", 0, "");
+        StateHasChanged();
+        try
+        {
+            last = await Execution.ExecuteAsync(Me, new ExecutionOptions
+            {
+                SqlText = sql, DatabaseId = Current.DatabaseId, DryRun = dryRun, TimeoutSeconds = timeout,
+                ConfirmUnfilteredWrites = confirmed, RunId = runId
+            });
+            activeResult = last.ResultSets.Count > 0 ? 0 : -1;
+            if (last.Outcome == "NeedsConfirmation") { confirm = last.UnfilteredWrites; last = null; }
+            else if (last.ErrorLine is { } line) await JS.InvokeVoidAsync("dbam.editorMarker", "main", line, last.Error);
+        }
+        finally { running = false; }
+        await LoadSidePanels();
+    }
+
+    private void CancelRun() => Execution.Cancel(runId, UserId);
+
+    private async Task FormatSql()
+    {
+        await SyncCurrent();
+        try
+        {
+            var parts = SqlGate.SplitBatches(Current!.Sql).Select(b => Gate.Format(b.Text, true, 4).Trim());
+            var formatted = string.Join("\nGO\n", parts);
+            await LoadSql(formatted, null);
+        }
+        catch (Exception ex) { Say(ex.Message, true); }
+    }
+
+    private void OpenSave() { saveName = Current?.Name ?? ""; saveTags = ""; saveDesc = ""; saving = true; }
+
+    private async Task DoSave()
+    {
+        await SyncCurrent();
+        var result = await Workspace.SaveAsync(UserId, Current!.DatabaseId, saveName, Current.Sql, saveTags, saveDesc);
+        Say(result, "Query saved.");
+        if (result.Ok) { Current.Name = saveName; saving = false; await LoadSidePanels(); await PersistAsync(); }
+    }
+
+    private async Task DeleteSaved(Guid id) { await Workspace.DeleteAsync(UserId, id); await LoadSidePanels(); }
+
+    private async Task ExportCsv()
+    {
+        if (last is null || activeResult < 0 || activeResult >= last.ResultSets.Count || Current is null) return;
+        var rs = last.ResultSets[activeResult];
+        var auth = await Execution.AuthorizeExportAsync(Me, Current.DatabaseId, rs.Rows.Count, lastRunSql ?? "");
+        if (!auth.Ok) { Say(auth.Error!, true); return; }
+
+        var sb = new StringBuilder();
+        sb.AppendLine(string.Join(",", rs.Columns.Select(Csv)));
+        foreach (var row in rs.Rows) sb.AppendLine(string.Join(",", row.Select(v => Csv(v is null ? "" : Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture)))));
+        await JS.InvokeVoidAsync("dbam.download", $"{Current.Name.Replace(' ', '_')}-{DateTime.Now:yyyyMMdd-HHmmss}.csv", sb.ToString(), "text/csv;charset=utf-8");
+    }
+
+    // Neutralise spreadsheet formula injection.
+    private static string Csv(string? value)
+    {
+        value ??= "";
+        if (value.Length > 0 && "=+-@\t\r".Contains(value[0])) value = "'" + value;
+        return "\"" + value.Replace("\"", "\"\"") + "\"";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try { await JS.InvokeVoidAsync("dbam.editorDispose", "main"); } catch { }
+        self?.Dispose();
+    }
+}

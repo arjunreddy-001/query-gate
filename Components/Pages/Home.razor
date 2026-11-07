@@ -1,0 +1,94 @@
+@page "/"
+@attribute [Authorize]
+@inherits PageBase
+@inject PermissionService Permissions
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NotificationService Notifications
+@using Microsoft.EntityFrameworkCore
+
+<PageTitle>Dashboard · Query Gate</PageTitle>
+
+<div class="hero">
+    <h1>@Greeting(), @firstName</h1>
+    <p>@(databases.Count == 0 ? "You don't have access to any databases yet. Request some below." : $"You can work with {databases.Count} database(s) right now.")</p>
+</div>
+
+<div class="grid g4" style="margin-bottom:22px">
+    <div class="card stat"><div class="label">Databases</div><div class="value">@databases.Count</div><div class="hint">available to you</div></div>
+    <div class="card stat"><div class="label">Temporary grants</div><div class="value">@activeGrants</div><div class="hint">@(expiring) expiring within 24h</div></div>
+    <div class="card stat"><div class="label">My open requests</div><div class="value">@openRequests</div><div class="hint">awaiting review</div></div>
+    <div class="card stat"><div class="label">@(IsAdmin ? "To approve" : "Unread")</div><div class="value">@(IsAdmin ? pendingApprovals : unread)</div><div class="hint">@(IsAdmin ? "pending requests" : "notifications")</div></div>
+</div>
+
+<div class="split">
+    <div class="card">
+        <div class="card-head"><h2>Your databases</h2><div class="actions"><a class="btn btn-sm" href="access"><Icon Name="key" />Request access</a></div></div>
+        @if (databases.Count == 0)
+        {
+            <div class="empty"><Icon Name="inbox" /><div>No databases yet.</div></div>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Name</th><th>Environment</th><th>Description</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var d in databases)
+                        {
+                            <tr>
+                                <td><b>@d.Name</b></td>
+                                <td><span class="badge @EnvClass(d.Environment)">@d.Environment</span></td>
+                                <td class="muted">@d.Description</td>
+                                <td class="right"><a class="btn btn-sm btn-primary" href="query?db=@d.Id"><Icon Name="terminal" />Open</a></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+    <div class="card">
+        <div class="card-head"><h2>Recent activity</h2></div>
+        @if (recent.Count == 0)
+        {
+            <div class="empty"><Icon Name="clock" /><div>Nothing run yet.</div></div>
+        }
+        else
+        {
+            <div class="stack card-pad">
+                @foreach (var h in recent)
+                {
+                    <div>
+                        <div class="row-inline"><span class="badge @OutcomeClass(h.Outcome)">@h.Outcome</span><span class="faint small">@Ago(h.ExecutedAt) · @h.DurationMs ms</span></div>
+                        <div class="cell-sql" title="@h.SqlText">@h.SqlText</div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<ManagedDatabase> databases = [];
+    private List<QueryHistory> recent = [];
+    private int activeGrants, expiring, openRequests, pendingApprovals, unread;
+    private string firstName = "";
+
+    protected override async Task OnLoadAsync()
+    {
+        firstName = UserName.Split('@')[0];
+        databases = await Permissions.GetAccessibleDatabasesAsync(UserId);
+        unread = await Notifications.UnreadCountAsync(UserId);
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var now = DateTimeOffset.UtcNow;
+        activeGrants = await db.PermissionGrants.CountAsync(g => g.UserId == UserId && g.EndsAt > now && (g.StartsAt == null || g.StartsAt <= now));
+        expiring = await db.PermissionGrants.CountAsync(g => g.UserId == UserId && g.EndsAt > now && g.EndsAt <= now.AddHours(24));
+        openRequests = await db.AccessRequests.CountAsync(r => r.RequesterId == UserId && r.Status == RequestStatus.Pending)
+                     + await db.ScriptRequests.CountAsync(r => r.RequesterId == UserId && r.Status == RequestStatus.Pending);
+        if (IsAdmin)
+            pendingApprovals = await db.AccessRequests.CountAsync(r => r.Status == RequestStatus.Pending) + await db.ScriptRequests.CountAsync(r => r.Status == RequestStatus.Pending);
+        recent = await db.QueryHistory.AsNoTracking().Where(h => h.UserId == UserId).OrderByDescending(h => h.Id).Take(6).ToListAsync();
+    }
+
+    private static string Greeting() => DateTime.Now.Hour switch { < 12 => "Good morning", < 18 => "Good afternoon", _ => "Good evening" };
+}

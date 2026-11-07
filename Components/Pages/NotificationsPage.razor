@@ -1,0 +1,49 @@
+@page "/notifications"
+@attribute [Authorize]
+@inherits PageBase
+@inject NotificationService Notifier
+
+<PageTitle>Notifications · Query Gate</PageTitle>
+
+<div class="page-head">
+    <div><h1>Notifications</h1><p>Approvals, expiries and system messages.</p></div>
+    <div class="actions"><button class="btn" @onclick="MarkAll"><Icon Name="check" />Mark all read</button></div>
+</div>
+
+<div class="card">
+    @if (items.Count == 0)
+    {
+        <div class="empty"><Icon Name="bell" /><div>You're all caught up.</div></div>
+    }
+    else
+    {
+        @foreach (var n in items)
+        {
+            <div class="card-head" style="@(n.IsRead ? "opacity:.6" : "")">
+                <span class="badge @(n.IsRead ? "" : "brand")">@(n.IsRead ? "read" : "new")</span>
+                <div>
+                    <b>@n.Title</b>
+                    <div class="muted small">@n.Message</div>
+                </div>
+                <div class="actions"><span class="faint small">@Ago(n.CreatedAt)</span>
+                    @if (!string.IsNullOrEmpty(n.Link)) { <a class="btn btn-sm" href="@n.Link" @onclick="() => Read(n.Id)">Open</a> }
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private List<Notification> items = [];
+
+    protected override async Task OnLoadAsync() => items = await Notifier.ListAsync(UserId);
+
+    private async Task MarkAll()
+    {
+        await Notifier.MarkReadAsync(UserId);
+        items = await Notifier.ListAsync(UserId);
+    }
+
+    private async Task Read(long id) => await Notifier.MarkReadAsync(UserId, id);
+}
+

@@ -1,4 +1,3 @@
-[SKILL.md](https://github.com/user-attachments/files/34457296/SKILL.md)
 ---
 name: ef-migrations
 description: 'Create, apply, reset or troubleshoot Entity Framework Core migrations for Query Gate (SQL Server). Use when changing entities or the DbContext, adding a column or table, running database update, or fixing errors like "object already exists" or "pending model changes".'

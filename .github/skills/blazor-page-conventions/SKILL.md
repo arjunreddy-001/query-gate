@@ -1,4 +1,3 @@
-[SKILL.md](https://github.com/user-attachments/files/34457276/SKILL.md)
 ---
 name: blazor-page-conventions
 description: 'Add or change Blazor pages, admin pages, services and navigation in Query Gate. Use when creating a new .razor page, adding a menu item, a setting, an icon, or fixing first-render errors such as KeyNotFoundException or components that never initialise.'

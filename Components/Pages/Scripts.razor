@@ -1,0 +1,103 @@
+@page "/scripts"
+@attribute [Authorize]
+@inherits PageBase
+@inject RequestService Requests
+@inject SqlGate Gate
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@using Microsoft.EntityFrameworkCore
+
+<PageTitle>Script requests · Query Gate</PageTitle>
+
+<div class="page-head">
+    <div><h1>Script requests</h1><p>Submit a script for an administrator to review and run on your behalf.</p></div>
+</div>
+
+<Banner Text="@Flash" IsError="@FlashIsError" />
+
+<div class="split">
+    <div class="card">
+        <div class="card-head"><h2>My scripts</h2></div>
+        @if (items.Count == 0) { <div class="empty"><Icon Name="file" /><div>No script requests yet.</div></div> }
+        else
+        {
+            <div class="table-wrap"><table>
+                <thead><tr><th>Title</th><th>Database</th><th>Status</th><th>Result</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var r in items)
+                    {
+                        <tr>
+                            <td><b>@r.Title</b><div class="faint small">@Ago(r.CreatedAt)</div></td>
+                            <td>@DbName(r.DatabaseId)</td>
+                            <td><span class="badge @OutcomeClass(r.Status)">@r.Status</span> @if (r.ModifiedScriptText is not null) { <span class="badge warn" title="Reviewer changed the script">modified</span> }</td>
+                            <td class="wrap muted small">@(r.ResultSummary ?? r.Comments)</td>
+                            <td class="right nowrap">
+                                <button class="btn btn-sm btn-ghost" @onclick="() => viewing = r">View</button>
+                                @if (r.Status == RequestStatus.Pending) { <button class="btn btn-sm btn-ghost" @onclick="() => Cancel(r.Id)">Cancel</button> }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table></div>
+        }
+    </div>
+
+    <div class="card card-pad" style="align-self:start">
+        <h2>New script</h2>
+        <div class="field"><label>Database</label><select @bind="dbId">@foreach (var d in databases) { <option value="@d.Id">@d.Name (@d.Environment)</option> }</select></div>
+        <div class="field"><label>Title</label><input type="text" @bind="title" maxlength="200" /></div>
+        <div class="field"><label>Script</label><textarea @bind="script" style="font-family:var(--mono);min-height:180px" spellcheck="false"></textarea></div>
+        <div class="field"><label>Justification</label><textarea @bind="justification" maxlength="1000"></textarea></div>
+        <button class="btn btn-primary" @onclick="Submit"><Icon Name="plus" />Submit for review</button>
+    </div>
+</div>
+
+@if (viewing is not null)
+{
+    <div class="modal-back" @onclick="() => viewing = null">
+        <div class="modal wide" @onclick:stopPropagation>
+            <div class="modal-head"><h2>@viewing.Title</h2></div>
+            <div class="modal-body">
+                <div class="label">Script @(viewing.ModifiedScriptText is not null ? "(as modified by reviewer)" : "")</div>
+                <pre class="secret" style="white-space:pre-wrap;max-height:360px;overflow:auto">@viewing.EffectiveScript</pre>
+                <p class="muted">@viewing.Justification</p>
+            </div>
+            <div class="modal-foot"><button class="btn" @onclick="() => viewing = null">Close</button></div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<ScriptRequest> items = [];
+    private List<ManagedDatabase> databases = [];
+    private Guid dbId;
+    private string? title, script, justification;
+    private ScriptRequest? viewing;
+
+    protected override async Task OnLoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        databases = await db.ManagedDatabases.AsNoTracking().Where(d => d.IsActive).OrderBy(d => d.Name).ToListAsync();
+        if (databases.Count > 0) dbId = databases[0].Id;
+        await Refresh();
+    }
+
+    private async Task Refresh()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        items = await db.ScriptRequests.AsNoTracking().Where(r => r.RequesterId == UserId).OrderByDescending(r => r.CreatedAt).Take(50).ToListAsync();
+    }
+
+    private string DbName(Guid id) => databases.FirstOrDefault(d => d.Id == id)?.Name ?? "-";
+
+    private async Task Submit()
+    {
+        Say(await Requests.SubmitScriptAsync(Me, dbId, title ?? "", script ?? "", justification ?? "", Gate), "Script submitted for review.");
+        if (!FlashIsError) { title = script = justification = null; await Refresh(); }
+    }
+
+    private async Task Cancel(Guid id)
+    {
+        Say(await Requests.CancelAsync(Me, "Script", id), "Request cancelled.");
+        await Refresh();
+    }
+}

@@ -1,0 +1,79 @@
+@page "/admin/audit"
+@attribute [Authorize(Roles = Roles.AdminOrAuditor)]
+@inherits PageBase
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject AuditService AuditSvc
+@inject IJSRuntime Js
+
+<PageTitle>Audit log · Query Gate</PageTitle>
+
+<div class="page-head">
+    <div><h1>Audit log</h1><p>Immutable record of queries, access and administration.</p></div>
+    <div class="actions"><button class="btn" @onclick="Export"><Icon Name="download" />Export CSV</button></div>
+</div>
+
+<div class="toolbar">
+    <input type="search" placeholder="User…" @bind="user" />
+    <select @bind="category"><option value="">All categories</option><option>Query</option><option>Auth</option><option>Request</option><option>User</option><option>Permission</option><option>Database</option><option>Settings</option><option>Export</option></select>
+    <select @bind="outcome"><option value="">All outcomes</option><option>Success</option><option>Failed</option><option>Denied</option><option>Cancelled</option><option>Timeout</option></select>
+    <input type="date" @bind="from" /><input type="date" @bind="to" />
+    <input class="grow" type="search" placeholder="Search SQL / details…" @bind="text" />
+    <button class="btn btn-primary" @onclick="Load">Filter</button>
+</div>
+
+<div class="card"><div class="table-wrap"><table>
+    <thead><tr><th>Time</th><th>User</th><th>Category</th><th>Action</th><th>Database</th><th>Outcome</th><th>Rows</th><th>ms</th><th>Detail</th></tr></thead>
+    <tbody>
+    @foreach (var a in rows)
+    {
+        <tr>
+            <td class="nowrap">@Local(a.Timestamp)</td><td>@a.UserName</td><td>@a.Category</td><td>@a.Action</td><td>@a.DatabaseName</td>
+            <td><span class="badge @OutcomeClass(a.Outcome)">@a.Outcome</span></td>
+            <td>@(a.RowsReturned ?? a.RowsAffected)</td><td>@a.DurationMs</td>
+            <td class="wrap">
+                @if (!string.IsNullOrEmpty(a.SqlText)) { <details><summary class="small muted">SQL</summary><pre class="small">@a.SqlText</pre></details> }
+                <span class="small muted">@a.Details</span>
+                <div class="faint small">@a.ClientIp @(a.Executor is null ? "" : "· exec: " + a.Executor)</div>
+            </td>
+        </tr>
+    }
+    </tbody>
+</table></div></div>
+<p class="faint small">Showing the latest @rows.Count matching entries (max 500).</p>
+
+@code {
+    private List<AuditLog> rows = [];
+    private string user = "", category = "", outcome = "", text = "";
+    private DateTime? from, to;
+
+    protected override async Task OnLoadAsync() => await Load();
+
+    private IQueryable<AuditLog> Query(ApplicationDbContext db)
+    {
+        var q = db.AuditLogs.AsNoTracking().AsQueryable();
+        if (!string.IsNullOrWhiteSpace(user)) q = q.Where(a => a.UserName != null && a.UserName.Contains(user));
+        if (category != "") q = q.Where(a => a.Category == category);
+        if (outcome != "") q = q.Where(a => a.Outcome == outcome);
+        if (from is not null) { var f = new DateTimeOffset(from.Value); q = q.Where(a => a.Timestamp >= f); }
+        if (to is not null) { var t = new DateTimeOffset(to.Value.AddDays(1)); q = q.Where(a => a.Timestamp < t); }
+        if (!string.IsNullOrWhiteSpace(text)) q = q.Where(a => (a.SqlText != null && a.SqlText.Contains(text)) || (a.Details != null && a.Details.Contains(text)));
+        return q.OrderByDescending(a => a.Id);
+    }
+
+    private async Task Load()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        rows = await Query(db).Take(500).ToListAsync();
+    }
+
+    private async Task Export()
+    {
+        List<AuditLog> data;
+        await using (var db = await DbFactory.CreateDbContextAsync()) data = await Query(db).Take(10000).ToListAsync();
+        var sb = new System.Text.StringBuilder("Timestamp,User,Category,Action,Database,Outcome,RowsReturned,RowsAffected,DurationMs,ClientIp,Details\r\n");
+        foreach (var a in data)
+            sb.AppendLine(string.Join(',', new[] { a.Timestamp.ToString("o"), a.UserName, a.Category, a.Action, a.DatabaseName, a.Outcome, a.RowsReturned?.ToString(), a.RowsAffected?.ToString(), a.DurationMs?.ToString(), a.ClientIp, a.Details }.Select(Csv.Cell)));
+        await AuditSvc.TryWriteAsync(Me, "Export", "AuditLogExport", "Success", $"{data.Count} rows");
+        await Js.InvokeVoidAsync("dbam.download", $"audit-{DateTime.UtcNow:yyyyMMdd-HHmm}.csv", sb.ToString(), "text/csv");
+    }
+}
