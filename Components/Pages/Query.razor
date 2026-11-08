@@ -131,10 +131,41 @@ else
                         @for (var i = 0; i < last.ResultSets.Count; i++)
                         {
                             var idx = i;
-                            <button class="btn btn-sm @(activeResult == idx ? "btn-primary" : "")" @onclick="() => activeResult = idx">Result @(idx + 1)</button>
+                            <button class="btn btn-sm @(activeResult == idx ? "btn-primary" : "")" @onclick="() => { activeResult = idx; sortCol = null; }">Result @(idx + 1)</button>
                         }
                         <button class="btn btn-sm @(activeResult == -1 ? "btn-primary" : "")" @onclick="() => activeResult = -1">Messages</button>
-                        @if (last.ResultSets.Count > 0 && activeResult >= 0) { <button class="btn btn-sm" @onclick="ExportCsv"><Icon Name="download" />CSV</button> }
+                        @if (last.ResultSets.Count > 0 && activeResult >= 0)
+                        {
+                            <input type="search" placeholder="Filter rows…" @bind="gridFilter" @bind:event="oninput" style="width:130px;height:24px;padding:2px 8px;font-size:12px;margin-right:2px" title="Filter displayed rows" />
+                            @if (!string.IsNullOrWhiteSpace(gridFilter))
+                            {
+                                var matchCount = GetProcessedRows(last.ResultSets[activeResult]).Count;
+                                <span class="badge" style="font-size:11px" title="Matching rows">@matchCount/@last.ResultSets[activeResult].Rows.Count</span>
+                            }
+                            <div class="export-dropdown">
+                                <button class="btn btn-sm" type="button" title="Export results">
+                                    <Icon Name="download" />Export <span style="font-size:9px;margin-left:2px">▾</span>
+                                </button>
+                                <div class="export-dropdown-menu">
+                                    <button class="export-dropdown-item" type="button" @onclick="ExportCsv">
+                                        <Icon Name="file" />CSV (.csv)
+                                    </button>
+                                    <button class="export-dropdown-item" type="button" @onclick="ExportExcel">
+                                        <Icon Name="table" />Excel (.xls)
+                                    </button>
+                                    <button class="export-dropdown-item" type="button" @onclick="ExportJson">
+                                        <Icon Name="code" />JSON (.json)
+                                    </button>
+                                    <hr class="export-dropdown-divider" />
+                                    <button class="export-dropdown-item" type="button" @onclick="CopyMarkdown">
+                                        <Icon Name="copy" />Copy Markdown
+                                    </button>
+                                    <button class="export-dropdown-item" type="button" @onclick="OpenSqlInsertDialog">
+                                        <Icon Name="code" />SQL INSERT…
+                                    </button>
+                                </div>
+                            </div>
+                        }
                         <button class="btn btn-sm" title="@(maximized ? "Minimize (Esc)" : "Maximize results")" @onclick="() => maximized = !maximized"><Icon Name="@(maximized ? "minimize" : "maximize")" />@(maximized ? "Minimize" : "Maximize")</button>
                     </div>
                 }
@@ -149,13 +180,39 @@ else
                 @if (activeResult >= 0 && activeResult < last.ResultSets.Count)
                 {
                     var rs = last.ResultSets[activeResult];
+                    var rowsToDisplay = GetProcessedRows(rs);
                     <div class="table-wrap">
                         <table>
-                            <thead><tr><th class="num">#</th>@foreach (var c in rs.Columns) { <th>@c</th> }</tr></thead>
+                            <thead>
+                                <tr>
+                                    <th class="num">#</th>
+                                    @for (var cIdx = 0; cIdx < rs.Columns.Count; cIdx++)
+                                    {
+                                        var col = cIdx;
+                                        var colName = rs.Columns[col];
+                                        <th class="sortable" @onclick="() => ToggleSort(col)" title="Click to sort" style="cursor:pointer;user-select:none">
+                                            <span>@colName</span>
+                                            @if (sortCol == col)
+                                            {
+                                                <span class="sort-icon" style="margin-left:4px;font-size:10px;color:var(--brand)">@(sortAsc ? "▲" : "▼")</span>
+                                            }
+                                        </th>
+                                    }
+                                </tr>
+                            </thead>
                             <tbody>
-                                @for (var r = 0; r < rs.Rows.Count; r++)
+                                @for (var r = 0; r < rowsToDisplay.Count; r++)
                                 {
-                                    <tr><td class="num faint">@(r + 1)</td>@foreach (var v in rs.Rows[r]) { <td>@if (v is null) { <span class="null">NULL</span> } else { @Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture) }</td> }</tr>
+                                    var row = rowsToDisplay[r];
+                                    <tr>
+                                        <td class="num faint">@(r + 1)</td>
+                                        @foreach (var v in row)
+                                        {
+                                            <td @ondblclick="() => CopyCell(v)" title="Double-click to copy cell value" style="cursor:pointer">
+                                                @if (v is null) { <span class="null">NULL</span> } else { @Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture) }
+                                            </td>
+                                        }
+                                    </tr>
                                 }
                             </tbody>
                         </table>
@@ -217,6 +274,50 @@ else
         </div>
         <div class="modal-foot"><button class="btn" @onclick="CancelPreferences">Cancel</button><button class="btn btn-primary" @onclick="SavePreferences">Save</button></div>
     </div></div>
+}
+
+@if (showSqlInsertModal && last is not null && activeResult >= 0 && activeResult < last.ResultSets.Count)
+{
+    var rs = last.ResultSets[activeResult];
+    <div class="modal-back">
+        <div class="modal">
+            <div class="modal-head"><h2>SQL INSERT Export</h2></div>
+            <div class="modal-body stack">
+                <div class="field">
+                    <label>Target Table Name</label>
+                    <input type="text" placeholder="e.g. Products" @bind="sqlInsertTableName" />
+                    <span class="faint small">Statements will insert into this table.</span>
+                </div>
+                <div class="field">
+                    <div class="row-inline" style="justify-content:space-between;margin-bottom:4px">
+                        <label style="margin:0">Duplicate Check Columns (Optional)</label>
+                        <div class="row-inline" style="gap:6px">
+                            <button class="btn btn-sm" type="button" @onclick="() => selectedInsertCols = new HashSet<string>(rs.Columns, StringComparer.OrdinalIgnoreCase)">Select all</button>
+                            <button class="btn btn-sm" type="button" @onclick="() => selectedInsertCols.Clear()">Clear</button>
+                        </div>
+                    </div>
+                    <p class="muted small" style="margin-bottom:8px">
+                        Select columns to check before inserting. If selected, wraps statements in:
+                        <code>IF NOT EXISTS (SELECT 1 FROM [Table] WHERE col = 'val') BEGIN INSERT ... END</code>
+                    </p>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(140px, 1fr));gap:6px;max-height:160px;overflow-y:auto;padding:8px;border:1px solid var(--line);border-radius:var(--radius);background:var(--bg-sunken)">
+                        @foreach (var col in rs.Columns)
+                        {
+                            <label class="check small" style="margin:0">
+                                <input type="checkbox" checked="@selectedInsertCols.Contains(col)" @onchange="e => ToggleInsertCol(col, (bool)(e.Value ?? false))" />
+                                <span>@col</span>
+                            </label>
+                        }
+                    </div>
+                </div>
+            </div>
+            <div class="modal-foot">
+                <button class="btn" @onclick="() => showSqlInsertModal = false">Cancel</button>
+                <button class="btn" @onclick="DownloadSqlInsert"><Icon Name="download" />Download .sql</button>
+                <button class="btn btn-primary" @onclick="CopySqlInsert"><Icon Name="copy" />Copy SQL</button>
+            </div>
+        </div>
+    </div>
 }
 
 @code {
@@ -481,6 +582,7 @@ else
         if (string.IsNullOrWhiteSpace(sql)) { Say("Nothing to run.", true); return; }
 
         running = true; Flash = null; runId = Guid.NewGuid(); lastRunSql = sql;
+        sortCol = null; sortAsc = true;
         await JS.InvokeVoidAsync("dbam.editorMarker", "main", 0, "");
         StateHasChanged();
         try
@@ -525,6 +627,45 @@ else
 
     private async Task DeleteSaved(Guid id) { await Workspace.DeleteAsync(UserId, id); await LoadSidePanels(); }
 
+    private int? sortCol;
+    private bool sortAsc = true;
+    private string gridFilter = "";
+
+    private void ToggleSort(int colIndex)
+    {
+        if (sortCol == colIndex)
+        {
+            if (sortAsc) sortAsc = false;
+            else { sortCol = null; sortAsc = true; }
+        }
+        else
+        {
+            sortCol = colIndex;
+            sortAsc = true;
+        }
+    }
+
+    private List<object?[]> GetProcessedRows(ResultSetDto rs)
+    {
+        IEnumerable<object?[]> rows = rs.Rows;
+        if (!string.IsNullOrWhiteSpace(gridFilter))
+        {
+            var filter = gridFilter.Trim();
+            rows = rows.Where(row => row.Any(cell => cell is not null &&
+                Convert.ToString(cell, System.Globalization.CultureInfo.InvariantCulture)?.Contains(filter, StringComparison.OrdinalIgnoreCase) == true));
+        }
+
+        if (sortCol.HasValue && sortCol.Value < rs.Columns.Count)
+        {
+            var idx = sortCol.Value;
+            rows = sortAsc
+                ? rows.OrderBy(r => r[idx], CellComparer.Instance)
+                : rows.OrderByDescending(r => r[idx], CellComparer.Instance);
+        }
+
+        return rows.ToList();
+    }
+
     private async Task ExportCsv()
     {
         if (last is null || activeResult < 0 || activeResult >= last.ResultSets.Count || Current is null) return;
@@ -532,18 +673,122 @@ else
         var auth = await Execution.AuthorizeExportAsync(Me, Current.DatabaseId, rs.Rows.Count, lastRunSql ?? "");
         if (!auth.Ok) { Say(auth.Error!, true); return; }
 
-        var sb = new StringBuilder();
-        sb.AppendLine(string.Join(",", rs.Columns.Select(Csv)));
-        foreach (var row in rs.Rows) sb.AppendLine(string.Join(",", row.Select(v => Csv(v is null ? "" : Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture)))));
-        await JS.InvokeVoidAsync("dbam.download", $"{Current.Name.Replace(' ', '_')}-{DateTime.Now:yyyyMMdd-HHmmss}.csv", sb.ToString(), "text/csv;charset=utf-8");
+        var csv = ExportFormatters.ToCsv(rs.Columns, rs.Rows);
+        await JS.InvokeVoidAsync("dbam.download", $"{Current.Name.Replace(' ', '_')}-{DateTime.Now:yyyyMMdd-HHmmss}.csv", csv, "text/csv;charset=utf-8");
     }
 
-    // Neutralise spreadsheet formula injection.
-    private static string Csv(string? value)
+    private async Task ExportExcel()
     {
-        value ??= "";
-        if (value.Length > 0 && "=+-@\t\r".Contains(value[0])) value = "'" + value;
-        return "\"" + value.Replace("\"", "\"\"") + "\"";
+        if (last is null || activeResult < 0 || activeResult >= last.ResultSets.Count || Current is null) return;
+        var rs = last.ResultSets[activeResult];
+        var auth = await Execution.AuthorizeExportAsync(Me, Current.DatabaseId, rs.Rows.Count, lastRunSql ?? "");
+        if (!auth.Ok) { Say(auth.Error!, true); return; }
+
+        var xml = ExportFormatters.ToExcelXml(rs.Columns, rs.Rows, Current.Name);
+        await JS.InvokeVoidAsync("dbam.download", $"{Current.Name.Replace(' ', '_')}-{DateTime.Now:yyyyMMdd-HHmmss}.xls", xml, "application/vnd.ms-excel;charset=utf-8");
+    }
+
+    private async Task ExportJson()
+    {
+        if (last is null || activeResult < 0 || activeResult >= last.ResultSets.Count || Current is null) return;
+        var rs = last.ResultSets[activeResult];
+        var auth = await Execution.AuthorizeExportAsync(Me, Current.DatabaseId, rs.Rows.Count, lastRunSql ?? "");
+        if (!auth.Ok) { Say(auth.Error!, true); return; }
+
+        var json = ExportFormatters.ToJson(rs.Columns, rs.Rows);
+        await JS.InvokeVoidAsync("dbam.download", $"{Current.Name.Replace(' ', '_')}-{DateTime.Now:yyyyMMdd-HHmmss}.json", json, "application/json;charset=utf-8");
+    }
+
+    private async Task CopyMarkdown()
+    {
+        if (last is null || activeResult < 0 || activeResult >= last.ResultSets.Count || Current is null) return;
+        var rs = last.ResultSets[activeResult];
+        var auth = await Execution.AuthorizeExportAsync(Me, Current.DatabaseId, rs.Rows.Count, lastRunSql ?? "");
+        if (!auth.Ok) { Say(auth.Error!, true); return; }
+
+        var md = ExportFormatters.ToMarkdown(rs.Columns, rs.Rows);
+        await JS.InvokeVoidAsync("dbam.copy", md);
+        Say("Markdown table copied to clipboard.");
+    }
+
+    private bool showSqlInsertModal;
+    private string sqlInsertTableName = "Products";
+    private HashSet<string> selectedInsertCols = new(StringComparer.OrdinalIgnoreCase);
+
+    private void OpenSqlInsertDialog()
+    {
+        if (last is null || activeResult < 0 || activeResult >= last.ResultSets.Count) return;
+        sqlInsertTableName = ExportFormatters.InferTableName(lastRunSql, "Products");
+        selectedInsertCols.Clear();
+        showSqlInsertModal = true;
+    }
+
+    private void ToggleInsertCol(string col, bool check)
+    {
+        if (check) selectedInsertCols.Add(col);
+        else selectedInsertCols.Remove(col);
+    }
+
+    private async Task CopySqlInsert()
+    {
+        if (last is null || activeResult < 0 || activeResult >= last.ResultSets.Count || Current is null) return;
+        var rs = last.ResultSets[activeResult];
+        var auth = await Execution.AuthorizeExportAsync(Me, Current.DatabaseId, rs.Rows.Count, lastRunSql ?? "");
+        if (!auth.Ok) { Say(auth.Error!, true); return; }
+
+        var sql = ExportFormatters.ToSqlInsert(rs.Columns, rs.Rows, sqlInsertTableName, selectedInsertCols);
+        await JS.InvokeVoidAsync("dbam.copy", sql);
+        showSqlInsertModal = false;
+        Say("SQL INSERT statements copied to clipboard.");
+    }
+
+    private async Task DownloadSqlInsert()
+    {
+        if (last is null || activeResult < 0 || activeResult >= last.ResultSets.Count || Current is null) return;
+        var rs = last.ResultSets[activeResult];
+        var auth = await Execution.AuthorizeExportAsync(Me, Current.DatabaseId, rs.Rows.Count, lastRunSql ?? "");
+        if (!auth.Ok) { Say(auth.Error!, true); return; }
+
+        var sql = ExportFormatters.ToSqlInsert(rs.Columns, rs.Rows, sqlInsertTableName, selectedInsertCols);
+        var clean = sqlInsertTableName.Trim().Trim('[', ']').Replace("]", "").Replace(".", "_");
+        var fileName = $"{clean}-insert-{DateTime.Now:yyyyMMdd-HHmmss}.sql";
+        await JS.InvokeVoidAsync("dbam.download", fileName, sql, "text/plain;charset=utf-8");
+        showSqlInsertModal = false;
+        Say("SQL INSERT file downloaded.");
+    }
+
+    private async Task CopyCell(object? val)
+    {
+        var str = val is null ? "NULL" : Convert.ToString(val, System.Globalization.CultureInfo.InvariantCulture) ?? "";
+        await JS.InvokeVoidAsync("dbam.copy", str);
+        Say($"Copied cell: {(str.Length > 40 ? str[..40] + "…" : str)}");
+    }
+
+    private sealed class CellComparer : IComparer<object?>
+    {
+        public static readonly CellComparer Instance = new();
+        public int Compare(object? x, object? y)
+        {
+            if (x is null && y is null) return 0;
+            if (x is null) return -1;
+            if (y is null) return 1;
+
+            if (x is IComparable cx && y is IComparable cy && x.GetType() == y.GetType())
+            {
+                return cx.CompareTo(cy);
+            }
+
+            var sx = Convert.ToString(x, System.Globalization.CultureInfo.InvariantCulture);
+            var sy = Convert.ToString(y, System.Globalization.CultureInfo.InvariantCulture);
+
+            if (double.TryParse(sx, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var dx) &&
+                double.TryParse(sy, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var dy))
+            {
+                return dx.CompareTo(dy);
+            }
+
+            return string.Compare(sx, sy, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     public async ValueTask DisposeAsync()

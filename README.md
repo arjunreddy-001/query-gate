@@ -45,16 +45,17 @@ Full usage documentation: [docs/USER-GUIDE.md](./docs/USER-GUIDE.md). Admin quic
 ## What's included
 
 - Custom-designed UI with light/dark themes, role-based navigation, idle timeout, notifications.
-- Query workspace: Monaco editor with schema-aware completion, tabs, saved queries, history, formatting, dry-run (rollback), timeout, cancel, results grid, CSV export (needs `EXPORT`, audited).
+- Query workspace: Monaco editor with schema-aware completion, tabs, saved queries, history, formatting, dry-run (rollback), timeout, cancel, results grid with column sorting, row filtering, double-click cell copy, and multi-format export: CSV, Excel (.xls), JSON, Markdown table, and SQL INSERT statements (needs `EXPORT`, audited).
 - SQL gate (ScriptDom): blocks parse errors, `USE`, cross-database references and security DDL; maps statements to required permissions; confirms unfiltered UPDATE/DELETE.
 - Fail-closed auditing: the audit row is written before execution; failure to write blocks the query.
 - Access and script requests with approval, edit-before-approve, auto-run, expiry and reminders.
 - Admin: approvals, users, databases, permissions (allow/deny, time windows), access matrix, audit log, app logs, settings.
+- Email & Webhooks: in-UI SMTP server configuration with live test delivery and AES-256 encrypted passwords; team collaboration webhook alerts (Slack, Microsoft Teams, Zoho Cliq, Discord, generic webhooks) with event filtering and instant verification.
 - JWT API under `/api/v1` (login, refresh, logout, change-password, databases, effective access, execute, cancel).
 
 ## Limitations
 
-CSV is the only export format; no object-level permission scope; targets SQL Server; LocalDB is untested.
+No object-level permission scope; targets SQL Server; LocalDB is untested.
 
 ## AI Agent Skills (Cross-Platform)
 

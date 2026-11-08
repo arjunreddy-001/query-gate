@@ -100,7 +100,10 @@ On narrow screens the Objects, Saved and History panel starts closed. Use the pa
    - **Timeout**: override per run (limited by the admin maximum).
    - **Tabs** are remembered in your browser. **Saved queries** (up to 50 per database) and **History** are in the side panel.
 5. Results appear in a grid (the row cap applies); the **Messages** tab shows errors and row counts.
-6. **CSV export** is available if you hold the `EXPORT` permission.
+   - **Export menu**: hover over the compact **Export ▾** button to download as **CSV**, Excel spreadsheet (**Excel** `.xls`), or JSON array (**JSON**). You can also copy results directly as a **Markdown** table or open the **SQL INSERT…** dialog. All export options require the `EXPORT` permission and are audited.
+   - **SQL INSERT export**: automatically infers the target table name from your `FROM` clause (e.g. `[Products]`). You can select one or more duplicate check columns to wrap each row in an idempotent `IF NOT EXISTS (SELECT 1 FROM [Products] WHERE col1 = 'val1' AND col2 = 'val2') BEGIN INSERT ... END` block, preventing duplicates when inserting into other databases.
+   - **Grid filtering & sorting**: use the search box in the results toolbar to filter displayed rows in real time. Click any column header to sort ascending or descending.
+   - **Cell copy**: double-click any cell to copy its value to the clipboard.
 
 **What the SQL gate does for you**
 
@@ -182,6 +185,10 @@ Errors and warnings with correlation IDs. Users who hit an error see a correlati
 | Temporary password length                         | 16      |
 
 The cache card below the settings lets admins reload or clear cached object metadata per database or for all databases.
+
+**Email & SMTP:** configure outgoing mail settings (host, port, SSL/TLS, username, password, sender address) directly in the UI. Passwords are encrypted at rest with AES-256-GCM. Use the _Send test_ button to verify deliverability with live SMTP status feedback.
+
+**Collaboration webhooks:** configure instant webhook dispatches to Slack, Microsoft Teams, Zoho Cliq, Discord, or generic webhook receivers. Filter alerts by all events, requests only, or script executions only. Use the _Test_ button to verify end-to-end webhook delivery.
 
 The effective timeout is the lowest of the admin ceiling and the first available of: per-run override, per-user override, per-database default.
 

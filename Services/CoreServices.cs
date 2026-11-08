@@ -105,13 +105,90 @@ public sealed class SettingsService(IDbContextFactory<ApplicationDbContext> fact
     public async Task SetAsync(string key, string value)
     {
         if (!Definitions.ContainsKey(key)) throw new ArgumentException("Unknown setting.", nameof(key));
+        await SetRawAsync(key, value);
+    }
+
+    public async Task<string?> GetRawAsync(string key)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        var stored = await db.Settings.AsNoTracking().FirstOrDefaultAsync(s => s.Key == key);
+        return stored?.Value;
+    }
+
+    public async Task SetRawAsync(string key, string value)
+    {
         await using var db = await factory.CreateDbContextAsync();
         var existing = await db.Settings.FindAsync(key);
         if (existing is null) db.Settings.Add(new SettingEntry { Key = key, Value = value });
         else existing.Value = value;
         await db.SaveChangesAsync();
     }
+
+    public async Task<SmtpConfig> GetSmtpConfigAsync(CryptoService crypto, IConfiguration? fallback = null)
+    {
+        var host = await GetRawAsync("Smtp:Host");
+        var portStr = await GetRawAsync("Smtp:Port");
+        var sslStr = await GetRawAsync("Smtp:EnableSsl");
+        var user = await GetRawAsync("Smtp:User");
+        var encPwd = await GetRawAsync("Smtp:EncryptedPassword");
+        var from = await GetRawAsync("Smtp:From");
+
+        // Fallback to configuration if host is not configured in DB
+        if (string.IsNullOrWhiteSpace(host) && fallback is not null)
+        {
+            host = fallback["Smtp:Host"];
+            portStr ??= fallback["Smtp:Port"];
+            sslStr ??= fallback["Smtp:EnableSsl"];
+            user ??= fallback["Smtp:User"];
+            var rawFallbackPwd = fallback["Smtp:Password"];
+            from ??= fallback["Smtp:From"];
+
+            if (!string.IsNullOrWhiteSpace(host))
+            {
+                var port = int.TryParse(portStr, out var p) ? p : 587;
+                var ssl = !bool.TryParse(sslStr, out var s) || s;
+                return new SmtpConfig(host, port, ssl, user, rawFallbackPwd, from ?? "noreply@localhost", true, !string.IsNullOrEmpty(rawFallbackPwd));
+            }
+        }
+
+        var hasEncPwd = !string.IsNullOrWhiteSpace(encPwd);
+        string? decryptedPwd = null;
+        if (hasEncPwd)
+        {
+            try { decryptedPwd = crypto.Decrypt(encPwd!); }
+            catch { /* if key changed or invalid, handle gracefully */ }
+        }
+
+        var dbPort = int.TryParse(portStr, out var dp) ? dp : 587;
+        var dbSsl = !bool.TryParse(sslStr, out var ds) || ds;
+        var isConfigured = !string.IsNullOrWhiteSpace(host);
+        return new SmtpConfig(host ?? "", dbPort, dbSsl, user, decryptedPwd, from ?? "noreply@localhost", isConfigured, hasEncPwd);
+    }
+
+    public async Task SaveSmtpConfigAsync(CryptoService crypto, string host, int port, bool enableSsl, string? user, string? newPassword, string from)
+    {
+        await SetRawAsync("Smtp:Host", (host ?? "").Trim());
+        await SetRawAsync("Smtp:Port", port.ToString());
+        await SetRawAsync("Smtp:EnableSsl", enableSsl ? "true" : "false");
+        await SetRawAsync("Smtp:User", (user ?? "").Trim());
+        await SetRawAsync("Smtp:From", (from ?? "").Trim());
+        if (!string.IsNullOrEmpty(newPassword))
+        {
+            var encrypted = crypto.Encrypt(newPassword);
+            await SetRawAsync("Smtp:EncryptedPassword", encrypted);
+        }
+    }
 }
+
+public sealed record SmtpConfig(
+    string Host,
+    int Port,
+    bool EnableSsl,
+    string? User,
+    string? Password,
+    string From,
+    bool IsConfigured,
+    bool HasSavedPassword);
 
 public sealed class AuditService(IDbContextFactory<ApplicationDbContext> factory, ILogger<AuditService> logger)
 {

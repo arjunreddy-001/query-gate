@@ -22,6 +22,7 @@ builder.Services.AddScoped<IdentityRedirectManager>();
 builder.Services.AddScoped<AuthenticationStateProvider, IdentityRevalidatingAuthenticationStateProvider>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddMemoryCache();
+builder.Services.AddHttpClient();
 
 var dataProtectionPath = builder.Configuration["DataProtection:KeyPath"];
 if (!string.IsNullOrWhiteSpace(dataProtectionPath))
@@ -129,6 +130,7 @@ builder.Services.AddAuthorization(options => options.AddPolicy("AuditAccess", po
     policy.RequireAuthenticatedUser().AddRequirements(new AuditRequirement())));
 builder.Services.AddSingleton<ExecutionService>();
 builder.Services.AddSingleton<MetadataService>();
+builder.Services.AddSingleton<WebhookService>();
 builder.Services.AddSingleton<NotificationService>();
 builder.Services.AddSingleton<DatabaseAdminService>();
 builder.Services.AddSingleton<UserAdminService>();

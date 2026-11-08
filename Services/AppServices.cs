@@ -7,7 +7,13 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DbAccessManager.Services;
 
-public sealed class NotificationService(IDbContextFactory<ApplicationDbContext> factory, IConfiguration config, ILogger<NotificationService> logger)
+public sealed class NotificationService(
+    IDbContextFactory<ApplicationDbContext> factory,
+    IConfiguration config,
+    SettingsService settings,
+    CryptoService crypto,
+    WebhookService webhooks,
+    ILogger<NotificationService> logger)
 {
     public event Action<string, int>? UnreadChanged;
 
@@ -21,6 +27,10 @@ public sealed class NotificationService(IDbContextFactory<ApplicationDbContext> 
             await db.SaveChangesAsync();
             await PublishUnreadAsync(userId);
             if (!string.IsNullOrEmpty(email)) _ = Task.Run(() => SendEmailAsync(email, title, message));
+
+            // Broadcast to webhooks for significant workflow events
+            var eventType = ClassifyEvent(title);
+            _ = Task.Run(() => webhooks.BroadcastAsync(eventType, title, message, link));
         }
         catch (Exception ex)
         {
@@ -37,6 +47,13 @@ public sealed class NotificationService(IDbContextFactory<ApplicationDbContext> 
                          where r.Name == role && u.IsActive && ur.UserId != exceptUserId
                          select ur.UserId).ToListAsync();
         foreach (var id in ids) await NotifyAsync(id, title, message, link);
+    }
+
+    private static string ClassifyEvent(string title)
+    {
+        if (title.Contains("request", StringComparison.OrdinalIgnoreCase)) return "Requests";
+        if (title.Contains("executed", StringComparison.OrdinalIgnoreCase) || title.Contains("failed", StringComparison.OrdinalIgnoreCase)) return "Executions";
+        return "General";
     }
 
     public async Task<int> UnreadCountAsync(string userId)
@@ -74,19 +91,47 @@ public sealed class NotificationService(IDbContextFactory<ApplicationDbContext> 
 
     private async Task SendEmailAsync(string to, string subject, string body)
     {
-        var host = config["Smtp:Host"];
-        if (string.IsNullOrWhiteSpace(host)) return;
         try
         {
-            using var client = new SmtpClient(host, config.GetValue("Smtp:Port", 587)) { EnableSsl = config.GetValue("Smtp:EnableSsl", true) };
-            var user = config["Smtp:User"];
-            if (!string.IsNullOrEmpty(user)) client.Credentials = new NetworkCredential(user, config["Smtp:Password"]);
-            using var mail = new MailMessage(config["Smtp:From"] ?? "noreply@localhost", to, "[Query Gate] " + subject, body);
+            var smtp = await settings.GetSmtpConfigAsync(crypto, config);
+            if (!smtp.IsConfigured) return;
+
+            using var client = new SmtpClient(smtp.Host, smtp.Port) { EnableSsl = smtp.EnableSsl };
+            if (!string.IsNullOrEmpty(smtp.User))
+            {
+                client.Credentials = new NetworkCredential(smtp.User, smtp.Password ?? "");
+            }
+            using var mail = new MailMessage(smtp.From, to, "[Query Gate] " + subject, body);
             await client.SendMailAsync(mail);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Email delivery failed");
+            logger.LogWarning(ex, "Email delivery failed to {To}", to);
+        }
+    }
+
+    public async Task<OpResult> SendTestEmailAsync(string to)
+    {
+        if (string.IsNullOrWhiteSpace(to)) return new OpResult(false, "Recipient email address is required.");
+        try
+        {
+            var smtp = await settings.GetSmtpConfigAsync(crypto, config);
+            if (!smtp.IsConfigured) return new OpResult(false, "SMTP server is not configured. Enter the host and save settings.");
+
+            using var client = new SmtpClient(smtp.Host, smtp.Port) { EnableSsl = smtp.EnableSsl };
+            if (!string.IsNullOrEmpty(smtp.User))
+            {
+                client.Credentials = new NetworkCredential(smtp.User, smtp.Password ?? "");
+            }
+            using var mail = new MailMessage(smtp.From, to, "[Query Gate] Test notification",
+                $"This is a test notification from Query Gate to verify your SMTP email configuration.\n\nSent: {DateTimeOffset.UtcNow:u}\nHost: {smtp.Host}:{smtp.Port}\nSSL: {smtp.EnableSsl}\nSender: {smtp.From}");
+            await client.SendMailAsync(mail);
+            return new OpResult(true, Value: $"Test email successfully sent to {to}.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Test email failed for {To}", to);
+            return new OpResult(false, $"SMTP send failed: {ex.Message}");
         }
     }
 }

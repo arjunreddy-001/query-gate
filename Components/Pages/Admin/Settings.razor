@@ -4,11 +4,21 @@
 @inject SettingsService Cfg
 @inject AuditService AuditSvc
 @inject MetadataService Metadata
+@inject NotificationService Notifications
+@inject WebhookService Webhooks
+@inject CryptoService Crypto
+@inject IConfiguration Config
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 
 <PageTitle>Settings · Query Gate</PageTitle>
 
-<div class="page-head"><div><h1>Settings</h1><p>Global defaults and limits.</p></div></div>
+<div class="page-head">
+    <div>
+        <h1>Settings</h1>
+        <p>Global execution limits, security defaults, outbound email and collaboration webhooks.</p>
+    </div>
+</div>
+
 <Banner Text="@Flash" IsError="@FlashIsError" />
 
 @if (!ready)
@@ -17,48 +27,299 @@
 }
 else
 {
-    <div class="grid g2 settings-grid" style="align-items:start">
-        <div class="card">
-            <div class="card-head"><h3>General</h3></div>
-            <div class="card-pad">
-                @foreach (var (key, def) in SettingsService.Definitions)
-                {
+    <div class="tabs">
+        <button class="tab @(activeTab == "general" ? "active" : "")" @onclick='() => activeTab = "general"'>
+            General & Limits
+        </button>
+        <button class="tab @(activeTab == "email" ? "active" : "")" @onclick='() => activeTab = "email"'>
+            Email & SMTP
+            <span class="badge @(smtpConfig?.IsConfigured == true ? "ok" : "warn")">@(smtpConfig?.IsConfigured == true ? "Configured" : "Unset")</span>
+        </button>
+        <button class="tab @(activeTab == "webhooks" ? "active" : "")" @onclick='() => activeTab = "webhooks"'>
+            Webhooks & Alerts
+            <span class="badge">@webhooks.Count(w => w.IsEnabled) active</span>
+        </button>
+        <button class="tab @(activeTab == "cache" ? "active" : "")" @onclick='() => activeTab = "cache"'>
+            Metadata Cache
+            <span class="badge @(cacheEnabled ? "ok" : "warn")">@(cacheEnabled ? "Enabled" : "Disabled")</span>
+        </button>
+    </div>
+
+    @if (activeTab == "general")
+    {
+        <div class="grid g2" style="align-items:start;gap:16px">
+            <div class="card">
+                <div class="card-head"><h3>Query Execution & Limits</h3></div>
+                <div class="card-pad">
+                    <p class="muted small" style="margin-bottom:14px">Safeguards to prevent long-running queries or excessive concurrency from impacting managed database servers.</p>
                     <div class="field">
-                        <label>@def.Label</label>
-                        @if (def.Default is "true" or "false")
-                        {
-                            <select value="@Get(key)" @onchange="e => values[key] = e.Value?.ToString() ?? def.Default"><option value="true">Yes</option><option value="false">No</option></select>
-                        }
-                        else
-                        {
-                            <input type="text" value="@Get(key)" @onchange="e => values[key] = e.Value?.ToString() ?? def.Default" />
-                        }
+                        <label>Default Query Timeout (seconds)</label>
+                        <input type="number" min="1" max="3600" value="@Get("DefaultTimeoutSeconds")" @onchange='e => values["DefaultTimeoutSeconds"] = e.Value?.ToString() ?? "30"' />
                     </div>
-                }
-                <button class="btn btn-primary" @onclick="Save">Save settings</button>
+                    <div class="field">
+                        <label>Maximum Timeout Ceiling (seconds)</label>
+                        <input type="number" min="1" max="7200" value="@Get("MaxTimeoutSeconds")" @onchange='e => values["MaxTimeoutSeconds"] = e.Value?.ToString() ?? "300"' />
+                    </div>
+                    <div class="field">
+                        <label>Default Result Row Limit</label>
+                        <input type="number" min="1" max="100000" value="@Get("DefaultMaxRows")" @onchange='e => values["DefaultMaxRows"] = e.Value?.ToString() ?? "1000"' />
+                    </div>
+                    <div class="grid g2" style="gap:8px">
+                        <div class="field">
+                            <label>Concurrent Queries / User</label>
+                            <input type="number" min="1" max="20" value="@Get("MaxConcurrentPerUser")" @onchange='e => values["MaxConcurrentPerUser"] = e.Value?.ToString() ?? "3"' />
+                        </div>
+                        <div class="field">
+                            <label>Concurrent Queries / DB</label>
+                            <input type="number" min="1" max="50" value="@Get("MaxConcurrentPerDatabase")" @onchange='e => values["MaxConcurrentPerDatabase"] = e.Value?.ToString() ?? "10"' />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stack" style="gap:16px">
+                <div class="card">
+                    <div class="card-head"><h3>Security & Request Governance</h3></div>
+                    <div class="card-pad">
+                        <p class="muted small" style="margin-bottom:14px">Approval rules, password generator defaults, and access duration notifications.</p>
+                        <div class="field">
+                            <label>Allow Self-Approval for Requests</label>
+                            <select value="@Get("AllowSelfApproval")" @onchange='e => values["AllowSelfApproval"] = e.Value?.ToString() ?? "false"'>
+                                <option value="false">No (Requires a different administrator)</option>
+                                <option value="true">Yes (Admins can approve own requests)</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label>Temporary Password Length</label>
+                            <input type="number" min="12" max="64" value="@Get("PasswordResetLength")" @onchange='e => values["PasswordResetLength"] = e.Value?.ToString() ?? "16"' />
+                        </div>
+                        <div class="field">
+                            <label>Expiry Reminder Window (hours before expiration)</label>
+                            <input type="number" min="1" max="168" value="@Get("ExpiryReminderHours")" @onchange='e => values["ExpiryReminderHours"] = e.Value?.ToString() ?? "24"' />
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-head"><h3>Workspace History</h3></div>
+                    <div class="card-pad">
+                        <div class="field">
+                            <label>Query History Entries Kept per User</label>
+                            <input type="number" min="10" max="1000" value="@Get("HistoryLimit")" @onchange='e => values["HistoryLimit"] = e.Value?.ToString() ?? "100"' />
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
+        <div style="margin-top:16px">
+            <button class="btn btn-primary" @onclick="Save">Save all general settings</button>
+        </div>
+    }
+    else if (activeTab == "email")
+    {
+        <div class="grid g2" style="align-items:start;gap:16px">
+            <div class="card">
+                <div class="card-head cache-head">
+                    <h3>Outgoing SMTP Server</h3>
+                    <span class="badge @(smtpConfig?.IsConfigured == true ? "ok" : "warn")">@(smtpConfig?.IsConfigured == true ? "Configured" : "Not configured")</span>
+                </div>
+                <div class="card-pad">
+                    <p class="muted small" style="margin-bottom:14px">Query Gate sends transactional emails for access requests, approval decisions, script executions, and time-bound grant expiration reminders. Passwords are encrypted at rest with AES-256-GCM.</p>
+                    <div class="field">
+                        <label>SMTP Host</label>
+                        <input type="text" placeholder="e.g. smtp.office365.com, smtp.gmail.com" @bind="smtpHost" />
+                    </div>
+                    <div class="grid g2" style="gap:8px">
+                        <div class="field">
+                            <label>Port</label>
+                            <input type="number" min="1" max="65535" @bind="smtpPort" />
+                        </div>
+                        <div class="field">
+                            <label>Enable SSL/TLS</label>
+                            <select @bind="smtpEnableSsl">
+                                <option value="true">Yes (SSL/TLS / STARTTLS)</option>
+                                <option value="false">No (Plaintext)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label>Username (optional)</label>
+                        <input type="text" placeholder="user@example.com" @bind="smtpUser" />
+                    </div>
+                    <div class="field">
+                        <label>Password @(smtpConfig?.HasSavedPassword == true ? "(Saved — leave blank to keep unchanged)" : "(optional)")</label>
+                        <input type="password" placeholder="@(smtpConfig?.HasSavedPassword == true ? "••••••••" : "Enter SMTP password")" @bind="smtpPassword" />
+                    </div>
+                    <div class="field">
+                        <label>Sender Address (From)</label>
+                        <input type="email" placeholder="noreply@example.com" @bind="smtpFrom" />
+                    </div>
+                    <div style="margin-top:14px">
+                        <button class="btn btn-primary" @onclick="SaveSmtp">Save SMTP configuration</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-head"><h3>Test Email Delivery</h3></div>
+                <div class="card-pad">
+                    <p class="muted small">Send an immediate test email to verify that your SMTP host, credentials, port, and security settings are functioning properly.</p>
+                    <div class="field">
+                        <label>Recipient Email Address</label>
+                        <input type="email" placeholder="recipient@example.com" @bind="testEmailRecipient" />
+                    </div>
+                    <div style="margin-top:12px">
+                        <button class="btn btn-sm btn-primary" disabled="@(smtpTesting || smtpConfig?.IsConfigured != true)" @onclick="SendTestEmail">
+                            <Icon Name="send" />@(smtpTesting ? "Sending test email…" : "Send test email")
+                        </button>
+                    </div>
+                    @if (smtpConfig?.IsConfigured != true)
+                    {
+                        <div class="alert warn small" style="margin-top:14px">
+                            Configure and save your SMTP host on the left before sending a test message.
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+    else if (activeTab == "webhooks")
+    {
         <div class="card">
             <div class="card-head cache-head">
-                <h3>Object metadata cache</h3>
-                <span class="badge @(cacheEnabled ? "ok" : "warn")">@(cacheEnabled ? "Enabled" : "Disabled")</span>
+                <div>
+                    <h3 style="margin:0">Collaboration Webhooks</h3>
+                    <span class="muted small">Send instant alerts to Slack, Microsoft Teams, Zoho Cliq, Discord, or generic endpoints.</span>
+                </div>
+                <button class="btn btn-sm btn-primary" @onclick="() => showAddWebhook = !showAddWebhook">
+                    <Icon Name="plus" />@(showAddWebhook ? "Cancel" : "Add webhook")
+                </button>
+            </div>
+            <div class="card-pad">
+                @if (showAddWebhook)
+                {
+                    <div class="card" style="margin-bottom:16px;background:var(--bg-elev);border:1px solid var(--line-strong)">
+                        <div class="card-pad">
+                            <h4 style="margin:0 0 12px 0;font-size:13px">New Webhook Subscription</h4>
+                            <div class="field">
+                                <label>Name</label>
+                                <input type="text" placeholder="e.g. #db-approvals in Slack, DevOps Teams" @bind="newHookName" />
+                            </div>
+                            <div class="grid g2" style="gap:10px">
+                                <div class="field">
+                                    <label>Platform</label>
+                                    <select @bind="newHookPlatform">
+                                        @foreach (var p in WebhookService.Platforms)
+                                        {
+                                            <option value="@p">@WebhookService.PlatformLabel(p)</option>
+                                        }
+                                    </select>
+                                </div>
+                                <div class="field">
+                                    <label>Events Filter</label>
+                                    <select @bind="newHookFilter">
+                                        @foreach (var f in WebhookService.EventFilters)
+                                        {
+                                            <option value="@f">@WebhookService.EventFilterLabel(f)</option>
+                                        }
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label>Webhook URL</label>
+                                <input type="url" placeholder="https://hooks.slack.com/services/..." @bind="newHookUrl" />
+                            </div>
+                            <div class="row-inline" style="gap:8px;margin-top:10px">
+                                <button class="btn btn-sm btn-primary" @onclick="SaveNewWebhook">Save webhook</button>
+                                <button class="btn btn-sm" @onclick="() => showAddWebhook = false">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                }
+
+                @if (webhooks.Count == 0)
+                {
+                    <div class="card empty" style="border:1px dashed var(--line);margin:10px 0">
+                        <Icon Name="bell" />
+                        <h3>No webhooks configured</h3>
+                        <p>Receive notifications directly in Slack, Microsoft Teams, Zoho Cliq, or Discord whenever a team member requests elevated database access or executes a script.</p>
+                        <button class="btn btn-sm btn-primary" @onclick="() => showAddWebhook = true"><Icon Name="plus" />Add your first webhook</button>
+                    </div>
+                }
+                else
+                {
+                    <div class="table-wrap"><table>
+                        <thead>
+                            <tr>
+                                <th>Name & Destination</th>
+                                <th>Platform</th>
+                                <th>Event Filter</th>
+                                <th>Status</th>
+                                <th class="right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var hook in webhooks)
+                            {
+                                <tr>
+                                    <td>
+                                        <b style="font-size:0.9rem">@hook.Name</b>
+                                        <div class="faint small" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="@hook.Url">@hook.Url</div>
+                                    </td>
+                                    <td><span class="badge">@WebhookService.PlatformLabel(hook.Platform)</span></td>
+                                    <td><span class="small">@WebhookService.EventFilterLabel(hook.EventFilter)</span></td>
+                                    <td><span class="badge @(hook.IsEnabled ? "ok" : "warn")">@(hook.IsEnabled ? "Active" : "Disabled")</span></td>
+                                    <td class="right nowrap">
+                                        <button class="btn btn-sm" title="Send test alert to this webhook" disabled="@hookTesting" @onclick="() => TestWebhook(hook)">
+                                            <Icon Name="send" />Test
+                                        </button>
+                                        <button class="btn btn-sm" @onclick="() => ToggleWebhook(hook)">
+                                            @(hook.IsEnabled ? "Disable" : "Enable")
+                                        </button>
+                                        <button class="btn btn-sm" style="color:var(--bad)" @onclick="() => DeleteWebhook(hook.Id)">
+                                            Delete
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table></div>
+                }
+            </div>
+        </div>
+    }
+    else if (activeTab == "cache")
+    {
+        <div class="card">
+            <div class="card-head cache-head">
+                <div>
+                    <h3 style="margin:0">Object Metadata Cache</h3>
+                    <span class="muted small">Caches tables, views, procedures and column definitions for Monaco autocomplete and the schema explorer.</span>
+                </div>
                 <div class="actions">
-                    <button class="btn btn-sm" @onclick="ToggleCache">@(cacheEnabled ? "Disable" : "Enable")</button>
+                    <button class="btn btn-sm" @onclick="ToggleCache">@(cacheEnabled ? "Disable cache" : "Enable cache")</button>
                     <button class="btn btn-sm" @onclick="ClearAll">Clear all</button>
                     <button class="btn btn-sm btn-primary" disabled="@busy" @onclick="ReloadAll"><Icon Name="refresh" />Reload all</button>
                 </div>
             </div>
             <div class="card-pad">
-                <p class="muted small">The object explorer and autocomplete read table, view and procedure names from this cache (shared by all users, expires after the TTL above). When disabled, every workspace load queries the database directly.</p>
                 <div class="table-wrap"><table>
-                    <thead><tr><th>Database</th><th>Environment</th><th>Cached</th><th>Objects</th><th></th></tr></thead>
+                    <thead>
+                        <tr>
+                            <th>Database</th>
+                            <th>Environment</th>
+                            <th>Cached Since</th>
+                            <th>Objects Count</th>
+                            <th class="right">Actions</th>
+                        </tr>
+                    </thead>
                     <tbody>
                     @foreach (var d in dbs)
                     {
                         var info = status.FirstOrDefault(s => s.DatabaseId == d.Id);
                         <tr>
-                            <td>@d.Name</td>
+                            <td><b>@d.Name</b></td>
                             <td><span class="badge @EnvClass(d.Environment)">@d.Environment</span></td>
                             <td>@(info is null ? "-" : Ago(info.LoadedAt))</td>
                             <td>@(info?.ObjectCount.ToString() ?? "-")</td>
@@ -72,19 +333,40 @@ else
                 </table></div>
             </div>
         </div>
-    </div>
+    }
 }
 
 @code {
+    private string activeTab = "general";
     private Dictionary<string, string> values = [];
     private List<ManagedDatabase> dbs = [];
     private IReadOnlyList<MetadataCacheEntry> status = [];
+    private SmtpConfig? smtpConfig;
+    private string smtpHost = "";
+    private int smtpPort = 587;
+    private bool smtpEnableSsl = true;
+    private string smtpUser = "";
+    private string smtpPassword = "";
+    private string smtpFrom = "noreply@localhost";
+    private string testEmailRecipient = "";
+    private bool smtpTesting;
+
+    private List<WebhookSubscription> webhooks = [];
+    private bool showAddWebhook;
+    private string newHookName = "";
+    private string newHookPlatform = "Slack";
+    private string newHookUrl = "";
+    private string newHookFilter = "All";
+    private bool hookTesting;
+
     private bool ready, cacheEnabled, busy;
 
     protected override async Task OnLoadAsync()
     {
         values = await Cfg.GetAllAsync();
         await LoadCache();
+        await LoadSmtpConfig();
+        await LoadWebhooks();
         ready = true;
     }
 
@@ -96,6 +378,23 @@ else
         dbs = await db.ManagedDatabases.AsNoTracking().OrderBy(d => d.Name).ToListAsync();
         cacheEnabled = await Metadata.IsEnabledAsync();
         status = Metadata.Status();
+    }
+
+    private async Task LoadSmtpConfig()
+    {
+        smtpConfig = await Cfg.GetSmtpConfigAsync(Crypto, Config);
+        smtpHost = smtpConfig.Host;
+        smtpPort = smtpConfig.Port;
+        smtpEnableSsl = smtpConfig.EnableSsl;
+        smtpUser = smtpConfig.User ?? "";
+        smtpPassword = "";
+        smtpFrom = smtpConfig.From;
+        if (string.IsNullOrWhiteSpace(testEmailRecipient)) testEmailRecipient = Me.UserName.Contains('@') ? Me.UserName : "";
+    }
+
+    private async Task LoadWebhooks()
+    {
+        webhooks = await Webhooks.ListAsync();
     }
 
     private async Task Save()
@@ -111,6 +410,74 @@ else
         await AuditSvc.TryWriteAsync(Me, "Settings", "Updated", "Success");
         await LoadCache();
         Say("Settings saved.");
+    }
+
+    private async Task SaveSmtp()
+    {
+        if (smtpPort <= 0 || smtpPort > 65535) { Say("Port must be between 1 and 65535.", true); return; }
+        await Cfg.SaveSmtpConfigAsync(Crypto, smtpHost, smtpPort, smtpEnableSsl, smtpUser, smtpPassword, smtpFrom);
+        await AuditSvc.TryWriteAsync(Me, "Settings", "SmtpConfigured", "Success", $"Host: {smtpHost}:{smtpPort}");
+        await LoadSmtpConfig();
+        Say("SMTP configuration saved.");
+    }
+
+    private async Task SendTestEmail()
+    {
+        if (string.IsNullOrWhiteSpace(testEmailRecipient)) { Say("Please provide a recipient email address.", true); return; }
+        smtpTesting = true; StateHasChanged();
+        var result = await Notifications.SendTestEmailAsync(testEmailRecipient);
+        smtpTesting = false;
+        if (result.Ok) Say(result.Value ?? "Test email sent successfully.");
+        else Say(result.Error ?? "Failed to send test email.", true);
+    }
+
+    private async Task SaveNewWebhook()
+    {
+        if (string.IsNullOrWhiteSpace(newHookName)) { Say("Please enter a webhook name.", true); return; }
+        if (string.IsNullOrWhiteSpace(newHookUrl) || !Uri.TryCreate(newHookUrl, UriKind.Absolute, out _))
+        {
+            Say("Please enter a valid absolute URL.", true);
+            return;
+        }
+
+        var hook = new WebhookSubscription
+        {
+            Name = newHookName.Trim(),
+            Platform = newHookPlatform,
+            Url = newHookUrl.Trim(),
+            EventFilter = newHookFilter,
+            IsEnabled = true
+        };
+
+        await Webhooks.SaveAsync(hook);
+        await AuditSvc.TryWriteAsync(Me, "Settings", "WebhookCreated", "Success", $"{hook.Name} ({hook.Platform})");
+        newHookName = ""; newHookUrl = ""; showAddWebhook = false;
+        await LoadWebhooks();
+        Say("Webhook saved.");
+    }
+
+    private async Task TestWebhook(WebhookSubscription hook)
+    {
+        hookTesting = true; StateHasChanged();
+        var result = await Webhooks.TestWebhookAsync(hook);
+        hookTesting = false;
+        if (result.Ok) Say($"Webhook delivered successfully: {result.Value}");
+        else Say(result.Error ?? "Webhook delivery failed.", true);
+    }
+
+    private async Task ToggleWebhook(WebhookSubscription hook)
+    {
+        await Webhooks.ToggleEnabledAsync(hook.Id);
+        await LoadWebhooks();
+        Say(hook.IsEnabled ? "Webhook disabled." : "Webhook enabled.");
+    }
+
+    private async Task DeleteWebhook(Guid id)
+    {
+        await Webhooks.DeleteAsync(id);
+        await AuditSvc.TryWriteAsync(Me, "Settings", "WebhookDeleted", "Success", id.ToString());
+        await LoadWebhooks();
+        Say("Webhook removed.");
     }
 
     private async Task ToggleCache()

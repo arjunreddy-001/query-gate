@@ -1100,7 +1100,10 @@ td.wrap {
   margin-bottom: 16px;
 }
 .tab {
-  padding: 6px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
   border: 0;
   background: none;
   color: var(--text-dim);
@@ -1109,6 +1112,16 @@ td.wrap {
   cursor: pointer;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
+  white-space: nowrap;
+}
+.tab svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.tab .badge {
+  font-size: 0.72rem;
+  padding: 1px 6px;
 }
 .tab.active {
   color: var(--brand-ink);
@@ -1402,6 +1415,70 @@ td.wrap {
   max-width: 380px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.results th.sortable:hover {
+  background: color-mix(in srgb, var(--brand-soft) 70%, var(--bg-sunken));
+  color: var(--text);
+}
+.export-dropdown {
+  position: relative;
+  display: inline-block;
+}
+.export-dropdown-menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 2px);
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  min-width: 170px;
+  z-index: 1000;
+  padding: 4px 0;
+}
+.export-dropdown-menu::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: 0;
+  right: 0;
+  height: 6px;
+}
+.export-dropdown:hover .export-dropdown-menu,
+.export-dropdown:focus-within .export-dropdown-menu {
+  display: block;
+}
+.export-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 14px;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font-size: 0.82rem;
+  cursor: pointer;
+  text-align: left;
+}
+.export-dropdown-item svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+.export-dropdown-item:hover {
+  background: var(--bg-hover);
+  color: var(--brand);
+}
+.export-dropdown-item:hover svg {
+  color: var(--brand);
+}
+.export-dropdown-divider {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 4px 0;
 }
 .null {
   color: var(--text-faint);
