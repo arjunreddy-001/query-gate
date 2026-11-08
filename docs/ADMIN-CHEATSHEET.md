@@ -63,7 +63,7 @@ Default grants added at registration:
 | Object metadata cache (on/off) / TTL       | On / 10 min  |
 | Temporary password length                  | 16           |
 
-**Metadata cache:** the _Object metadata cache_ card on the Settings page shows what is cached per database. Use _Enable/Disable_, per-database _Reload_ / _Clear_, or _Reload all_ / _Clear all_. All actions are audited.
+**Metadata cache:** the _Object metadata cache_ card on the Settings page shows what is cached per database, with the environment in a separate column. Use _Enable/Disable_, per-database _Reload_ / _Clear_, or _Reload all_ / _Clear all_. All actions are audited.
 
 ## 5. Who can see what
 

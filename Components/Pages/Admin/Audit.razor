@@ -12,14 +12,14 @@
     <div class="actions"><button class="btn" @onclick="Export"><Icon Name="download" />Export CSV</button></div>
 </div>
 
-<div class="toolbar">
+<div class="toolbar audit-toolbar">
     <div class="audit-key-filters">
-        <input type="search" placeholder="User…" @bind="user" @onkeydown="OnFilterKeyDown" />
-        <select @bind="category"><option value="">All categories</option><option>Query</option><option>Auth</option><option>Request</option><option>User</option><option>Permission</option><option>Database</option><option>Settings</option><option>Export</option></select>
-        <select @bind="outcome"><option value="">All outcomes</option><option>Success</option><option>Failed</option><option>Denied</option><option>Cancelled</option><option>Timeout</option></select>
-        <input type="date" @bind="from" /><input type="date" @bind="to" />
+        <input type="search" aria-label="User" placeholder="User…" @bind="user" @bind:event="oninput" @onkeydown="OnFilterKeyDown" />
+        <select aria-label="Category" @bind="category"><option value="">All categories</option><option>Query</option><option>Auth</option><option>Request</option><option>User</option><option>Permission</option><option>Database</option><option>Settings</option><option>Export</option></select>
+        <select aria-label="Outcome" @bind="outcome"><option value="">All outcomes</option><option>Success</option><option>Failed</option><option>Denied</option><option>Cancelled</option><option>Timeout</option></select>
+        <input type="date" aria-label="From date" @bind="from" /><input type="date" aria-label="To date" @bind="to" />
     </div>
-    <input class="grow" type="search" placeholder="Search SQL / details…" @bind="text" @onkeydown="OnFilterKeyDown" />
+    <input class="grow" type="search" aria-label="Search SQL or details" placeholder="Search SQL / details…" @bind="text" @bind:event="oninput" @onkeydown="OnFilterKeyDown" />
     <button class="btn btn-primary" @onclick="Load">Filter</button>
 </div>
 

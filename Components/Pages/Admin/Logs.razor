@@ -8,8 +8,8 @@
 <div class="page-head"><div><h1>Application logs</h1><p>Errors and warnings, correlated by request ID.</p></div></div>
 
 <div class="toolbar logs-toolbar">
-    <select class="logs-level" @bind="level" @bind:after="Load"><option value="">All levels</option><option>Error</option><option>Warning</option><option>Information</option></select>
-    <input class="logs-search" type="search" placeholder="Search message or correlation ID…" @bind="search" @onkeydown="OnSearchKeyDown" />
+    <select class="logs-level" aria-label="Level" @bind="level" @bind:after="Load"><option value="">All levels</option><option>Error</option><option>Warning</option><option>Information</option></select>
+    <input class="logs-search" type="search" aria-label="Search message or correlation ID" placeholder="Search message or correlation ID…" @bind="search" @bind:event="oninput" @onkeydown="OnSearchKeyDown" />
 </div>
 
 <div class="card">

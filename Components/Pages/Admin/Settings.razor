@@ -17,7 +17,7 @@
 }
 else
 {
-    <div class="grid g2" style="align-items:start">
+    <div class="grid g2 settings-grid" style="align-items:start">
         <div class="card">
             <div class="card-head"><h3>General</h3></div>
             <div class="card-pad">
@@ -40,7 +40,7 @@ else
         </div>
 
         <div class="card">
-            <div class="card-head">
+            <div class="card-head cache-head">
                 <h3>Object metadata cache</h3>
                 <span class="badge @(cacheEnabled ? "ok" : "warn")">@(cacheEnabled ? "Enabled" : "Disabled")</span>
                 <div class="actions">
@@ -52,13 +52,14 @@ else
             <div class="card-pad">
                 <p class="muted small">The object explorer and autocomplete read table, view and procedure names from this cache (shared by all users, expires after the TTL above). When disabled, every workspace load queries the database directly.</p>
                 <div class="table-wrap"><table>
-                    <thead><tr><th>Database</th><th>Cached</th><th>Objects</th><th></th></tr></thead>
+                    <thead><tr><th>Database</th><th>Environment</th><th>Cached</th><th>Objects</th><th></th></tr></thead>
                     <tbody>
                     @foreach (var d in dbs)
                     {
                         var info = status.FirstOrDefault(s => s.DatabaseId == d.Id);
                         <tr>
-                            <td>@d.Name <span class="badge @EnvClass(d.Environment)">@d.Environment</span></td>
+                            <td>@d.Name</td>
+                            <td><span class="badge @EnvClass(d.Environment)">@d.Environment</span></td>
                             <td>@(info is null ? "-" : Ago(info.LoadedAt))</td>
                             <td>@(info?.ObjectCount.ToString() ?? "-")</td>
                             <td class="right nowrap">
