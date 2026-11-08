@@ -2,6 +2,8 @@
 
 Query Gate lets people run SQL against registered SQL Server databases **without ever seeing the database credentials**. Every query passes a SQL gate, is permission-checked, and is written to an audit log _before_ it runs.
 
+The public homepage links to sign-in and `/documentation`. After signing in, the dashboard is at `/dashboard`. On narrow screens, use the navigation button to open the menu. For hosting options, see the [deployment guide](./DEPLOYMENT.md).
+
 ## 1. Roles
 
 | Role          | Typical use    | Can do                                                                      |
@@ -74,6 +76,8 @@ Permissions flagged as _dangerous_ (CREATE/ALTER/DROP/TRUNCATE, DYNAMIC_SQL, LIN
 Overview of your accessible databases, pending requests and recent activity.
 
 ### Query workspace (_Query workspace_)
+
+On narrow screens the Objects, Saved and History panel starts closed. Use the panel button next to the query tabs to open or close it.
 
 1. Choose a **database** (environment badge shows Dev/QA/Prod).
 2. Write SQL in the editor (autocomplete knows tables, views, columns and aliases). The **object explorer** on the left lists tables/views/procedures.

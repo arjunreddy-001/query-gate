@@ -1,0 +1,28 @@
+services:
+  query-gate:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8443:8443"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: https://+:8443
+      ASPNETCORE_HTTPS_PORTS: "8443"
+      ASPNETCORE_Kestrel__Certificates__Default__Path: /certs/query-gate.pfx
+      ASPNETCORE_Kestrel__Certificates__Default__Password: ${TLS_CERT_PASSWORD:?Set TLS_CERT_PASSWORD in .env}
+      ConnectionStrings__DefaultConnection: ${DB_CONNECTION_STRING:?Set DB_CONNECTION_STRING in .env}
+      Encryption__Key: ${ENCRYPTION_KEY:?Set ENCRYPTION_KEY in .env}
+      Jwt__Key: ${JWT_KEY:?Set JWT_KEY in .env}
+      BootstrapAdmin__Email: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BootstrapAdmin__Password: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      Database__ApplyMigrationsOnStartup: ${APPLY_MIGRATIONS:-false}
+      DataProtection__KeyPath: /var/query-gate/keys
+    volumes:
+      - data-protection-keys:/var/query-gate/keys
+      - type: bind
+        source: ${TLS_CERT_PATH:?Set TLS_CERT_PATH in .env}
+        target: /certs/query-gate.pfx
+        read_only: true
+
+volumes:
+  data-protection-keys:

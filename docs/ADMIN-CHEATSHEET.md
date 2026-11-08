@@ -2,6 +2,8 @@
 
 One-page reference for Query Gate administrators. Full details: [USER-GUIDE.md](./USER-GUIDE.md).
 
+For IIS, Azure App Service, Linux and Docker, see the [deployment guide](./DEPLOYMENT.md). The public `/documentation` page also provides deployment instructions.
+
 ## 1. Onboard a database and a user (5 steps)
 
 | #   | Where                                     | Action                                                                                                                 |

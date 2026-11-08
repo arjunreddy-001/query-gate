@@ -34,6 +34,7 @@ appsettings.Local.json
 appsettings.*.local.json
 .env
 .env.*
+!.env.example
 
 # Logs and temp files
 logs/

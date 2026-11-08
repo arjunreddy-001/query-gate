@@ -257,6 +257,7 @@ window.dbam = (function () {
   }
 
   return {
+    isNarrowViewport: () => window.matchMedia("(max-width: 860px)").matches,
     getTheme: () =>
       document.documentElement.getAttribute("data-theme") || "light",
     toggleTheme: function () {

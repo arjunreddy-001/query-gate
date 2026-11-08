@@ -19,12 +19,13 @@
 }
 else
 {
-<div id="query-ws" class="ws @(sideOpen ? "" : "side-hidden")">
-    <aside class="card ws-side">
+<div id="query-ws" class="ws @(sideOpen is null ? "side-auto" : sideOpen.Value ? "side-open" : "side-hidden")">
+    <aside id="workspace-panel" class="card ws-side">
         <div class="tabs" style="margin:0;padding:0 8px">
             <button class="tab @(side == "explorer" ? "active" : "")" @onclick='() => side = "explorer"'>Objects</button>
             <button class="tab @(side == "saved" ? "active" : "")" @onclick='() => SwitchSide("saved")'>Saved</button>
             <button class="tab @(side == "history" ? "active" : "")" @onclick='() => SwitchSide("history")'>History</button>
+            <button class="mobile-panel-close icon-btn sm" type="button" aria-label="Close workspace panel" @onclick="ToggleSide"><Icon Name="x" /></button>
         </div>
         <div class="scroll">
             @if (side == "explorer")
@@ -86,7 +87,7 @@ else
 
     <section class="ws-main">
         <div class="ws-tabs">
-            <button class="icon-btn sm" type="button" title="@(sideOpen ? "Hide panel" : "Show panel")" @onclick="() => sideOpen = !sideOpen"><Icon Name="list" /></button>
+            <button class="icon-btn sm" type="button" title="@(sideOpen == true ? "Hide panel" : "Show panel")" aria-label="@(sideOpen == true ? "Hide objects, saved queries and history" : "Show objects, saved queries and history")" aria-controls="workspace-panel" aria-expanded="@(sideOpen == true ? "true" : "false")" @onclick="ToggleSide"><Icon Name="list" /></button>
             @foreach (var t in tabs)
             {
                 <div class="ws-tab @(t.Id == activeId ? "active" : "")" @onclick="() => Activate(t.Id)">
@@ -213,7 +214,8 @@ else
     private List<QueryTab> tabs = [];
     private string activeId = "";
     private QueryTab? Current => tabs.FirstOrDefault(t => t.Id == activeId);
-    private bool loaded, running, dryRun, saving, initialized, maximized, sideOpen = true;
+    private bool loaded, running, dryRun, saving, initialized, maximized;
+    private bool? sideOpen;
     private int? timeout;
     private ExecutionResult? last;
     private int activeResult;
@@ -248,6 +250,11 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            sideOpen = !await JS.InvokeAsync<bool>("dbam.isNarrowViewport");
+            StateHasChanged();
+        }
         // Blazor renders (and fires firstRender) before the async load finishes, so initialise once data is available.
         if (initialized || !loaded || databases.Count == 0) return;
         initialized = true;
@@ -257,6 +264,7 @@ else
             if (stored.Success && stored.Value is not null)
                 tabs = JsonSerializer.Deserialize<List<QueryTab>>(stored.Value)?.Where(t => databases.Any(d => d.Id == t.DatabaseId)).ToList() ?? [];
         }
+
         catch { tabs = []; }
 
         if (tabs.Count == 0) tabs.Add(new QueryTab { DatabaseId = DbParam ?? databases[0].Id, Sql = "SELECT TOP 10 * FROM sys.objects;" });
@@ -269,6 +277,8 @@ else
         await OnDbChanged();
         StateHasChanged();
     }
+
+    private void ToggleSide() => sideOpen = sideOpen != true;
 
     private async Task OnDbChanged()
     {

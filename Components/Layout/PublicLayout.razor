@@ -1,0 +1,30 @@
+@inherits LayoutComponentBase
+
+<div class="public-site">
+    <header class="public-header">
+        <div class="public-header-inner">
+            <a class="brand public-brand" href="/">
+                <span class="brand-mark"><Icon Name="db" /></span>
+                <span>Query Gate</span>
+            </a>
+            <nav class="public-nav" aria-label="Main navigation">
+                <a href="/documentation">Documentation</a>
+                <a href="https://github.com/arjunreddy-001/query-gate">GitHub</a>
+                <button class="icon-btn" type="button" title="Toggle theme" aria-label="Toggle theme" data-theme-toggle>
+                    <span class="theme-sun"><Icon Name="sun" /></span><span class="theme-moon"><Icon Name="moon" /></span>
+                </button>
+                <AuthorizeView>
+                    <Authorized><a class="btn btn-primary" href="/dashboard">Dashboard</a></Authorized>
+                    <NotAuthorized><a class="btn btn-primary" href="/Account/Login">Sign in</a></NotAuthorized>
+                </AuthorizeView>
+            </nav>
+        </div>
+    </header>
+    <main>
+        @Body
+    </main>
+    <footer class="public-footer">
+        <span>Query Gate. Governed access to SQL Server.</span>
+        <a href="https://github.com/arjunreddy-001/query-gate">View on GitHub</a>
+    </footer>
+</div>

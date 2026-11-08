@@ -4,6 +4,8 @@ Blazor Server (.NET 10) tool that brokers access to SQL Server databases with a 
 
 ## Run
 
+For IIS, Azure App Service, Linux and Docker, see the [deployment guide](./docs/DEPLOYMENT.md). The application also provides a public homepage and documentation at `/documentation`.
+
 ### PowerShell (Windows)
 
 ```powershell
@@ -37,6 +39,8 @@ Full usage documentation: [docs/USER-GUIDE.md](./docs/USER-GUIDE.md). Admin quic
 | `Jwt:Key`                              | JWT signing key (random per process if unset, which invalidates tokens on restart)                                            |
 | `BootstrapAdmin__Email` / `__Password` | One-time first admin                                                                                                          |
 | `Smtp:*`                               | Optional email notifications                                                                                                  |
+| `Database:ApplyMigrationsOnStartup`    | Opt in to applying EF migrations at startup outside Development; use one instance at a time                                  |
+| `DataProtection:KeyPath`               | Optional persistent directory for ASP.NET Core data protection keys                                                           |
 
 ## What's included
 

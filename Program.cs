@@ -8,6 +8,7 @@ using DbAccessManager.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Server.Circuits;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -20,6 +21,14 @@ builder.Services.AddScoped<IdentityRedirectManager>();
 builder.Services.AddScoped<AuthenticationStateProvider, IdentityRevalidatingAuthenticationStateProvider>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddMemoryCache();
+
+var dataProtectionPath = builder.Configuration["DataProtection:KeyPath"];
+if (!string.IsNullOrWhiteSpace(dataProtectionPath))
+{
+    builder.Services.AddDataProtection()
+        .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionPath))
+        .SetApplicationName("QueryGate");
+}
 
 var jwtKey = TokenService.BuildKey(builder.Configuration);
 builder.Services.AddAuthentication(options =>
@@ -182,7 +191,7 @@ app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 app.MapHealthChecks("/health");
 app.MapAdditionalIdentityEndpoints();
 
-if (app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("Database:ApplyMigrationsOnStartup"))
 {
     await using var scope = app.Services.CreateAsyncScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
@@ -228,5 +237,3 @@ static async Task SeedAsync(IServiceProvider services, IConfiguration configurat
         if (!roleResult.Succeeded) throw new InvalidOperationException("The bootstrap administrator role could not be assigned.");
     }
 }
-
-

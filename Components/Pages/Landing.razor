@@ -1,0 +1,35 @@
+@page "/"
+@layout PublicLayout
+
+<PageTitle>Query Gate · Governed SQL access</PageTitle>
+
+<div class="landing-wrap">
+    <section class="landing-hero">
+        <div class="landing-copy">
+            <span class="landing-eyebrow"><Icon Name="shield" /> A safer way to work with SQL Server</span>
+            <h1>Give your team access.<br /><span>Keep the guardrails.</span></h1>
+            <p>Query Gate brings database access, approvals and auditing together in one workspace. Run the queries you need with controls built in.</p>
+            <div class="landing-actions">
+                <a class="btn btn-primary landing-button" href="/Account/Login">Sign in to Query Gate <Icon Name="chevron" /></a>
+                <a class="btn landing-button" href="/documentation">Explore documentation</a>
+            </div>
+            <div class="landing-note">Open source <span> / </span> Built for SQL Server <span> / </span> Powered by .NET</div>
+        </div>
+        <div class="landing-preview" aria-label="Query Gate workflow">
+            <div class="preview-top"><span class="preview-dot"></span><span class="preview-dot"></span><span class="preview-dot"></span><span class="preview-title">QUERY WORKSPACE</span></div>
+            <div class="preview-body">
+                <div class="preview-heading"><span class="preview-icon"><Icon Name="terminal" /></span><div><strong>SQL workspace</strong><small>One governed doorway to your data</small></div></div>
+                <div class="preview-code"><span>01</span> SELECT *<br /><span>02</span> FROM dbo.Orders<br /><span>03</span> WHERE Status = 'Open';</div>
+                <div class="preview-check"><Icon Name="check" /><div><strong>Checked before execution</strong><small>Permissions verified. Activity recorded.</small></div></div>
+            </div>
+        </div>
+    </section>
+    <section class="landing-features" aria-labelledby="features-title">
+        <div class="landing-section-head"><span class="landing-kicker">CONTROL WITHOUT THE FRICTION</span><h2 id="features-title">A better path from request to query.</h2><p>Give people a practical workspace and administrators the visibility they need.</p></div>
+        <div class="landing-feature-grid">
+            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="shield" /></span><h3>Permission-gated SQL</h3><p>Statements are analysed and checked against effective permissions before they reach a database.</p></article>
+            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="clock" /></span><h3>Access on your terms</h3><p>Manage role and user grants, approve requests and set time windows for temporary access.</p></article>
+            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="list" /></span><h3>Accountability built in</h3><p>Queries require an audit record before execution, giving your team a trail of activity.</p></article>
+        </div>
+    </section>
+</div>

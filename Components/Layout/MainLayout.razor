@@ -11,20 +11,28 @@
 @inject NotificationService Notifications
 @inject IJSRuntime JS
 
-<div class="shell">
-    <aside class="sidebar">
-        <a class="brand" href="/" style="text-decoration:none">
+<div class="shell" @onkeydown="HandleNavKey">
+    @if (mobileNavOpen)
+    {
+        <button class="mobile-nav-backdrop" type="button" aria-label="Close navigation" @onclick="CloseMobileNav"></button>
+    }
+    <aside id="app-navigation" class="sidebar @(mobileNavOpen ? "mobile-open" : "")">
+        <div class="sidebar-brand">
+        <a class="brand" href="/" @onclick="CloseMobileNav" style="text-decoration:none">
             <span class="brand-mark"><Icon Name="db" /></span>
             <span class="lbl">Query Gate</span>
         </a>
+        <button class="mobile-nav-close icon-btn" type="button" aria-label="Close navigation" @onclick="CloseMobileNav"><Icon Name="x" /></button>
+        </div>
 
-        <nav>
+        <nav aria-label="Application navigation" @onclick="CloseMobileNav">
             <div class="nav-section">Workspace</div>
-            <NavLink class="nav-item" href="" Match="NavLinkMatch.All"><Icon Name="home" /><span class="lbl">Dashboard</span></NavLink>
+            <NavLink class="nav-item" href="dashboard" Match="NavLinkMatch.All"><Icon Name="home" /><span class="lbl">Dashboard</span></NavLink>
             <NavLink class="nav-item" href="query"><Icon Name="terminal" /><span class="lbl">Query workspace</span></NavLink>
             <NavLink class="nav-item" href="access"><Icon Name="key" /><span class="lbl">My access</span></NavLink>
             <NavLink class="nav-item" href="scripts"><Icon Name="file" /><span class="lbl">Script requests</span></NavLink>
             <NavLink class="nav-item" href="notifications"><Icon Name="bell" /><span class="lbl">Notifications</span> @if (unread > 0) { <span class="count">@unread</span> }</NavLink>
+            <NavLink class="nav-item" href="documentation"><Icon Name="file" /><span class="lbl">Documentation</span></NavLink>
 
             @if (isAdmin || isAuditor)
             {
@@ -50,6 +58,7 @@
 
     <div class="main">
         <header class="topbar">
+            <button class="mobile-nav-toggle icon-btn" type="button" aria-label="Open navigation" aria-controls="app-navigation" aria-expanded="@(mobileNavOpen ? "true" : "false")" @onclick="() => mobileNavOpen = !mobileNavOpen"><Icon Name="panel" /></button>
             <div class="spacer"></div>
             <button class="icon-btn" type="button" title="Toggle theme" data-theme-toggle>
                 <span class="theme-sun"><Icon Name="sun" /></span><span class="theme-moon"><Icon Name="moon" /></span>
@@ -96,12 +105,18 @@
 
 @code {
     private int unread;
-    private bool isAdmin, isAuditor;
+    private bool isAdmin, isAuditor, mobileNavOpen;
     private string displayName = "", initials = "?", roleText = "";
     private int? idleMinutesLeft;
     private Timer? timer;
     private string? userId;
     private DotNetObjectReference<MainLayout>? self;
+
+    private void CloseMobileNav() => mobileNavOpen = false;
+    private void HandleNavKey(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape") CloseMobileNav();
+    }
 
     protected override async Task OnInitializedAsync()
     {
