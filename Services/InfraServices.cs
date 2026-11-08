@@ -104,7 +104,15 @@ public sealed class DatabaseAdminService(IDbContextFactory<ApplicationDbContext>
     }
 }
 
-public sealed record DbObjectInfo(string Schema, string Name, string Type, List<string> Columns);
+public sealed record DbColumnInfo(string Name, string DataType, bool Nullable);
+public sealed record DbForeignKeyColumn(string Column, string ReferencedColumn);
+public sealed record DbForeignKeyInfo(string Name, string ReferencedSchema, string ReferencedTable, List<DbForeignKeyColumn> Columns);
+public sealed record DbObjectInfo(string Schema, string Name, string Type, List<string> Columns)
+{
+    public bool IsTableValuedFunction { get; init; }
+    public List<DbColumnInfo> ColumnDetails { get; } = [];
+    public List<DbForeignKeyInfo> ForeignKeys { get; } = [];
+}
 
 public sealed record MetadataCacheEntry(Guid DatabaseId, int ObjectCount, DateTimeOffset LoadedAt);
 
@@ -149,16 +157,51 @@ public sealed class MetadataService(IDbContextFactory<ApplicationDbContext> fact
         {
             while (await r.ReadAsync())
             {
-                var type = r.GetString(2).Trim() switch { "U" => "Table", "V" => "View", "P" => "Procedure", _ => "Function" };
-                objects[(r.GetString(0), r.GetString(1))] = new DbObjectInfo(r.GetString(0), r.GetString(1), type, []);
+                var sqlType = r.GetString(2).Trim();
+                var type = sqlType switch { "U" => "Table", "V" => "View", "P" => "Procedure", _ => "Function" };
+                objects[(r.GetString(0), r.GetString(1))] = new DbObjectInfo(r.GetString(0), r.GetString(1), type, [])
+                {
+                    IsTableValuedFunction = sqlType is "IF" or "TF"
+                };
             }
         }
-        await using (var cmd = new SqlCommand(@"SELECT s.name, o.name, c.name FROM sys.columns c JOIN sys.objects o ON o.object_id = c.object_id
-            JOIN sys.schemas s ON s.schema_id = o.schema_id WHERE o.type IN ('U','V') AND o.is_ms_shipped = 0 ORDER BY c.column_id", conn) { CommandTimeout = 30 })
+        await using (var cmd = new SqlCommand(@"SELECT ps.name, po.name, fk.name, rs.name, ro.name, pc.name, rc.name
+            FROM sys.foreign_keys fk
+            JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
+            JOIN sys.objects po ON po.object_id = fk.parent_object_id
+            JOIN sys.schemas ps ON ps.schema_id = po.schema_id
+            JOIN sys.objects ro ON ro.object_id = fk.referenced_object_id
+            JOIN sys.schemas rs ON rs.schema_id = ro.schema_id
+            JOIN sys.columns pc ON pc.object_id = fkc.parent_object_id AND pc.column_id = fkc.parent_column_id
+            JOIN sys.columns rc ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id
+            ORDER BY ps.name, po.name, fk.name, fkc.constraint_column_id", conn) { CommandTimeout = 30 })
         await using (var r = await cmd.ExecuteReaderAsync())
         {
             while (await r.ReadAsync())
-                if (objects.TryGetValue((r.GetString(0), r.GetString(1)), out var o)) o.Columns.Add(r.GetString(2));
+            {
+            if (!objects.TryGetValue((r.GetString(0), r.GetString(1)), out var source)
+                || !objects.ContainsKey((r.GetString(3), r.GetString(4)))) continue;
+            var foreignKey = source.ForeignKeys.FirstOrDefault(f => f.Name == r.GetString(2));
+            if (foreignKey is null)
+            {
+                foreignKey = new DbForeignKeyInfo(r.GetString(2), r.GetString(3), r.GetString(4), []);
+                source.ForeignKeys.Add(foreignKey);
+            }
+            foreignKey.Columns.Add(new DbForeignKeyColumn(r.GetString(5), r.GetString(6)));
+            }
+        }
+        await using (var cmd = new SqlCommand(@"SELECT s.name, o.name, c.name, t.name, c.is_nullable FROM sys.columns c JOIN sys.objects o ON o.object_id = c.object_id
+            JOIN sys.schemas s ON s.schema_id = o.schema_id JOIN sys.types t ON t.user_type_id = c.user_type_id
+            WHERE o.type IN ('U','V','IF','TF') AND o.is_ms_shipped = 0 ORDER BY c.column_id", conn) { CommandTimeout = 30 })
+        await using (var r = await cmd.ExecuteReaderAsync())
+        {
+            while (await r.ReadAsync())
+                if (objects.TryGetValue((r.GetString(0), r.GetString(1)), out var o))
+                {
+                    var column = r.GetString(2);
+                    o.Columns.Add(column);
+                    o.ColumnDetails.Add(new DbColumnInfo(column, r.GetString(3), r.GetBoolean(4)));
+                }
         }
 
         var list = objects.Values.ToList();
@@ -311,4 +354,3 @@ public sealed class MaintenanceWorker(IServiceScopeFactory scopes, ILogger<Maint
         }
     }
 }
-

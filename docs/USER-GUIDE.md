@@ -80,7 +80,12 @@ Overview of your accessible databases, pending requests and recent activity.
 On narrow screens the Objects, Saved and History panel starts closed. Use the panel button next to the query tabs to open or close it.
 
 1. Choose a **database** (environment badge shows Dev/QA/Prod).
-2. Write SQL in the editor (autocomplete knows tables, views, columns and aliases). The **object explorer** on the left lists tables/views/procedures.
+2. Write SQL in the editor. Autocomplete suggests tables and views in source clauses and columns from visible table and view aliases in expressions. Press `Ctrl+Space` to request suggestions. Duplicate column names are qualified with their source alias. Column suggestions include type and nullability when available.
+   - Basic derived tables, CTE projections and table-valued functions are supported. Complex or incomplete SQL may not be fully resolved; suggestions do not validate or authorize a query.
+   - In an `ON` clause, select a named foreign-key suggestion to insert its join condition. Relationships depend on metadata visible to the managed SQL account. Composite keys include all columns.
+   - Suggestions include common SQL snippets. Hover over a resolvable column to see its source and available type details. Basic table variables, temporary tables, scalar variables and DML targets are inferred from the current batch where possible.
+   - Use **Editor settings** to change automatic suggestions, font size and optional live syntax diagnostics. Settings follow your account. Diagnostics are off by default, do not execute SQL, and can report errors while a statement is incomplete. They are unavailable for SQL over 4,000 characters.
+   - The **object explorer** on the left lists tables/views/procedures.
    - Object search is **fuzzy by default**. Use the **Fuzzy** toggle to switch between fuzzy and exact contains matching.
    - Use the object type chips to filter to **Tables**, **Views**, **Procedures** or **Functions**.
    - Database dropdown shows enabled databases by default. Turn on **Show disabled** to include disabled entries.

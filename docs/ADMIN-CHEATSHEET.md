@@ -4,6 +4,8 @@ One-page reference for Query Gate administrators. Full details: [USER-GUIDE.md](
 
 For IIS, Azure App Service, Linux and Docker, see the [deployment guide](./DEPLOYMENT.md). The public `/documentation` page also provides deployment instructions.
 
+The workspace caches object, column and foreign-key metadata using the metadata cache settings below. JOIN suggestions depend on the managed SQL account's metadata visibility and do not grant query access. Users can save their own editor preferences, including opt-in live syntax diagnostics, in their account.
+
 ## 1. Onboard a database and a user (5 steps)
 
 | #   | Where                                     | Action                                                                                                                 |

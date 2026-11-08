@@ -147,6 +147,15 @@ namespace DbAccessManager.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<bool>("EditorAutomaticSuggestions")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("EditorFontSize")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("EditorLiveDiagnostics")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Email")
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");

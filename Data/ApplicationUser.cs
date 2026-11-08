@@ -9,6 +9,9 @@ public class ApplicationUser : IdentityUser
     public bool MustChangePassword { get; set; }
     public DateTimeOffset? ExpiresAt { get; set; }
     public int? TimeoutOverrideSeconds { get; set; }
+    public bool EditorAutomaticSuggestions { get; set; } = true;
+    public bool EditorLiveDiagnostics { get; set; }
+    public int EditorFontSize { get; set; } = 14;
     public string? CreatedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 

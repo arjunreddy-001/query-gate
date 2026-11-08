@@ -99,36 +99,12 @@ window.dbam = (function () {
     "COMMIT",
     "ROLLBACK",
   ];
-
-  function aliasMap(text) {
-    const map = {};
-    const re =
-      /\b(?:from|join)\s+((?:\[?\w+\]?\.)?\[?\w+\]?)(?:\s+(?:as\s+)?(\[?\w+\]?))?/gi;
-    let m;
-    const reserved = new Set([
-      "where",
-      "on",
-      "inner",
-      "left",
-      "right",
-      "full",
-      "cross",
-      "join",
-      "group",
-      "order",
-      "having",
-      "union",
-      "set",
-      "with",
-    ]);
-    while ((m = re.exec(text)) !== null) {
-      const table = m[1].replace(/[\[\]]/g, "").toLowerCase();
-      const alias = m[2] ? m[2].replace(/[\[\]]/g, "").toLowerCase() : null;
-      if (alias && !reserved.has(alias)) map[alias] = table;
-      map[table.split(".").pop()] = table;
-    }
-    return map;
-  }
+  const SNIPPETS = [
+    { label: "SELECT query", text: "SELECT ${1:*}\nFROM ${2:dbo.TableName}\nWHERE ${3:condition};" },
+    { label: "JOIN clause", text: "JOIN ${1:dbo.TableName} AS ${2:t}\n  ON ${3:condition}" },
+    { label: "CASE expression", text: "CASE WHEN ${1:condition} THEN ${2:value} ELSE ${3:value} END" },
+    { label: "CTE", text: "WITH ${1:cte} AS (\n    SELECT ${2:*} FROM ${3:dbo.TableName}\n)\nSELECT * FROM ${1:cte};" },
+  ];
 
   function registerProvider(monaco) {
     if (providerRegistered) return;
@@ -143,67 +119,90 @@ window.dbam = (function () {
           startColumn: word.startColumn,
           endColumn: word.endColumn,
         };
-        const line = model
-          .getLineContent(position.lineNumber)
-          .substring(0, position.column - 1);
         const K = monaco.languages.CompletionItemKind;
-        const dot = /([\w\[\]]+)\.\s*\w*$/.exec(line);
-        if (dot) {
-          const key = dot[1].replace(/[\[\]]/g, "").toLowerCase();
-          const full = aliasMap(model.getValue())[key] || key;
-          const hit = metadata.find(
-            (o) =>
-              (o.schema + "." + o.name).toLowerCase() === full ||
-              o.name.toLowerCase() === full,
-          );
-          if (hit)
-            return {
-              suggestions: hit.columns.map((c) => ({
-                label: c,
-                kind: K.Field,
-                insertText: c,
-                range,
-              })),
-            };
-          const schemaObjs = metadata.filter(
-            (o) => o.schema.toLowerCase() === key,
-          );
-          return {
-            suggestions: schemaObjs.map((o) => ({
-              label: o.name,
-              kind: K.Class,
-              insertText: o.name,
-              detail: o.type,
-              range,
-            })),
-          };
+        const result = window.queryGateCompletion.analyze(
+          model.getValue(), model.getOffsetAt(position), metadata,
+        );
+        if (result.replacement) {
+          const start = model.getPositionAt(result.replacement.start);
+          const end = model.getPositionAt(result.replacement.end);
+          range.startLineNumber = start.lineNumber;
+          range.startColumn = start.column;
+          range.endLineNumber = end.lineNumber;
+          range.endColumn = end.column;
         }
-        const suggestions = KEYWORDS.map((k) => ({
+        const suggestions = result.suggestions.map((item) => ({
+          label: item.label,
+          kind: item.kind === "column" ? K.Field : item.kind === "join" ? K.Reference : item.kind === "variable" ? K.Variable : K.Class,
+          insertText: item.insertText,
+          detail: item.detail,
+          sortText: "0" + item.label,
+          range,
+        }));
+        if (result.context === "expression") suggestions.push(...KEYWORDS.map((k) => ({
           label: k,
           kind: K.Keyword,
           insertText: k,
+          sortText: "1" + k,
           range,
-        }));
-        metadata.forEach((o) =>
-          suggestions.push({
-            label: o.schema + "." + o.name,
-            kind:
-              o.type === "Table"
-                ? K.Class
-                : o.type === "View"
-                  ? K.Interface
-                  : K.Function,
-            insertText: o.schema + "." + o.name,
-            detail: o.type,
-            range,
-          }),
-        );
+        })));
+        if (result.context === "expression") suggestions.push(...SNIPPETS.map((s) => ({
+          label: s.label, kind: K.Snippet, insertText: s.text,
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          sortText: "2" + s.label, range,
+        })));
         return { suggestions };
+      },
+    });
+    monaco.languages.registerHoverProvider("sql", {
+      provideHover(model, position) {
+        const word = model.getWordAtPosition(position);
+        if (!word) return null;
+        const end = { lineNumber: position.lineNumber, column: word.endColumn };
+        const result = window.queryGateCompletion.analyze(model.getValue(), model.getOffsetAt(end), metadata);
+        const matches = result.suggestions.filter(s => s.kind === "column" && s.label.toLowerCase() === word.word.toLowerCase());
+        let detail = matches.length === 1 ? matches[0].detail : null;
+        if (!detail && matches.length === 0) {
+          const prefix = model.getLineContent(position.lineNumber).slice(0, word.startColumn - 1);
+          const schema = /(?:\[([^\]]+)\]|([a-z_]\w*))\.\s*$/i.exec(prefix);
+          const hits = metadata.filter(o => o.name.toLowerCase() === word.word.toLowerCase() &&
+            (!schema || o.schema.toLowerCase() === (schema[1] || schema[2]).toLowerCase()));
+          if (hits.length === 1) detail = hits[0].schema + "." + hits[0].name + " / " + hits[0].type;
+        }
+        if (!detail) return null;
+        detail = detail.replace(/[\\`*_{}\[\]()#+.!|>~-]/g, "\\$&");
+        return { range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
+          contents: [{ value: detail }] };
       },
     });
   }
 
   const editors = {};
+  function scheduleDiagnostics(entry) {
+    clearTimeout(entry.diagnosticTimer);
+    if (!entry.diagnostics) return;
+    const model = entry.editor.getModel();
+    const version = model.getVersionId();
+    entry.diagnosticTimer = setTimeout(async () => {
+      try {
+        const sql = model.getValue();
+        const errors = sql.length > 4000
+          ? [{ line: 1, column: 1, message: "Live diagnostics are unavailable for SQL over 4,000 characters." }]
+          : await entry.ref.invokeMethodAsync("GetSyntaxDiagnostics", sql);
+        if (entry.editor.getModel() !== model || model.isDisposed() || model.getVersionId() !== version || !entry.diagnostics) return;
+        window.monaco.editor.setModelMarkers(model, "dbam-syntax", errors.map(e => {
+          const line = Math.max(1, Math.min(e.line, model.getLineCount()));
+          const column = Math.max(1, Math.min(e.column, model.getLineMaxColumn(line)));
+          return { severity: window.monaco.MarkerSeverity.Warning, message: e.message,
+            startLineNumber: line, endLineNumber: line, startColumn: column,
+            endColumn: Math.min(column + 1, model.getLineMaxColumn(line)) };
+        }));
+      } catch (error) {
+        console.error("Could not check SQL syntax", error);
+        entry.ref.invokeMethodAsync("OnDiagnosticsError").catch(console.error);
+      }
+    }, 1000);
+  }
 
   function clampSideWidth(width) {
     return Math.max(180, Math.min(520, width));
@@ -327,10 +326,11 @@ window.dbam = (function () {
       ensureSideResizeHandlers();
     },
 
-    editorInit: async function (id, elementId, ref, value) {
+    editorInit: async function (id, elementId, ref, value, preferences) {
       const el = document.getElementById(elementId);
       if (!el) return false;
       try {
+        metadata = [];
         const monaco = await loadMonaco();
         registerProvider(monaco);
         el.innerHTML = "";
@@ -340,7 +340,9 @@ window.dbam = (function () {
           theme: this.getTheme() === "dark" ? "vs-dark" : "vs",
           automaticLayout: true,
           minimap: { enabled: false },
-          fontSize: 14,
+          fontSize: preferences.fontSize,
+          quickSuggestions: preferences.automaticSuggestions,
+          suggestOnTriggerCharacters: preferences.automaticSuggestions,
           fontFamily: "'Cascadia Code', Consolas, monospace",
           fontLigatures: true,
           scrollBeyondLastLine: false,
@@ -370,10 +372,13 @@ window.dbam = (function () {
             ref.invokeMethodAsync("OnRun");
           }
         });
-        editor.onDidChangeModelContent(() =>
-          ref.invokeMethodAsync("OnChanged", editor.getValue()),
-        );
-        editors[id] = { kind: "monaco", editor };
+        const entry = { kind: "monaco", editor, ref, diagnostics: preferences.liveDiagnostics };
+        editors[id] = entry;
+        editor.onDidChangeModelContent(() => {
+          ref.invokeMethodAsync("OnChanged", editor.getValue());
+          scheduleDiagnostics(entry);
+        });
+        scheduleDiagnostics(entry);
         return true;
       } catch (e) {
         console.warn("Monaco unavailable, using plain editor", e);
@@ -442,8 +447,20 @@ window.dbam = (function () {
     },
     editorDispose: function (id) {
       const e = editors[id];
-      if (e && e.kind === "monaco") e.editor.dispose();
+      if (e && e.kind === "monaco") { clearTimeout(e.diagnosticTimer); e.editor.dispose(); }
       delete editors[id];
+      metadata = [];
+    },
+    editorPreferences: function (id, preferences) {
+      const e = editors[id];
+      if (!e || e.kind !== "monaco") return;
+      e.diagnostics = preferences.liveDiagnostics;
+      e.editor.updateOptions({ fontSize: preferences.fontSize, quickSuggestions: preferences.automaticSuggestions,
+        suggestOnTriggerCharacters: preferences.automaticSuggestions });
+      if (!e.diagnostics) {
+        clearTimeout(e.diagnosticTimer);
+        window.monaco.editor.setModelMarkers(e.editor.getModel(), "dbam-syntax", []);
+      } else scheduleDiagnostics(e);
     },
     setMetadata: function (objects) {
       metadata = objects || [];

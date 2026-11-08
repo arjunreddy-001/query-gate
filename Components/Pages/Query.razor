@@ -7,9 +7,13 @@
 @inject MetadataService Metadata
 @inject WorkspaceService Workspace
 @inject SqlGate Gate
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject AuditService AuditSvc
+@inject ILogger<Query> Logger
 @inject Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage.ProtectedLocalStorage Storage
 @using System.Text
 @using System.Text.Json
+@using Microsoft.SqlServer.TransactSql.ScriptDom
 
 <PageTitle>Query workspace · Query Gate</PageTitle>
 
@@ -107,6 +111,7 @@ else
             else { <button class="btn btn-primary" title="Run (F5 or Ctrl+Enter). Runs the selection if any." @onclick="Run"><Icon Name="play" />Run</button> }
             <button class="btn" title="Format (Shift+Alt+F)" @onclick="FormatSql"><Icon Name="format" />Format</button>
             <button class="btn" title="Save (Ctrl+S)" @onclick="OpenSave"><Icon Name="save" />Save</button>
+            <button class="btn" @onclick="() => editingPreferences = true">Editor settings</button>
             <label class="check small" title="Run inside a transaction and roll back"><input type="checkbox" @bind="dryRun" />Dry run</label>
             <label class="check small">Timeout <input type="number" min="1" max="600" style="width:64px" @bind="timeout" placeholder="def" />s</label>
         </div>
@@ -199,6 +204,21 @@ else
     </div>
 }
 
+@if (editingPreferences)
+{
+    <div class="modal-back"><div class="modal">
+        <div class="modal-head"><h2>Editor settings</h2></div>
+        <div class="modal-body stack">
+            <label class="check"><input type="checkbox" @bind="automaticSuggestions" />Automatic suggestions</label>
+            <label class="check"><input type="checkbox" @bind="liveDiagnostics" />Live syntax diagnostics</label>
+            <div class="field"><label for="editor-font-size">Font size (10-24)</label><input id="editor-font-size" type="number" min="10" max="24" @bind="fontSize" /></div>
+            <p class="muted small">Settings are saved to your account. Diagnostics check syntax without running SQL.</p>
+            @if (preferencesError is not null) { <div class="alert bad" role="alert">@preferencesError</div> }
+        </div>
+        <div class="modal-foot"><button class="btn" @onclick="CancelPreferences">Cancel</button><button class="btn btn-primary" @onclick="SavePreferences">Save</button></div>
+    </div></div>
+}
+
 @code {
     private sealed class QueryTab
     {
@@ -228,11 +248,18 @@ else
     private HashSet<string> expanded = [];
     private bool metaLoading;
     private string? metaError;
+    private long metadataRequest;
     private List<SavedQuery> saved = [];
     private List<QueryHistory> history = [];
     private string saveName = "", saveTags = "", saveDesc = "";
     private DotNetObjectReference<Query>? self;
     private string? lastRunSql;
+    private bool editingPreferences, automaticSuggestions = true, liveDiagnostics;
+    private string? preferencesError;
+    private int fontSize = 14;
+    private EditorPreferences savedPreferences = new(true, false, 14);
+    private sealed record EditorPreferences(bool AutomaticSuggestions, bool LiveDiagnostics, int FontSize);
+    public sealed record SyntaxDiagnostic(int Line, int Column, string Message);
 
     private IEnumerable<DbObjectInfo> FilteredObjects => BuildFilteredObjects();
 
@@ -245,6 +272,10 @@ else
     protected override async Task OnLoadAsync()
     {
         await ReloadDatabases();
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var user = await db.Users.AsNoTracking().SingleAsync(u => u.Id == UserId);
+        savedPreferences = new(user.EditorAutomaticSuggestions, user.EditorLiveDiagnostics, user.EditorFontSize);
+        CancelPreferences();
         loaded = true;
     }
 
@@ -273,12 +304,66 @@ else
 
         self = DotNetObjectReference.Create(this);
         await JS.InvokeVoidAsync("dbam.workspaceInit", "query-ws");
-        await JS.InvokeAsync<bool>("dbam.editorInit", "main", "sql-editor", self, Current!.Sql);
+        await JS.InvokeAsync<bool>("dbam.editorInit", "main", "sql-editor", self, Current!.Sql, savedPreferences);
         await OnDbChanged();
         StateHasChanged();
     }
 
     private void ToggleSide() => sideOpen = sideOpen != true;
+
+    private void CancelPreferences()
+    {
+        automaticSuggestions = savedPreferences.AutomaticSuggestions;
+        liveDiagnostics = savedPreferences.LiveDiagnostics;
+        fontSize = savedPreferences.FontSize;
+        preferencesError = null;
+        editingPreferences = false;
+    }
+
+    private async Task SavePreferences()
+    {
+        if (fontSize is < 10 or > 24) { preferencesError = "Editor font size must be between 10 and 24."; return; }
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var user = await db.Users.SingleAsync(u => u.Id == UserId);
+            user.EditorAutomaticSuggestions = automaticSuggestions;
+            user.EditorLiveDiagnostics = liveDiagnostics;
+            user.EditorFontSize = fontSize;
+            await db.SaveChangesAsync();
+            savedPreferences = new(automaticSuggestions, liveDiagnostics, fontSize);
+            await AuditSvc.TryWriteAsync(Me, "Settings", "EditorPreferencesUpdated", "Success");
+            await JS.InvokeVoidAsync("dbam.editorPreferences", "main", savedPreferences);
+            editingPreferences = false;
+            preferencesError = null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Could not save editor preferences for user {UserId}", UserId);
+            preferencesError = "Could not save or apply editor settings. Try again.";
+        }
+    }
+
+    [JSInvokable]
+    public List<SyntaxDiagnostic> GetSyntaxDiagnostics(string sql)
+    {
+        if (!savedPreferences.LiveDiagnostics) return [];
+        if (sql.Length > 4000) return [new SyntaxDiagnostic(1, 1, "Live diagnostics are unavailable for SQL over 4,000 characters.")];
+        var diagnostics = new List<SyntaxDiagnostic>();
+        foreach (var batch in SqlGate.SplitBatches(sql))
+        {
+            var parser = new TSql160Parser(initialQuotedIdentifiers: true);
+            using var reader = new StringReader(batch.Text);
+            parser.Parse(reader, out var errors);
+            diagnostics.AddRange(errors.Take(20 - diagnostics.Count)
+                .Select(e => new SyntaxDiagnostic(e.Line + batch.LineOffset, e.Column, e.Message)));
+            if (diagnostics.Count >= 20) break;
+        }
+        return diagnostics;
+    }
+
+    [JSInvokable]
+    public Task OnDiagnosticsError() => InvokeAsync(() => { Say("Could not check SQL syntax.", true); StateHasChanged(); });
 
     private async Task OnDbChanged()
     {
@@ -298,13 +383,23 @@ else
     private async Task LoadMetadata(bool refresh)
     {
         if (Current is null) return;
+        var databaseId = Current.DatabaseId;
+        var request = ++metadataRequest;
+        objects = [];
+        await JS.InvokeVoidAsync("dbam.setMetadata", Array.Empty<DbObjectInfo>());
         metaLoading = true; metaError = null; StateHasChanged();
         try
         {
-            objects = await Metadata.GetAsync(Current.DatabaseId, refresh);
+            var loadedObjects = await Metadata.GetAsync(databaseId, refresh);
+            if (request != metadataRequest || Current?.DatabaseId != databaseId) return;
+            objects = loadedObjects;
             await JS.InvokeVoidAsync("dbam.setMetadata", objects);
         }
-        catch (Exception ex) { objects = []; metaError = "Could not load objects: " + ex.Message; }
+        catch (Exception ex)
+        {
+            if (request != metadataRequest || Current?.DatabaseId != databaseId) return;
+            objects = []; metaError = "Could not load objects: " + ex.Message;
+        }
         metaLoading = false;
     }
 
