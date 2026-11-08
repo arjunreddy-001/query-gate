@@ -10,13 +10,13 @@ The workspace caches object, column and foreign-key metadata using the metadata 
 
 | #   | Where                                     | Action                                                                                                                 |
 | --- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| 1   | **Admin → Databases → Register database** | Name, environment (Development / QA / Production), connection string of a dedicated service account, timeout, max rows |
+| 1   | **Admin → Databases → Register database** | Name, configured environment, connection string of a dedicated service account, timeout, max rows |
 | 2   | Same dialog                               | **Test connection**, then **Save** (the connection string is encrypted and never shown again)                          |
 | 3   | **Admin → Users → New user**              | Email, display name (optional), role, optional expiry. **Copy the temporary password. It is shown once.**              |
 | 4   | **Admin → Permissions**                   | Select the database, then **Add grant** (role or user, permission, Allow/Deny, optional window)                        |
 | 5   | Tell the user to sign in                  | They set a new password on first sign-in, then use **Query workspace**                                                 |
 
-Default grants added at registration:
+Initial default grants added at registration (configurable under Permissions):
 
 | Role      | Development                                          | QA                  | Production |
 | --------- | ---------------------------------------------------- | ------------------- | ---------- |
@@ -25,6 +25,10 @@ Default grants added at registration:
 
 ## 2. Permission rules
 
+- Add or edit roles and environments in **Permissions**; Admin is protected. New roles have standard user pages but no grants or audit capability. Role renames preserve memberships and grants; members must sign in again when sessions are revalidated.
+- Enable a role's audit capability to allow the Audit log and Access matrix. The initial Auditor role has this capability.
+- Use an environment's **Defaults** to set allow grants per role for future database registrations only. Changing defaults or a registered database's environment leaves existing grants unchanged. Environment renames update associated databases without changing their grants.
+- Delete a role only after removing its users, database grants and defaults. Delete an environment only after removing its databases and defaults.
 - User rule beats role rule. **Deny beats Allow** at the same level. No rule means denied.
 - Time windows are checked when the query runs.
 - Dangerous permissions (CREATE, ALTER, DROP, TRUNCATE, DYNAMIC_SQL, LINKED_SERVER, XP_CMDSHELL, `SYSPROC:*`): grant sparingly. They are required even for approved scripts.
@@ -75,10 +79,12 @@ Default grants added at registration:
 | Audit log, Access matrix                                   |   ✔   |    ✔    |                    |
 | Query workspace, My access, Script requests, Notifications |   ✔   |    ✔    |         ✔          |
 
+Audit and Access matrix access is configurable per role; the Auditor column describes the initial configuration.
+
 ## 6. Rules of thumb
 
 - Use a **separate least-privilege SQL account per database**. The tool can never do more than that account can.
-- Keep **Production** grants explicit and time-boxed. There are no default Production grants.
+- Keep **Production** grants explicit and time-boxed. There are no Production defaults in the initial configuration.
 - Never share the temporary password over chat history you don't control.
 - Leave **self-approval off** unless you have a single admin.
 - Set `Encryption:Key` and `Jwt:Key` in production and back the encryption key up. Losing it makes saved connection strings unreadable.

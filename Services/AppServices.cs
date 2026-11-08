@@ -132,7 +132,11 @@ public sealed class UserAdminService(
     {
         using var scope = scopes.CreateScope();
         var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var roles = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+        if (!await roles.RoleExistsAsync(role)) return OpResult.Fail("Role not found.");
         if (await users.FindByEmailAsync(email) is not null) return OpResult.Fail("A user with that email already exists.");
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await using var transaction = await db.Database.BeginTransactionAsync();
         var password = GeneratePassword();
         var finalDisplayName = string.IsNullOrWhiteSpace(displayName) ? email.Split('@')[0] : displayName.Trim();
         var user = new ApplicationUser
@@ -142,7 +146,9 @@ public sealed class UserAdminService(
         };
         var result = await users.CreateAsync(user, password);
         if (!result.Succeeded) return OpResult.Fail(string.Join(" ", result.Errors.Select(e => e.Description)));
-        await users.AddToRoleAsync(user, role);
+        var assigned = await users.AddToRoleAsync(user, role);
+        if (!assigned.Succeeded) return OpResult.Fail(string.Join(" ", assigned.Errors.Select(e => e.Description)));
+        await transaction.CommitAsync();
         await audit.TryWriteAsync(actor, "UserAdmin", "CreateUser", "Success", $"{email} role={role}");
         return OpResult.Success(password);
     }
@@ -190,13 +196,21 @@ public sealed class UserAdminService(
     {
         using var scope = scopes.CreateScope();
         var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var roles = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+        if (!await roles.RoleExistsAsync(role)) return OpResult.Fail("Role not found.");
         var user = await users.FindByIdAsync(userId);
         if (user is null) return OpResult.Fail("User not found.");
-        if (userId == actor.UserId && role != Roles.Admin) return OpResult.Fail("You cannot remove your own Admin role.");
+        if (userId == actor.UserId && !string.Equals(role, Roles.Admin, StringComparison.OrdinalIgnoreCase)) return OpResult.Fail("You cannot remove your own Admin role.");
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await using var transaction = await db.Database.BeginTransactionAsync();
         var current = await users.GetRolesAsync(user);
-        await users.RemoveFromRolesAsync(user, current);
-        await users.AddToRoleAsync(user, role);
-        await users.UpdateSecurityStampAsync(user);
+        var removed = await users.RemoveFromRolesAsync(user, current);
+        if (!removed.Succeeded) return OpResult.Fail(string.Join(" ", removed.Errors.Select(e => e.Description)));
+        var added = await users.AddToRoleAsync(user, role);
+        if (!added.Succeeded) return OpResult.Fail(string.Join(" ", added.Errors.Select(e => e.Description)));
+        var stamp = await users.UpdateSecurityStampAsync(user);
+        if (!stamp.Succeeded) return OpResult.Fail(string.Join(" ", stamp.Errors.Select(e => e.Description)));
+        await transaction.CommitAsync();
         await audit.TryWriteAsync(actor, "UserAdmin", "SetRole", "Success", $"{user.Email} -> {role}");
         return OpResult.Success();
     }
@@ -405,4 +419,3 @@ public sealed class WorkspaceService(IDbContextFactory<ApplicationDbContext> fac
         return await db.QueryHistory.AsNoTracking().Where(h => h.UserId == userId && h.DatabaseId == databaseId).OrderByDescending(h => h.Id).Take(take).ToListAsync();
     }
 }
-

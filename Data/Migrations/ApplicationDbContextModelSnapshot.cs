@@ -312,6 +312,45 @@ namespace DbAccessManager.Data.Migrations
                     b.ToTable("AuditLogs");
                 });
 
+            modelBuilder.Entity("DbAccessManager.Data.DatabaseEnvironment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("DatabaseEnvironments");
+                });
+
+            modelBuilder.Entity("DbAccessManager.Data.EnvironmentDefaultGrant", b =>
+                {
+                    b.Property<Guid>("EnvironmentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RoleId")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("PermissionCode")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.HasKey("EnvironmentId", "RoleId", "PermissionCode");
+
+                    b.HasIndex("RoleId");
+
+                    b.ToTable("EnvironmentDefaultGrants");
+                });
+
             modelBuilder.Entity("DbAccessManager.Data.ManagedDatabase", b =>
                 {
                     b.Property<Guid>("Id")
@@ -847,6 +886,21 @@ namespace DbAccessManager.Data.Migrations
                     b.HasKey("UserId", "LoginProvider", "Name");
 
                     b.ToTable("AspNetUserTokens", (string)null);
+                });
+
+            modelBuilder.Entity("DbAccessManager.Data.EnvironmentDefaultGrant", b =>
+                {
+                    b.HasOne("DbAccessManager.Data.DatabaseEnvironment", null)
+                        .WithMany()
+                        .HasForeignKey("EnvironmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityRole", null)
+                        .WithMany()
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("DbAccessManager.Data.PermissionGrant", b =>

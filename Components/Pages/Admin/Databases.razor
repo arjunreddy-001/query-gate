@@ -48,7 +48,8 @@
         <div class="modal-body">
             <div class="field"><label>Name</label><input type="text" @bind="name" /></div>
             <div class="field"><label>Environment</label>
-                <select @bind="env"><option>Development</option><option>QA</option><option>Production</option></select></div>
+                <select @bind="env">@foreach (var e in environments) { <option value="@e.Name">@e.Name</option> }</select></div>
+            @if (environments.Count == 0) { <div class="alert warn">Add an environment under Permissions before registering a database.</div> }
             <div class="field"><label>Description</label><input type="text" @bind="description" /></div>
             <div class="field"><label>Connection string @(editId is null ? "" : "(leave blank to keep current)")</label>
                 <textarea style="min-height:70px" autocomplete="off" @bind="connection"></textarea></div>
@@ -62,13 +63,14 @@
         <div class="modal-foot">
             <button class="btn" @onclick="() => open = false">Cancel</button>
             <button class="btn" disabled="@string.IsNullOrWhiteSpace(connection)" @onclick="Test">Test connection</button>
-            <button class="btn btn-primary" @onclick="Save">Save</button>
+            <button class="btn btn-primary" disabled="@(environments.Count == 0)" @onclick="Save">Save</button>
         </div>
     </div></div>
 }
 
 @code {
     private List<ManagedDatabase> list = [];
+    private List<DatabaseEnvironment> environments = [];
     private bool open, active = true, testOk, showDisabled;
     private Guid? editId;
     private string name = "", env = "Development", description = "", connection = "";
@@ -80,12 +82,13 @@
     private async Task Load()
     {
         await using var db = await DbFactory.CreateDbContextAsync();
+        environments = await db.DatabaseEnvironments.AsNoTracking().OrderBy(e => e.Name).ToListAsync();
         var query = db.ManagedDatabases.AsNoTracking().AsQueryable();
         if (!showDisabled) query = query.Where(d => d.IsActive);
         list = await query.OrderBy(d => d.Environment).ThenBy(d => d.Name).ToListAsync();
     }
 
-    private void New() { editId = null; name = description = connection = ""; env = "Development"; timeout = 30; maxRows = 1000; active = true; testMsg = null; open = true; }
+    private void New() { editId = null; name = description = connection = ""; env = environments.FirstOrDefault(e => e.Name == "Development")?.Name ?? environments.FirstOrDefault()?.Name ?? ""; timeout = 30; maxRows = 1000; active = true; testMsg = null; open = true; }
     private void Edit(ManagedDatabase d) { editId = d.Id; name = d.Name; env = d.Environment; description = d.Description ?? ""; connection = ""; timeout = d.DefaultTimeoutSeconds; maxRows = d.MaxRows; active = d.IsActive; testMsg = null; open = true; }
 
     private async Task Test() { (testOk, testMsg) = await DbAdmin.TestAsync(connection); }

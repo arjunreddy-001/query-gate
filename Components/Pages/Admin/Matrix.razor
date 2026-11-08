@@ -1,5 +1,5 @@
 @page "/admin/matrix"
-@attribute [Authorize(Roles = Roles.AdminOrAuditor)]
+@attribute [Authorize(Policy = "AuditAccess")]
 @inherits PageBase
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject PermissionService Permissions

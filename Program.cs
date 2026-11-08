@@ -6,6 +6,7 @@ using DbAccessManager.Data;
 using DbAccessManager.Security;
 using DbAccessManager.Services;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Server.Circuits;
 using Microsoft.AspNetCore.DataProtection;
@@ -122,6 +123,10 @@ builder.Services.AddSingleton<CryptoService>();
 builder.Services.AddSingleton<SettingsService>();
 builder.Services.AddSingleton<AuditService>();
 builder.Services.AddSingleton<PermissionService>();
+builder.Services.AddSingleton<AccessConfigurationService>();
+builder.Services.AddSingleton<IAuthorizationHandler, AuditAuthorizationHandler>();
+builder.Services.AddAuthorization(options => options.AddPolicy("AuditAccess", policy =>
+    policy.RequireAuthenticatedUser().AddRequirements(new AuditRequirement())));
 builder.Services.AddSingleton<ExecutionService>();
 builder.Services.AddSingleton<MetadataService>();
 builder.Services.AddSingleton<NotificationService>();
@@ -206,7 +211,7 @@ static async Task SeedAsync(IServiceProvider services, IConfiguration configurat
 {
     await using var scope = services.CreateAsyncScope();
     var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
-    foreach (var role in new[] { Roles.Admin, Roles.Developer, Roles.Tester, Roles.Auditor })
+    foreach (var role in new[] { Roles.Admin })
     {
         if (!await roleManager.RoleExistsAsync(role)) await roleManager.CreateAsync(new IdentityRole(role));
     }

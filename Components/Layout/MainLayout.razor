@@ -9,6 +9,7 @@
 @inject NavigationManager Nav
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject NotificationService Notifications
+@inject AccessConfigurationService AccessConfig
 @inject IJSRuntime JS
 
 <div class="shell" @onkeydown="HandleNavKey">
@@ -125,7 +126,7 @@
 
         userId = user.FindFirstValue(ClaimTypes.NameIdentifier);
         isAdmin = user.IsInRole(Roles.Admin);
-        isAuditor = user.IsInRole(Roles.Auditor);
+        isAuditor = userId is not null && await AccessConfig.CanAuditAsync(userId);
         roleText = string.Join(", ", user.FindAll(ClaimTypes.Role).Select(c => c.Value).DefaultIfEmpty("Member"));
         var email = user.Identity?.Name ?? "";
 

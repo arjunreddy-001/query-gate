@@ -2,6 +2,7 @@
 @attribute [Authorize(Roles = Roles.Admin)]
 @inherits PageBase
 @inject UserAdminService UserAdmin
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
 
 <PageTitle>Users · Query Gate</PageTitle>
 
@@ -86,7 +87,7 @@
 }
 
 @code {
-    private static readonly string[] AllRoles = [Roles.Developer, Roles.Tester, Roles.Auditor, Roles.Admin];
+    private List<string> AllRoles = [];
     private List<(ApplicationUser User, string[] Roles)> list = [];
     private HashSet<string> selected = [];
     private string search = "", newEmail = "", newName = "", newRole = Roles.Developer, secretFor = "";
@@ -96,7 +97,13 @@
     private bool creating;
     private ApplicationUser? editing;
 
-    protected override async Task OnLoadAsync() => await Load();
+    protected override async Task OnLoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        AllRoles = await db.Roles.AsNoTracking().Where(r => r.Name != null).Select(r => r.Name!).OrderBy(r => r).ToListAsync();
+        if (!AllRoles.Contains(newRole)) newRole = AllRoles.FirstOrDefault() ?? "";
+        await Load();
+    }
     private async Task Load() => list = await UserAdmin.ListAsync(search);
     private void Select(string id, bool on) { if (on) selected.Add(id); else selected.Remove(id); }
 

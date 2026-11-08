@@ -62,5 +62,4 @@ public static class Roles
     public const string Tester = "Tester";
     public const string Auditor = "Auditor";
 
-    public const string AdminOrAuditor = "Admin,Auditor";
 }

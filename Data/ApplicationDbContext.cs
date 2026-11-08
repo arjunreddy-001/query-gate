@@ -18,10 +18,27 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<RequestStatusHistory> RequestStatusHistory => Set<RequestStatusHistory>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<SettingEntry> Settings => Set<SettingEntry>();
+    public DbSet<DatabaseEnvironment> DatabaseEnvironments => Set<DatabaseEnvironment>();
+    public DbSet<EnvironmentDefaultGrant> EnvironmentDefaultGrants => Set<EnvironmentDefaultGrant>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+
+        builder.Entity<DatabaseEnvironment>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).HasMaxLength(32).IsRequired();
+            entity.HasIndex(e => e.Name).IsUnique();
+        });
+        builder.Entity<EnvironmentDefaultGrant>(entity =>
+        {
+            entity.HasKey(g => new { g.EnvironmentId, g.RoleId, g.PermissionCode });
+            entity.Property(g => g.RoleId).HasMaxLength(450);
+            entity.Property(g => g.PermissionCode).HasMaxLength(128);
+            entity.HasOne<DatabaseEnvironment>().WithMany().HasForeignKey(g => g.EnvironmentId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<IdentityRole>().WithMany().HasForeignKey(g => g.RoleId).OnDelete(DeleteBehavior.Restrict);
+        });
 
         builder.Entity<ApplicationUser>(entity =>
         {

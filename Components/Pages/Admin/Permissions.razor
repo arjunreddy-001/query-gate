@@ -3,11 +3,42 @@
 @inherits PageBase
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject AuditService AuditSvc
+@inject IServiceScopeFactory Scopes
+@inject AccessConfigurationService AccessConfig
 
 <PageTitle>Permissions · Query Gate</PageTitle>
 
 <div class="page-head"><div><h1>Permissions</h1><p>Role and user grants per database. User rules override role rules; deny wins.</p></div></div>
 <Banner Text="@Flash" IsError="@FlashIsError" />
+
+<div class="card card-pad" style="margin-bottom:16px">
+    <div class="row-inline">
+        <div class="grow"><h2>Roles</h2><p class="muted">New roles have standard user access and no database grants until you add them.</p></div>
+        <button class="btn" @onclick="StartCreateRole"><Icon Name="plus" />Add role</button>
+    </div>
+    <div class="table-wrap"><table><thead><tr><th>Role</th><th>Audit and access matrix</th><th></th></tr></thead><tbody>
+    @foreach (var role in roles)
+    {
+        <tr><td>@role.Name</td><td>@(IsAdminRole(role) ? "Admin" : auditRoleIds.Contains(role.Id) ? "Allowed" : "Not allowed")</td><td class="right">
+            @if (!IsAdminRole(role)) { <button class="btn btn-sm" @onclick="() => EditRole(role)">Edit</button> <button class="btn btn-sm btn-danger" @onclick="() => ConfirmDeleteRole(role)">Delete</button> }
+        </td></tr>
+    }
+    </tbody></table></div>
+</div>
+<div class="card card-pad" style="margin-bottom:16px">
+    <div class="row-inline"><div class="grow"><h2>Environments</h2><p class="muted">Defaults apply only when registering a new database. Existing grants are unchanged.</p></div>
+        <button class="btn" @onclick="NewEnvironment"><Icon Name="plus" />Add environment</button></div>
+    <div class="table-wrap"><table><thead><tr><th>Environment</th><th></th></tr></thead><tbody>
+    @foreach (var env in environments)
+    {
+        <tr><td>@env.Name</td><td class="right">
+            <button class="btn btn-sm" @onclick="() => EditEnvironment(env)">Edit</button>
+            <button class="btn btn-sm" @onclick="() => OpenDefaults(env)">Defaults</button>
+            <button class="btn btn-sm btn-danger" @onclick="() => ConfirmDeleteEnvironment(env)">Delete</button>
+        </td></tr>
+    }
+    </tbody></table></div>
+</div>
 
 <div class="toolbar">
     <select @bind="dbId" @bind:after="Load" style="min-width:240px">
@@ -81,6 +112,67 @@
     </div></div>
 }
 
+@if (creatingRole)
+{
+    <div class="modal-back"><div class="modal">
+        <div class="modal-head"><h2>Add role</h2></div>
+        <div class="modal-body">
+            <div class="field"><label for="new-role-name">Role name</label><input id="new-role-name" type="text" maxlength="256" @bind="newRoleName" /></div>
+            @if (roleError is not null) { <div class="alert bad" role="alert">@roleError</div> }
+        </div>
+        <div class="modal-foot"><button class="btn" @onclick="CancelRole">Cancel</button><button class="btn btn-primary" @onclick="CreateRole">Create</button></div>
+    </div></div>
+}
+
+@if (editingRole is not null)
+{
+    <div class="modal-back"><div class="modal">
+        <div class="modal-head"><h2>Edit role</h2></div><div class="modal-body">
+            <div class="field"><label for="edit-role-name">Role name</label><input id="edit-role-name" type="text" maxlength="256" @bind="editRoleName" /></div>
+            <label class="check"><input type="checkbox" @bind="editRoleAudit" />Allow audit logs and access matrix</label>
+            <p class="muted small">Renaming preserves users and database grants. Members may need to sign in again.</p>
+            @if (roleError is not null) { <div class="alert bad" role="alert">@roleError</div> }
+        </div><div class="modal-foot"><button class="btn" @onclick="() => editingRole = null">Cancel</button><button class="btn btn-primary" @onclick="SaveRole">Save</button></div>
+    </div></div>
+}
+@if (environmentOpen)
+{
+    <div class="modal-back"><div class="modal">
+        <div class="modal-head"><h2>@(editEnvironmentId is null ? "Add environment" : "Edit environment")</h2></div><div class="modal-body">
+            <div class="field"><label for="environment-name">Environment name</label><input id="environment-name" type="text" maxlength="32" @bind="environmentName" /></div>
+            <p class="muted small">Renaming updates associated databases and preserves their grants.</p>
+            @if (environmentError is not null) { <div class="alert bad" role="alert">@environmentError</div> }
+        </div><div class="modal-foot"><button class="btn" @onclick="() => environmentOpen = false">Cancel</button><button class="btn btn-primary" @onclick="SaveEnvironment">Save</button></div>
+    </div></div>
+}
+@if (defaultsEnvironment is not null)
+{
+    <div class="modal-back"><div class="modal">
+        <div class="modal-head"><h2>Defaults: @defaultsEnvironment.Name</h2></div><div class="modal-body">
+            <p class="muted small">These allow grants apply only to newly registered databases.</p>
+            <div class="field"><label for="defaults-role">Role</label><select id="defaults-role" @bind="defaultsRoleId" @bind:after="LoadDefaults">
+                @foreach (var role in roles) { <option value="@role.Id">@role.Name</option> }
+            </select></div>
+            <div class="check-grid">@foreach (var code in Perm.Catalog) { <label class="check"><input type="checkbox" checked="@defaultCodes.Contains(code)" @onchange="e => ToggleDefault(code, (bool)e.Value!)" />@Perm.Label(code)</label> }</div>
+            <div class="field"><label for="default-procedure">System procedure (SYSPROC:name)</label>
+                <div class="row-inline"><input id="default-procedure" maxlength="128" @bind="defaultProcedure" /><button class="btn" @onclick="AddDefaultProcedure">Add</button></div></div>
+            @foreach (var code in defaultCodes.Where(c => c.StartsWith(Perm.SysProcPrefix, StringComparison.OrdinalIgnoreCase)).OrderBy(c => c))
+            {
+                <div class="row-inline"><span>@(code)</span><button class="btn btn-sm" @onclick="() => defaultCodes.Remove(code)">Remove</button></div>
+            }
+            @if (defaultsError is not null) { <div class="alert bad" role="alert">@defaultsError</div> }
+        </div><div class="modal-foot"><button class="btn" @onclick="() => defaultsEnvironment = null">Cancel</button><button class="btn btn-primary" @onclick="SaveDefaults">Save</button></div>
+    </div></div>
+}
+@if (deleteRole is not null || deleteEnvironment is not null)
+{
+    <div class="modal-back"><div class="modal"><div class="modal-head"><h2>Confirm deletion</h2></div>
+        <div class="modal-body"><p>Delete @(deleteRole?.Name ?? deleteEnvironment?.Name)? Deletion is blocked while dependent records exist.</p>
+            @if (deleteError is not null) { <div class="alert bad" role="alert">@deleteError</div> }</div>
+        <div class="modal-foot"><button class="btn" @onclick="CancelDelete">Cancel</button><button class="btn btn-danger" @onclick="DeleteSelected">Delete</button></div>
+    </div></div>
+}
+
 @code {
     private List<ManagedDatabase> dbs = [];
     private List<PermissionGrant> grants = [];
@@ -93,12 +185,99 @@
     private HashSet<string> selectedCodes = [Perm.Select];
     private PermissionEffect effect = PermissionEffect.Allow;
     private DateTime? starts, ends;
+    private bool creatingRole;
+    private string newRoleName = "";
+    private string? roleError;
+    private List<DatabaseEnvironment> environments = [];
+    private HashSet<string> auditRoleIds = [];
+    private Microsoft.AspNetCore.Identity.IdentityRole? editingRole, deleteRole;
+    private DatabaseEnvironment? defaultsEnvironment, deleteEnvironment;
+    private string editRoleName = "", environmentName = "", defaultsRoleId = "", defaultProcedure = "";
+    private string? environmentError, defaultsError, deleteError;
+    private bool editRoleAudit, environmentOpen;
+    private Guid? editEnvironmentId;
+    private HashSet<string> defaultCodes = new(StringComparer.OrdinalIgnoreCase);
+
+    private async Task RefreshConfiguration()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        roles = await db.Roles.AsNoTracking().OrderBy(r => r.Name).ToListAsync();
+        environments = await db.DatabaseEnvironments.AsNoTracking().OrderBy(e => e.Name).ToListAsync();
+        auditRoleIds = (await db.RoleClaims.Where(c => c.ClaimType == AccessConfigurationService.CapabilityClaim && c.ClaimValue == AccessConfigurationService.AuditCapability).Select(c => c.RoleId).ToListAsync()).ToHashSet();
+        dbs = await db.ManagedDatabases.AsNoTracking().OrderBy(d => d.Name).ToListAsync();
+        if (!roles.Any(r => r.Id == roleId)) roleId = roles.FirstOrDefault()?.Id ?? "";
+    }
+    private static bool IsAdminRole(Microsoft.AspNetCore.Identity.IdentityRole role) => string.Equals(role.Name, Roles.Admin, StringComparison.OrdinalIgnoreCase);
+    private void EditRole(Microsoft.AspNetCore.Identity.IdentityRole role) { editingRole = role; editRoleName = role.Name ?? ""; editRoleAudit = auditRoleIds.Contains(role.Id); roleError = null; }
+    private async Task SaveRole()
+    {
+        var result = await AccessConfig.SaveRoleAsync(Me, editingRole!.Id, editRoleName, editRoleAudit);
+        if (!result.Ok) { roleError = result.Error; return; }
+        editingRole = null; await RefreshConfiguration(); Say("Role updated.");
+    }
+    private void NewEnvironment() { editEnvironmentId = null; environmentName = ""; environmentError = null; environmentOpen = true; }
+    private void EditEnvironment(DatabaseEnvironment e) { editEnvironmentId = e.Id; environmentName = e.Name; environmentError = null; environmentOpen = true; }
+    private async Task SaveEnvironment()
+    {
+        var result = await AccessConfig.SaveEnvironmentAsync(Me, editEnvironmentId, environmentName);
+        if (!result.Ok) { environmentError = result.Error; return; }
+        environmentOpen = false; await RefreshConfiguration(); Say("Environment saved.");
+    }
+    private async Task OpenDefaults(DatabaseEnvironment e) { defaultsEnvironment = e; defaultsRoleId = roles.FirstOrDefault()?.Id ?? ""; defaultsError = null; defaultProcedure = ""; await LoadDefaults(); }
+    private async Task LoadDefaults()
+    {
+        if (defaultsEnvironment is null) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        defaultCodes = (await db.EnvironmentDefaultGrants.Where(g => g.EnvironmentId == defaultsEnvironment.Id && g.RoleId == defaultsRoleId).Select(g => g.PermissionCode).ToListAsync()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+    private void ToggleDefault(string code, bool value) { if (value) defaultCodes.Add(code); else defaultCodes.Remove(code); }
+    private void AddDefaultProcedure()
+    {
+        var code = defaultProcedure.Trim().ToUpperInvariant();
+        if (!code.StartsWith(Perm.SysProcPrefix, StringComparison.Ordinal) || !Perm.IsValid(code) || code.Length > 128)
+        {
+            defaultsError = "Enter a valid system procedure permission in the form SYSPROC:name.";
+            return;
+        }
+        defaultCodes.Add(code); defaultProcedure = ""; defaultsError = null;
+    }
+    private async Task SaveDefaults()
+    {
+        var result = await AccessConfig.SaveDefaultsAsync(Me, defaultsEnvironment!.Id, defaultsRoleId, defaultCodes);
+        if (!result.Ok) { defaultsError = result.Error; return; }
+        defaultsEnvironment = null; Say("Defaults saved for future registrations.");
+    }
+    private void ConfirmDeleteRole(Microsoft.AspNetCore.Identity.IdentityRole r) { deleteRole = r; deleteError = null; }
+    private void ConfirmDeleteEnvironment(DatabaseEnvironment e) { deleteEnvironment = e; deleteError = null; }
+    private void CancelDelete() { deleteRole = null; deleteEnvironment = null; deleteError = null; }
+    private async Task DeleteSelected()
+    {
+        var result = deleteRole is not null ? await AccessConfig.DeleteRoleAsync(Me, deleteRole.Id) : await AccessConfig.DeleteEnvironmentAsync(Me, deleteEnvironment!.Id);
+        if (!result.Ok) { deleteError = result.Error; return; }
+        CancelDelete(); await RefreshConfiguration(); Say("Deleted.");
+    }
+
+    private void StartCreateRole() { newRoleName = ""; roleError = null; creatingRole = true; }
+    private void CancelRole() { creatingRole = false; newRoleName = ""; roleError = null; }
+
+    private async Task CreateRole()
+    {
+        var name = newRoleName.Trim();
+        if (name.Length is 0 or > 256) { roleError = "Enter a role name of up to 256 characters."; return; }
+        using var scope = Scopes.CreateScope();
+        var manager = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.RoleManager<Microsoft.AspNetCore.Identity.IdentityRole>>();
+        var result = await manager.CreateAsync(new Microsoft.AspNetCore.Identity.IdentityRole(name));
+        if (!result.Succeeded) { roleError = string.Join(" ", result.Errors.Select(e => e.Description)); return; }
+        await AuditSvc.TryWriteAsync(Me, "Permission", "RoleCreated", "Success", name);
+        await RefreshConfiguration();
+        CancelRole();
+        Say("Role created. Add database grants before assigning access.");
+    }
 
     protected override async Task OnLoadAsync()
     {
         await using var db = await DbFactory.CreateDbContextAsync();
-        dbs = await db.ManagedDatabases.AsNoTracking().OrderBy(d => d.Name).ToListAsync();
-        roles = await db.Roles.AsNoTracking().OrderBy(r => r.Name).ToListAsync();
+        await RefreshConfiguration();
         users = await db.Users.AsNoTracking().OrderBy(u => u.Email).ToListAsync();
         roleId = roles.FirstOrDefault()?.Id ?? "";
         userId = users.FirstOrDefault()?.Id ?? "";

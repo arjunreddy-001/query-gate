@@ -13,7 +13,7 @@ The public homepage links to sign-in, `/documentation`, deployment options and c
 | **Tester**    | QA             | Same as Developer, with narrower default permissions                        |
 | **Auditor**   | Compliance     | Read-only: Audit log and Access matrix (plus normal user pages)             |
 
-Default grants applied when an admin registers a database:
+Initial default grants applied when an admin registers a database (configurable under Permissions):
 
 | Role      | Development                                          | QA                  | Production |
 | --------- | ---------------------------------------------------- | ------------------- | ---------- |
@@ -22,12 +22,16 @@ Default grants applied when an admin registers a database:
 
 Anything not explicitly allowed is **denied**.
 
+Administrators can add, rename and delete roles and environments under **Permissions**. Only Admin is protected. New roles have standard user page access and no database grants or audit capability by default. Enable a role's audit capability to grant access to the Audit log and Access matrix; the initial Auditor role has this capability. Assign grants on the Permissions page and roles on the Users page. Renaming a role preserves memberships and grants; affected users must sign in again when their sessions are revalidated.
+
+Use **Defaults** beside an environment to configure allow grants for each role, including specific `SYSPROC:name` permissions. Defaults apply only to databases registered afterward; editing defaults or changing a database's environment does not alter existing grants. Renaming an environment updates its databases without changing their grants. Remove dependent users, grants and defaults before deleting a role, or dependent databases and defaults before deleting an environment.
+
 ## 2. Admin quick start (first-time setup)
 
 1. **Sign in** with the bootstrap admin (`BootstrapAdmin__Email` / `__Password`). If prompted, change the password.
 2. **Register a database**: _Admin → Databases → Register database_
    - **Name**: a friendly name (e.g. `Orders`).
-   - **Environment**: Development, QA or Production. Drives the colour badge and the default grants.
+   - **Environment**: select a configured environment. Development, QA and Production are provided initially; administrators can manage them under Permissions.
    - **Connection string**: a SQL Server connection string for a **dedicated service account** with only the rights the tool should be able to use, e.g.
      `Server=host;Database=Orders;User Id=svc_dbam;Password=...;TrustServerCertificate=True`
    - **Default timeout** and **Max rows**: per-database limits.
@@ -149,11 +153,11 @@ The light/dark theme toggle is in the top bar. The sidebar is icon-only by defau
 
 ## 7. Auditing and oversight
 
-### Audit log (Admin or Auditor)
+### Audit log (Admin or roles with audit capability)
 
 Filter by user, category, outcome, date range and SQL/detail text; expand **SQL** to see the exact statement. Records include client IP, duration, rows, and who executed it (user, admin, or System). **Export CSV** is itself audited. Entries cannot be edited or deleted in the UI.
 
-### Access matrix (Admin or Auditor)
+### Access matrix (Admin or roles with audit capability)
 
 Select a database to see, for every user, which permissions are effectively allowed (dangerous ones highlighted). **Export CSV** for access reviews.
 

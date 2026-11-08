@@ -16,7 +16,6 @@ public abstract class PageBase : ComponentBase
     protected string UserId { get; private set; } = "";
     protected string UserName { get; private set; } = "";
     protected bool IsAdmin { get; private set; }
-    protected bool IsAuditor { get; private set; }
     protected Actor Me => new(UserId, UserName, Client.Ip, Client.UserAgent);
 
     protected string? Flash { get; set; }
@@ -28,7 +27,6 @@ public abstract class PageBase : ComponentBase
         UserId = user.FindFirstValue(ClaimTypes.NameIdentifier) ?? "";
         UserName = user.Identity?.Name ?? "";
         IsAdmin = user.IsInRole(Security.Roles.Admin);
-        IsAuditor = user.IsInRole(Security.Roles.Auditor);
         await OnLoadAsync();
     }
 

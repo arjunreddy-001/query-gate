@@ -1,5 +1,5 @@
 @page "/admin/audit"
-@attribute [Authorize(Roles = Roles.AdminOrAuditor)]
+@attribute [Authorize(Policy = "AuditAccess")]
 @inherits PageBase
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject AuditService AuditSvc
