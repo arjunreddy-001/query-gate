@@ -10,12 +10,33 @@
 
 <div class="hero">
     <h1>@Greeting(), @firstName</h1>
-    <p>@(databases.Count == 0 ? "You don't have access to any databases yet. Request some below." : $"You can work with {databases.Count} database(s) right now.")</p>
+    <p>@(databases.Count == 0 ? "You don't have access to any databases yet." : $"You can work with {databases.Count} database{(databases.Count == 1 ? "" : "s")} right now.")</p>
+    <div class="hero-actions">
+        @if (databases.Count > 0)
+        {
+            <a class="btn btn-primary" href="query"><Icon Name="terminal" />Open query workspace</a>
+        }
+        else
+        {
+            <a class="btn btn-primary" href="access"><Icon Name="key" />Request database access</a>
+        }
+        @if (IsAdmin && pendingApprovals > 0)
+        {
+            <a class="btn" href="admin/approvals"><Icon Name="check" />Review @pendingApprovals pending approval@(pendingApprovals == 1 ? "" : "s")</a>
+        }
+    </div>
 </div>
+
+@if (expiring > 0)
+{
+    <div class="alert warn" role="alert" style="margin-bottom:18px">
+        <Icon Name="clock" /> You have <strong>@expiring temporary grant@(expiring == 1 ? "" : "s")</strong> expiring within the next 24 hours.
+    </div>
+}
 
 <div class="grid g4" style="margin-bottom:22px">
     <div class="card stat"><div class="label">Databases</div><div class="value">@databases.Count</div><div class="hint">available to you</div></div>
-    <div class="card stat"><div class="label">Temporary grants</div><div class="value">@activeGrants</div><div class="hint">@(expiring) expiring within 24h</div></div>
+    <div class="card stat"><div class="label">Temporary grants</div><div class="value">@activeGrants</div><div class="hint">@(expiring > 0 ? $"{expiring} expiring soon" : "active now")</div></div>
     <div class="card stat"><div class="label">My open requests</div><div class="value">@openRequests</div><div class="hint">awaiting review</div></div>
     <div class="card stat"><div class="label">@(IsAdmin ? "To approve" : "Unread")</div><div class="value">@(IsAdmin ? pendingApprovals : unread)</div><div class="hint">@(IsAdmin ? "pending requests" : "notifications")</div></div>
 </div>
@@ -25,7 +46,11 @@
         <div class="card-head"><h2>Your databases</h2><div class="actions"><a class="btn btn-sm" href="access"><Icon Name="key" />Request access</a></div></div>
         @if (databases.Count == 0)
         {
-            <div class="empty"><Icon Name="inbox" /><div>No databases yet.</div></div>
+            <div class="empty">
+                <Icon Name="inbox" />
+                <div>No databases yet.</div>
+                <a class="btn btn-primary btn-sm" href="access" style="margin-top:12px"><Icon Name="key" />Request access</a>
+            </div>
         }
         else
         {
@@ -59,8 +84,10 @@
                 @foreach (var h in recent)
                 {
                     <div>
-                        <div class="row-inline"><span class="badge @OutcomeClass(h.Outcome)">@h.Outcome</span><span class="faint small">@Ago(h.ExecutedAt) · @h.DurationMs ms</span></div>
-                        <div class="cell-sql" title="@h.SqlText">@h.SqlText</div>
+                        <div class="row-inline"><span class="badge @OutcomeClass(h.Outcome)">@h.Outcome</span><span class="faint small">@Ago(h.ExecutedAt) · @h.DurationMs ms</span>
+                            <a class="btn btn-sm" href="query?db=@h.DatabaseId" style="margin-left:auto" title="Open in workspace"><Icon Name="terminal" /></a>
+                        </div>
+                        <div class="cell-sql" title="@h.SqlText">@TruncateSql(h.SqlText)</div>
                     </div>
                 }
             </div>
@@ -76,7 +103,9 @@
 
     protected override async Task OnLoadAsync()
     {
-        firstName = UserName.Split('@')[0];
+        var rawName = UserName.Split('@')[0];
+        firstName = rawName.Length > 0 ? char.ToUpper(rawName[0]) + rawName[1..] : rawName;
+
         databases = await Permissions.GetAccessibleDatabasesAsync(UserId);
         unread = await Notifications.UnreadCountAsync(UserId);
         await using var db = await DbFactory.CreateDbContextAsync();
@@ -98,5 +127,11 @@
         if (hour < 12) return "Good morning";
         if (hour < 18) return "Good afternoon";
         return "Good evening";
+    }
+
+    private static string TruncateSql(string? sql)
+    {
+        if (string.IsNullOrEmpty(sql)) return "";
+        return sql.Length > 80 ? sql[..77] + "…" : sql;
     }
 }

@@ -12,6 +12,7 @@ public abstract class PageBase : ComponentBase
     [Inject] protected ClientInfo Client { get; set; } = default!;
     [Inject] protected IJSRuntime JS { get; set; } = default!;
     [Inject] protected NavigationManager Nav { get; set; } = default!;
+    [Inject] protected ToastService Toast { get; set; } = default!;
 
     protected string UserId { get; private set; } = "";
     protected string UserName { get; private set; } = "";
@@ -36,12 +37,21 @@ public abstract class PageBase : ComponentBase
     {
         Flash = message;
         FlashIsError = error;
+        Toast?.Show(message, isError: error);
     }
 
     protected void Say(OpResult result, string success)
     {
         Flash = result.Ok ? success : result.Error;
         FlashIsError = !result.Ok;
+        if (result.Ok)
+        {
+            Toast?.Show(success, isError: false);
+        }
+        else
+        {
+            Toast?.Show(result.Error ?? "Operation failed.", isError: true);
+        }
     }
 
     protected static string EnvClass(string env) => env switch
@@ -69,4 +79,15 @@ public abstract class PageBase : ComponentBase
     }
 
     protected static string Local(DateTimeOffset? at) => at?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "-";
+
+    protected async Task DownloadFileAsync(string filename, string content, string mimeType = "text/csv;charset=utf-8")
+    {
+        await JS.InvokeVoidAsync("dbam.download", filename, content, mimeType);
+    }
+
+    protected async Task DownloadBinaryAsync(string filename, byte[] bytes, string mimeType = "application/octet-stream")
+    {
+        var base64 = Convert.ToBase64String(bytes);
+        await JS.InvokeVoidAsync("dbam.downloadBase64", filename, base64, mimeType);
+    }
 }

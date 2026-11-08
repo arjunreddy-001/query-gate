@@ -11,6 +11,7 @@
 @inject AuditService AuditSvc
 @inject ILogger<Query> Logger
 @inject Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage.ProtectedLocalStorage Storage
+@inject SettingsService SettingsSvc
 @using System.Text
 @using System.Text.Json
 @using Microsoft.SqlServer.TransactSql.ScriptDom
@@ -69,7 +70,7 @@ else
                 {
                     <div class="tree-item" @onclick="() => LoadSql(s.SqlText, s.Name)">
                         <Icon Name="star" /><div style="min-width:0"><div>@s.Name</div>@if (!string.IsNullOrEmpty(s.Tags)) { <div class="faint small">@s.Tags</div> }</div>
-                        <button class="btn-ghost btn btn-sm" style="margin-left:auto" @onclick:stopPropagation @onclick="() => DeleteSaved(s.Id)"><Icon Name="x" /></button>
+                        <button class="btn-ghost btn btn-sm" style="margin-left:auto" @onclick:stopPropagation @onclick="() => PromptDeleteSaved(s)" title="Delete saved query"><Icon Name="x" /></button>
                     </div>
                 }
                 @if (saved.Count == 0) { <div class="muted small" style="padding:8px">Nothing saved for this database. Use Save (Ctrl+S).</div> }
@@ -105,20 +106,41 @@ else
             <select @bind="CurrentDbId" style="width:auto;min-width:200px">
                 @foreach (var d in databases) { <option value="@d.Id">@d.Name · @d.Environment @(d.IsActive ? "" : "(Disabled)")</option> }
             </select>
-            <label class="check small" title="Include disabled databases in the list"><input type="checkbox" @bind="showDisabledDatabases" @bind:after="ReloadDatabases" />Show disabled</label>
+            <label class="chip-toggle @(showDisabledDatabases ? "active" : "")" title="Include disabled databases in database list">
+                <input type="checkbox" class="visually-hidden" @bind="showDisabledDatabases" @bind:after="ReloadDatabases" />
+                <span>Show disabled</span>
+            </label>
             @if (Current is not null && databases.FirstOrDefault(d => d.Id == Current.DatabaseId) is { } cd) { <span class="badge @EnvClass(cd.Environment)">@cd.Environment</span> }
             @if (running) { <button class="btn btn-danger" @onclick="CancelRun"><Icon Name="stop" />Cancel</button> }
-            else { <button class="btn btn-primary" title="Run (F5 or Ctrl+Enter). Runs the selection if any." @onclick="Run"><Icon Name="play" />Run</button> }
-            <button class="btn" title="Format (Shift+Alt+F)" @onclick="FormatSql"><Icon Name="format" />Format</button>
-            <button class="btn" title="Save (Ctrl+S)" @onclick="OpenSave"><Icon Name="save" />Save</button>
-            <button class="btn" @onclick="() => editingPreferences = true">Editor settings</button>
-            <label class="check small" title="Run inside a transaction and roll back"><input type="checkbox" @bind="dryRun" />Dry run</label>
-            <label class="check small">Timeout <input type="number" min="1" max="600" style="width:64px" @bind="timeout" placeholder="def" />s</label>
+            else
+            {
+                <button class="btn btn-primary" title="Run (F5 or Ctrl+Enter). Runs the selection if any." @onclick="Run"><Icon Name="play" />Run</button>
+                <button class="btn btn-hover-expand" title="Explain query plan" @onclick="ExplainPlan" disabled="@(Current is null)">
+                    <Icon Name="activity" /><span class="btn-lbl">Explain</span>
+                </button>
+            }
+            <button class="btn btn-hover-expand" title="Format (Shift+Alt+F)" @onclick="FormatSql">
+                <Icon Name="format" /><span class="btn-lbl">Format</span>
+            </button>
+            <button class="btn btn-hover-expand" title="Save (Ctrl+S)" @onclick="OpenSave">
+                <Icon Name="save" /><span class="btn-lbl">Save</span>
+            </button>
+            <button class="btn btn-hover-expand" title="Editor preferences" @onclick="() => editingPreferences = true">
+                <Icon Name="cog" /><span class="btn-lbl">Editor settings</span>
+            </button>
+            <label class="chip-toggle chip-warn @(dryRun ? "active" : "")" title="Dry run: execute in transaction and roll back">
+                <input type="checkbox" class="visually-hidden" @bind="dryRun" />
+                <span>Dry run</span>
+            </label>
+            <div class="chip-input" title="@TimeoutTooltip">
+                <Icon Name="clock" />
+                <input type="number" min="1" max="@maxTimeout" @bind="timeout" @bind:after="ValidateTimeout" placeholder="@defaultTimeout" />
+                <span class="unit">s</span>
+            </div>
         </div>
 
         <div id="sql-editor" class="editor-box"></div>
         <div class="ws-split" title="Drag to resize"></div>
-        <Banner Text="@Flash" IsError="@FlashIsError" />
 
         <div class="card results @(maximized ? "maximized" : "")" @onkeydown='e => { if (e.Key == "Escape") maximized = false; }' tabindex="-1">
             <div class="card-head" style="padding:5px 10px">
@@ -126,14 +148,22 @@ else
                 else
                 {
                     <span class="badge @OutcomeClass(last.Outcome)">@last.Outcome</span>
+                    @if (last.IsMasked)
+                    {
+                        <span class="badge warn" title="Sensitive PII columns redacted (no UNMASK permission)"><Icon Name="lock" />Masked (@last.MaskedColumns.Count PII redacted)</span>
+                    }
                     <span class="muted small">@last.DurationMs ms · @last.RowsReturned row(s) returned@(last.RowsAffected > 0 ? $" · {last.RowsAffected} affected" : "")</span>
                     <div class="actions">
                         @for (var i = 0; i < last.ResultSets.Count; i++)
                         {
                             var idx = i;
-                            <button class="btn btn-sm @(activeResult == idx ? "btn-primary" : "")" @onclick="() => { activeResult = idx; sortCol = null; }">Result @(idx + 1)</button>
+                            <button class="btn btn-sm @(activeResult == idx ? "btn-primary" : "")" @onclick="() => { activeResult = idx; sortCol = null; SaveTabResultState(Current); }">Result @(idx + 1)</button>
                         }
-                        <button class="btn btn-sm @(activeResult == -1 ? "btn-primary" : "")" @onclick="() => activeResult = -1">Messages</button>
+                        <button class="btn btn-sm @(activeResult == -1 ? "btn-primary" : "")" @onclick="() => { activeResult = -1; SaveTabResultState(Current); }">Messages</button>
+                        @if (last.ExecutionPlan is not null)
+                        {
+                            <button class="btn btn-sm @(activeResult == -2 ? "btn-primary" : "")" @onclick="() => { activeResult = -2; SaveTabResultState(Current); }"><Icon Name="activity" />Execution Plan</button>
+                        }
                         @if (last.ResultSets.Count > 0 && activeResult >= 0)
                         {
                             <input type="search" placeholder="Filter rows…" @bind="gridFilter" @bind:event="oninput" style="width:130px;height:24px;padding:2px 8px;font-size:12px;margin-right:2px" title="Filter displayed rows" />
@@ -142,29 +172,35 @@ else
                                 var matchCount = GetProcessedRows(last.ResultSets[activeResult]).Count;
                                 <span class="badge" style="font-size:11px" title="Matching rows">@matchCount/@last.ResultSets[activeResult].Rows.Count</span>
                             }
-                            <div class="export-dropdown">
-                                <button class="btn btn-sm" type="button" title="Export results">
-                                    <Icon Name="download" />Export <span style="font-size:9px;margin-left:2px">▾</span>
-                                </button>
-                                <div class="export-dropdown-menu">
-                                    <button class="export-dropdown-item" type="button" @onclick="ExportCsv">
-                                        <Icon Name="file" />CSV (.csv)
+                            @if (canExport)
+                            {
+                                <div class="export-dropdown">
+                                    <button class="btn btn-sm" type="button" title="Export results">
+                                        <Icon Name="download" />Export <span style="font-size:9px;margin-left:2px">▾</span>
                                     </button>
-                                    <button class="export-dropdown-item" type="button" @onclick="ExportExcel">
-                                        <Icon Name="table" />Excel (.xls)
-                                    </button>
-                                    <button class="export-dropdown-item" type="button" @onclick="ExportJson">
-                                        <Icon Name="code" />JSON (.json)
-                                    </button>
-                                    <hr class="export-dropdown-divider" />
-                                    <button class="export-dropdown-item" type="button" @onclick="CopyMarkdown">
-                                        <Icon Name="copy" />Copy Markdown
-                                    </button>
-                                    <button class="export-dropdown-item" type="button" @onclick="OpenSqlInsertDialog">
-                                        <Icon Name="code" />SQL INSERT…
-                                    </button>
+                                    <div class="export-dropdown-menu">
+                                        <button class="export-dropdown-item" type="button" @onclick="ExportCsv">
+                                            <Icon Name="file" />CSV (.csv)
+                                        </button>
+                                        <button class="export-dropdown-item" type="button" @onclick="ExportXlsx">
+                                            <Icon Name="table" />Excel (.xlsx)
+                                        </button>
+                                        <button class="export-dropdown-item" type="button" @onclick="ExportXlsb">
+                                            <Icon Name="table" />Excel Binary (.xlsb)
+                                        </button>
+                                        <button class="export-dropdown-item" type="button" @onclick="ExportJson">
+                                            <Icon Name="code" />JSON (.json)
+                                        </button>
+                                        <hr class="export-dropdown-divider" />
+                                        <button class="export-dropdown-item" type="button" @onclick="CopyMarkdown">
+                                            <Icon Name="copy" />Copy Markdown
+                                        </button>
+                                        <button class="export-dropdown-item" type="button" @onclick="OpenSqlInsertDialog">
+                                            <Icon Name="code" />SQL INSERT…
+                                        </button>
+                                    </div>
                                 </div>
-                            </div>
+                            }
                         }
                         <button class="btn btn-sm" title="@(maximized ? "Minimize (Esc)" : "Maximize results")" @onclick="() => maximized = !maximized"><Icon Name="@(maximized ? "minimize" : "maximize")" />@(maximized ? "Minimize" : "Maximize")</button>
                     </div>
@@ -190,8 +226,15 @@ else
                                     {
                                         var col = cIdx;
                                         var colName = rs.Columns[col];
+                                        var isColMasked = rs.MaskedColumns.Contains(colName, StringComparer.OrdinalIgnoreCase);
                                         <th class="sortable" @onclick="() => ToggleSort(col)" title="Click to sort" style="cursor:pointer;user-select:none">
-                                            <span>@colName</span>
+                                            <span style="display:inline-flex;align-items:center;gap:4px">
+                                                @if (isColMasked)
+                                                {
+                                                    <span title="Sensitive data masked (no UNMASK permission)"><Icon Name="lock" /></span>
+                                                }
+                                                <span>@colName</span>
+                                            </span>
                                             @if (sortCol == col)
                                             {
                                                 <span class="sort-icon" style="margin-left:4px;font-size:10px;color:var(--brand)">@(sortAsc ? "▲" : "▼")</span>
@@ -224,6 +267,140 @@ else
                     <div class="card-pad mono small">
                         @foreach (var m in last.Messages) { <div>@m</div> }
                         @if (last.Messages.Count == 0) { <span class="muted">No messages.</span> }
+                    </div>
+                }
+                else if (activeResult == -2 && last.ExecutionPlan is not null)
+                {
+                    var plan = last.ExecutionPlan;
+                    <div class="plan-container" style="padding:14px;overflow-y:auto;max-height:100%">
+                        <div class="plan-summary-grid">
+                            <div class="plan-metric">
+                                <span class="plan-metric-label">Estimated Subtree Cost</span>
+                                <span class="plan-metric-value">@plan.TotalCost.ToString("F4")</span>
+                            </div>
+                            <div class="plan-metric">
+                                <span class="plan-metric-label">Optimization Level</span>
+                                <span class="plan-metric-value">@plan.OptimizationLevel</span>
+                            </div>
+                            <div class="plan-metric">
+                                <span class="plan-metric-label">Estimated Rows</span>
+                                <span class="plan-metric-value">@plan.EstimatedRows.ToString("N0")</span>
+                            </div>
+                            <div class="plan-metric">
+                                <span class="plan-metric-label">Operators</span>
+                                <span class="plan-metric-value">@plan.Operators.Count</span>
+                            </div>
+                            @if (plan.CompileTimeMs > 0)
+                            {
+                                <div class="plan-metric">
+                                    <span class="plan-metric-label">Compile Time</span>
+                                    <span class="plan-metric-value">@plan.CompileTimeMs ms</span>
+                                </div>
+                            }
+                        </div>
+
+                        @if (plan.MissingIndexes.Count > 0)
+                        {
+                            <div class="plan-card" style="margin-top:14px">
+                                <div class="row-inline" style="justify-content:space-between;margin-bottom:8px">
+                                    <div class="row-inline" style="gap:8px">
+                                        <span class="badge warn"><Icon Name="alert" />Missing Index Recommendation</span>
+                                        <span class="muted small">SQL Server optimizer identified index improvement</span>
+                                    </div>
+                                </div>
+                                @foreach (var mi in plan.MissingIndexes)
+                                {
+                                    <div style="background:var(--bg-sunken);border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:8px">
+                                        <div class="row-inline" style="justify-content:space-between;margin-bottom:6px">
+                                            <div>
+                                                <b>@mi.Table</b>
+                                                <span class="badge ok" style="margin-left:6px">+@mi.Impact% cost reduction</span>
+                                            </div>
+                                            <div class="row-inline" style="gap:6px">
+                                                <button class="btn btn-sm" type="button" @onclick="() => CopyMissingIndex(mi.CreateIndexStatement)"><Icon Name="copy" />Copy Index Script</button>
+                                                <button class="btn btn-sm btn-primary" type="button" @onclick="() => InsertMissingIndexToEditor(mi.CreateIndexStatement)"><Icon Name="code" />Add to Editor</button>
+                                            </div>
+                                        </div>
+                                        <pre class="mono small" style="margin:0;padding:8px;background:var(--bg-elev);border-radius:4px;overflow-x:auto"><code>@mi.CreateIndexStatement</code></pre>
+                                    </div>
+                                }
+                            </div>
+                        }
+
+                        <div class="plan-card" style="margin-top:14px">
+                            <div class="row-inline" style="justify-content:space-between;margin-bottom:8px">
+                                <h4 style="margin:0;font-size:13px;font-weight:700">Operator Breakdown (by Cost)</h4>
+                                <div class="row-inline" style="gap:6px">
+                                    <button class="btn btn-sm" type="button" @onclick="CopyPlanXml"><Icon Name="copy" />Copy Plan XML</button>
+                                    <button class="btn btn-sm" type="button" @onclick="() => showRawPlanXml = !showRawPlanXml"><Icon Name="code" />@(showRawPlanXml ? "Hide XML" : "View Raw XML")</button>
+                                </div>
+                            </div>
+
+                            @if (showRawPlanXml)
+                            {
+                                <pre class="mono small" style="max-height:240px;overflow:auto;padding:10px;background:var(--bg-sunken);border:1px solid var(--line);border-radius:var(--radius-sm);margin-bottom:12px"><code>@plan.RawXml</code></pre>
+                            }
+
+                            <div class="table-wrap">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th style="width:40px">Node</th>
+                                            <th>Operator</th>
+                                            <th>Target Object</th>
+                                            <th class="num" style="width:90px">Est. Rows</th>
+                                            <th class="num" style="width:110px">Cost (% of Total)</th>
+                                            <th style="width:160px">% Subtree Cost</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var op in plan.Operators)
+                                        {
+                                            <tr>
+                                                <td class="num faint">@op.NodeId</td>
+                                                <td>
+                                                    <div class="row-inline" style="gap:6px">
+                                                        <b>@op.PhysicalOp</b>
+                                                        @if (op.LogicalOp != op.PhysicalOp && !string.IsNullOrEmpty(op.LogicalOp))
+                                                        {
+                                                            <span class="faint small">(@op.LogicalOp)</span>
+                                                        }
+                                                        @if (op.IsScan)
+                                                        {
+                                                            <span class="badge warn" style="font-size:10px;padding:1px 5px" title="Full scan: consider adding index or selective predicate">SCAN</span>
+                                                        }
+                                                        @if (op.IsWarning && !op.IsScan)
+                                                        {
+                                                            <span class="badge bad" style="font-size:10px;padding:1px 5px" title="@op.WarningMessage">WARNING</span>
+                                                        }
+                                                    </div>
+                                                </td>
+                                                <td>
+                                                    @if (!string.IsNullOrEmpty(op.TargetObject))
+                                                    {
+                                                        <code>@op.TargetObject</code>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="faint small">-</span>
+                                                    }
+                                                </td>
+                                                <td class="num">@op.EstimatedRows.ToString("N0")</td>
+                                                <td class="num">
+                                                    <span>@op.OperatorCost.ToString("F4")</span>
+                                                    <span class="faint small" style="margin-left:4px">(@op.CostPercentage%)</span>
+                                                </td>
+                                                <td>
+                                                    <div class="plan-cost-bar">
+                                                        <div class="plan-cost-fill @(op.CostPercentage >= 50 ? "cost-high" : op.CostPercentage >= 20 ? "cost-med" : "")" style="width:@(Math.Max(3, Math.Min(100, op.CostPercentage)))%"></div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
                 }
             }
@@ -280,17 +457,62 @@ else
 {
     var rs = last.ResultSets[activeResult];
     <div class="modal-back">
-        <div class="modal">
-            <div class="modal-head"><h2>SQL INSERT Export</h2></div>
-            <div class="modal-body stack">
+        <div class="modal" style="max-width:920px;width:95vw;max-height:90vh;display:flex;flex-direction:column">
+            <div class="modal-head">
+                <h2>SQL INSERT Export</h2>
+                <span class="badge" style="font-size:11px">@rs.Rows.Count @(rs.Rows.Count == 1 ? "row" : "rows")</span>
+            </div>
+            <div class="modal-body stack" style="gap:16px;overflow-y:auto;flex:1">
                 <div class="field">
                     <label>Target Table Name</label>
-                    <input type="text" placeholder="e.g. Products" @bind="sqlInsertTableName" />
-                    <span class="faint small">Statements will insert into this table.</span>
+                    <input type="text" placeholder="e.g. Products or dbo.Products" @bind="sqlInsertTableName" />
+                    <span class="faint small">Statements will insert into this table. Schema is checked to detect identities and auto-insert defaults.</span>
                 </div>
+
                 <div class="field">
-                    <div class="row-inline" style="justify-content:space-between;margin-bottom:4px">
-                        <label style="margin:0">Duplicate Check Columns (Optional)</label>
+                    <div class="row-inline" style="justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:8px">
+                        <label style="margin:0;font-weight:600">
+                            Columns in INSERT Statement (@includedInsertCols.Count of @rs.Columns.Count included)
+                        </label>
+                        <div class="row-inline" style="gap:6px">
+                            <button class="btn btn-sm" type="button" @onclick="() => SelectAllIncludedCols(rs.Columns)">Select all</button>
+                            <button class="btn btn-sm" type="button" @onclick="() => ExcludeIdentityCols(rs.Columns)">Exclude Identity</button>
+                            <button class="btn btn-sm" type="button" @onclick="() => ExcludeAutoCols(rs.Columns)">Exclude Auto-insert</button>
+                            <button class="btn btn-sm" type="button" @onclick="() => ResetIncludedColsDefaults(rs.Columns)">Reset defaults</button>
+                        </div>
+                    </div>
+                    <p class="muted small" style="margin-bottom:8px">
+                        Select which columns to include in the generated <code>INSERT INTO [Table] (...)</code> statement. Identity and auto-insert columns are excluded by default, but you can check any column below to include it:
+                    </p>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(210px, 1fr));gap:6px;max-height:200px;overflow-y:auto;padding:8px 10px;border:1px solid var(--line);border-radius:var(--radius);background:var(--bg-sunken)">
+                        @foreach (var col in rs.Columns)
+                        {
+                            var isId = IsIdentityColumn(col);
+                            var isAuto = IsAutoInsertColumn(col);
+                            var isIncluded = includedInsertCols.Contains(col);
+                            <label class="check small" style="margin:0;display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:var(--radius-sm);background:@(isIncluded ? "var(--bg-elev)" : "transparent")">
+                                <input type="checkbox" checked="@isIncluded" @onchange="e => ToggleIncludedCol(col, (bool)(e.Value ?? false))" />
+                                <span style="font-weight:@(isIncluded ? "600" : "400");word-break:break-all">@col</span>
+                                @if (isId)
+                                {
+                                    <span class="badge warn" style="font-size:9px;padding:1px 5px;margin-left:auto" title="Identity column detected from table schema">Identity</span>
+                                }
+                                else if (isAuto)
+                                {
+                                    <span class="badge" style="font-size:9px;padding:1px 5px;margin-left:auto" title="Auto-generated / default column detected from table schema">Auto</span>
+                                }
+                            </label>
+                        }
+                    </div>
+                    @if (includedInsertCols.Count == 0)
+                    {
+                        <div class="alert bad small" style="margin-top:6px">Please select at least one column to include in the INSERT statement.</div>
+                    }
+                </div>
+
+                <div class="field">
+                    <div class="row-inline" style="justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:8px">
+                        <label style="margin:0;font-weight:600">Duplicate Check Columns (Optional - @selectedInsertCols.Count selected)</label>
                         <div class="row-inline" style="gap:6px">
                             <button class="btn btn-sm" type="button" @onclick="() => selectedInsertCols = new HashSet<string>(rs.Columns, StringComparer.OrdinalIgnoreCase)">Select all</button>
                             <button class="btn btn-sm" type="button" @onclick="() => selectedInsertCols.Clear()">Clear</button>
@@ -300,25 +522,38 @@ else
                         Select columns to check before inserting. If selected, wraps statements in:
                         <code>IF NOT EXISTS (SELECT 1 FROM [Table] WHERE col = 'val') BEGIN INSERT ... END</code>
                     </p>
-                    <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(140px, 1fr));gap:6px;max-height:160px;overflow-y:auto;padding:8px;border:1px solid var(--line);border-radius:var(--radius);background:var(--bg-sunken)">
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(210px, 1fr));gap:6px;max-height:160px;overflow-y:auto;padding:8px 10px;border:1px solid var(--line);border-radius:var(--radius);background:var(--bg-sunken)">
                         @foreach (var col in rs.Columns)
                         {
-                            <label class="check small" style="margin:0">
+                            <label class="check small" style="margin:0;display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:var(--radius-sm)">
                                 <input type="checkbox" checked="@selectedInsertCols.Contains(col)" @onchange="e => ToggleInsertCol(col, (bool)(e.Value ?? false))" />
-                                <span>@col</span>
+                                <span style="word-break:break-all">@col</span>
                             </label>
                         }
                     </div>
                 </div>
             </div>
             <div class="modal-foot">
-                <button class="btn" @onclick="() => showSqlInsertModal = false">Cancel</button>
-                <button class="btn" @onclick="DownloadSqlInsert"><Icon Name="download" />Download .sql</button>
-                <button class="btn btn-primary" @onclick="CopySqlInsert"><Icon Name="copy" />Copy SQL</button>
+                <button class="btn" type="button" @onclick="() => showSqlInsertModal = false">Cancel</button>
+                <button class="btn" type="button" disabled="@(includedInsertCols.Count == 0)" @onclick="CopySqlInsert">
+                    <Icon Name="copy" />Copy SQL
+                </button>
+                <button class="btn btn-primary" type="button" disabled="@(includedInsertCols.Count == 0)" @onclick="DownloadSqlInsert">
+                    <Icon Name="download" />Download .sql
+                </button>
             </div>
         </div>
     </div>
 }
+
+<ConfirmDialog IsOpen="@(deletingSaved is not null)"
+               Title="Delete Saved Query?"
+               Message="@($"Are you sure you want to delete the saved query '{deletingSaved?.Name}'?")"
+               Details="This saved query will be permanently removed from your workspace."
+               ConfirmText="Delete Query"
+               IsDanger="true"
+               OnConfirm="ConfirmDeleteSaved"
+               OnCancel="() => deletingSaved = null" />
 
 @code {
     private sealed class QueryTab
@@ -327,6 +562,30 @@ else
         public string Name { get; set; } = "Query 1";
         public Guid DatabaseId { get; set; }
         public string Sql { get; set; } = "";
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public ExecutionResult? LastResult { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public int ActiveResult { get; set; } = -1;
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string? LastRunSql { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public List<string>? Confirm { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string? GridFilter { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public int? SortCol { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool SortAsc { get; set; } = true;
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool ShowRawPlanXml { get; set; }
     }
 
     [SupplyParameterFromQuery(Name = "db")] public Guid? DbParam { get; set; }
@@ -338,6 +597,10 @@ else
     private bool loaded, running, dryRun, saving, initialized, maximized;
     private bool? sideOpen;
     private int? timeout;
+    private int defaultTimeout = 30;
+    private int maxTimeout = 300;
+    private bool canExport;
+    private string TimeoutTooltip => $"Query timeout in seconds (Default: {defaultTimeout}s, Max allowed: {maxTimeout}s)";
     private ExecutionResult? last;
     private int activeResult;
     private Guid runId;
@@ -367,12 +630,66 @@ else
     private Guid CurrentDbId
     {
         get => Current?.DatabaseId ?? Guid.Empty;
-        set { if (Current is not null && Current.DatabaseId != value) { Current.DatabaseId = value; _ = OnDbChanged(); } }
+        set
+        {
+            if (Current is not null && Current.DatabaseId != value)
+            {
+                Current.DatabaseId = value;
+                ResetResults();
+                SaveTabResultState(Current);
+                _ = OnDbChanged();
+            }
+        }
+    }
+
+    private void ResetResults()
+    {
+        last = null;
+        activeResult = -1;
+        confirm = null;
+        gridFilter = "";
+        sortCol = null;
+        sortAsc = true;
+        showRawPlanXml = false;
+        lastRunSql = null;
+    }
+
+    private void SaveTabResultState(QueryTab? tab)
+    {
+        if (tab is null) return;
+        tab.LastResult = last;
+        tab.ActiveResult = activeResult;
+        tab.LastRunSql = lastRunSql;
+        tab.Confirm = confirm;
+        tab.GridFilter = gridFilter;
+        tab.SortCol = sortCol;
+        tab.SortAsc = sortAsc;
+        tab.ShowRawPlanXml = showRawPlanXml;
+    }
+
+    private void LoadTabResultState(QueryTab? tab)
+    {
+        if (tab is null)
+        {
+            ResetResults();
+            return;
+        }
+        last = tab.LastResult;
+        activeResult = tab.ActiveResult;
+        lastRunSql = tab.LastRunSql;
+        confirm = tab.Confirm;
+        gridFilter = tab.GridFilter ?? "";
+        sortCol = tab.SortCol;
+        sortAsc = tab.SortAsc;
+        showRawPlanXml = tab.ShowRawPlanXml;
     }
 
     protected override async Task OnLoadAsync()
     {
         await ReloadDatabases();
+        defaultTimeout = await SettingsSvc.GetIntAsync("DefaultTimeoutSeconds");
+        maxTimeout = await SettingsSvc.GetIntAsync("MaxTimeoutSeconds");
+        if (!timeout.HasValue) timeout = defaultTimeout;
         await using var db = await DbFactory.CreateDbContextAsync();
         var user = await db.Users.AsNoTracking().SingleAsync(u => u.Id == UserId);
         savedPreferences = new(user.EditorAutomaticSuggestions, user.EditorLiveDiagnostics, user.EditorFontSize);
@@ -402,6 +719,7 @@ else
         if (tabs.Count == 0) tabs.Add(new QueryTab { DatabaseId = DbParam ?? databases[0].Id, Sql = "SELECT TOP 10 * FROM sys.objects;" });
         else if (DbParam is { } p && databases.Any(d => d.Id == p)) tabs.Add(new QueryTab { Name = "Query " + (tabs.Count + 1), DatabaseId = p });
         activeId = tabs[^1].Id;
+        LoadTabResultState(Current);
 
         self = DotNetObjectReference.Create(this);
         await JS.InvokeVoidAsync("dbam.workspaceInit", "query-ws");
@@ -468,10 +786,43 @@ else
 
     private async Task OnDbChanged()
     {
+        await CheckExportPermissionAsync();
         await LoadMetadata(false);
         await LoadSidePanels();
         await PersistAsync();
         StateHasChanged();
+    }
+
+    private async Task CheckExportPermissionAsync()
+    {
+        if (Current is not null && Current.DatabaseId != Guid.Empty)
+        {
+            canExport = await Permissions.HasAsync(UserId, Current.DatabaseId, Perm.Export);
+        }
+        else
+        {
+            canExport = false;
+        }
+    }
+
+    private void ValidateTimeout()
+    {
+        if (!timeout.HasValue)
+        {
+            timeout = defaultTimeout;
+            return;
+        }
+
+        if (timeout.Value < 1)
+        {
+            timeout = 1;
+            Say("Minimum query timeout is 1 second.", true);
+        }
+        else if (timeout.Value > maxTimeout)
+        {
+            timeout = maxTimeout;
+            Say($"Maximum allowed query timeout is {maxTimeout} seconds.", true);
+        }
     }
 
     private async Task ReloadDatabases()
@@ -527,7 +878,9 @@ else
     {
         if (id == activeId) return;
         await SyncCurrent();
+        SaveTabResultState(Current);
         activeId = id;
+        LoadTabResultState(Current);
         await JS.InvokeVoidAsync("dbam.editorSet", "main", Current!.Sql);
         await OnDbChanged();
     }
@@ -540,8 +893,10 @@ else
     private async Task NewTab()
     {
         await SyncCurrent();
+        SaveTabResultState(Current);
         tabs.Add(new QueryTab { Name = "Query " + (tabs.Count + 1), DatabaseId = Current?.DatabaseId ?? databases[0].Id });
         activeId = tabs[^1].Id;
+        LoadTabResultState(Current);
         await JS.InvokeVoidAsync("dbam.editorSet", "main", "");
         await PersistAsync();
     }
@@ -551,7 +906,13 @@ else
         if (tabs.Count == 1) { Current!.Sql = ""; await JS.InvokeVoidAsync("dbam.editorSet", "main", ""); return; }
         var wasActive = id == activeId;
         tabs.RemoveAll(t => t.Id == id);
-        if (wasActive) { activeId = tabs[^1].Id; await JS.InvokeVoidAsync("dbam.editorSet", "main", Current!.Sql); await OnDbChanged(); }
+        if (wasActive)
+        {
+            activeId = tabs[^1].Id;
+            LoadTabResultState(Current);
+            await JS.InvokeVoidAsync("dbam.editorSet", "main", Current!.Sql);
+            await OnDbChanged();
+        }
         else await PersistAsync();
     }
 
@@ -575,6 +936,7 @@ else
 
     private async Task RunCore(bool confirmed)
     {
+        ValidateTimeout();
         if (running || Current is null) return;
         await SyncCurrent();
         var selection = await JS.InvokeAsync<string>("dbam.editorSelection", "main");
@@ -596,9 +958,72 @@ else
             if (last.Outcome == "NeedsConfirmation") { confirm = last.UnfilteredWrites; last = null; }
             else if (last.ErrorLine is { } line) await JS.InvokeVoidAsync("dbam.editorMarker", "main", line, last.Error);
         }
-        finally { running = false; }
+        finally
+        {
+            running = false;
+            SaveTabResultState(Current);
+        }
         await LoadSidePanels();
         await InvokeAsync(StateHasChanged);
+    }
+
+    private bool showRawPlanXml;
+
+    private async Task ExplainPlan()
+    {
+        ValidateTimeout();
+        if (running || Current is null) return;
+        await SyncCurrent();
+        var selection = await JS.InvokeAsync<string>("dbam.editorSelection", "main");
+        var sql = string.IsNullOrWhiteSpace(selection) ? Current.Sql : selection;
+        if (string.IsNullOrWhiteSpace(sql)) { Say("Nothing to explain.", true); return; }
+
+        running = true; Flash = null; lastRunSql = sql;
+        await JS.InvokeVoidAsync("dbam.editorMarker", "main", 0, "");
+        StateHasChanged();
+        try
+        {
+            last = await Execution.GetEstimatedPlanAsync(Me, Current.DatabaseId, sql, timeout);
+            if (last.ExecutionPlan is not null)
+            {
+                activeResult = -2;
+            }
+            else
+            {
+                activeResult = -1;
+            }
+            if (last.ErrorLine is { } line) await JS.InvokeVoidAsync("dbam.editorMarker", "main", line, last.Error);
+        }
+        finally
+        {
+            running = false;
+            SaveTabResultState(Current);
+        }
+        await LoadSidePanels();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task CopyPlanXml()
+    {
+        if (last?.ExecutionPlan is null) return;
+        await JS.InvokeVoidAsync("dbam.copy", last.ExecutionPlan.RawXml);
+        Say("Showplan XML copied to clipboard.");
+    }
+
+    private async Task CopyMissingIndex(string ddl)
+    {
+        await JS.InvokeVoidAsync("dbam.copy", ddl);
+        Say("CREATE INDEX statement copied to clipboard.");
+    }
+
+    private async Task InsertMissingIndexToEditor(string ddl)
+    {
+        await SyncCurrent();
+        var existing = Current?.Sql ?? "";
+        var separator = string.IsNullOrWhiteSpace(existing) ? "" : "\n\n-- Recommended Index\n";
+        var updated = existing + separator + ddl;
+        await LoadSql(updated, null);
+        Say("Missing index statement added to editor.");
     }
 
     private void CancelRun() => Execution.Cancel(runId, UserId);
@@ -625,6 +1050,22 @@ else
         if (result.Ok) { Current.Name = saveName; saving = false; await LoadSidePanels(); await PersistAsync(); }
     }
 
+    private SavedQuery? deletingSaved;
+
+    private void PromptDeleteSaved(SavedQuery s)
+    {
+        deletingSaved = s;
+    }
+
+    private async Task ConfirmDeleteSaved()
+    {
+        if (deletingSaved is null) return;
+        var id = deletingSaved.Id;
+        deletingSaved = null;
+        await DeleteSaved(id);
+        Say("Saved query deleted.");
+    }
+
     private async Task DeleteSaved(Guid id) { await Workspace.DeleteAsync(UserId, id); await LoadSidePanels(); }
 
     private int? sortCol;
@@ -643,6 +1084,7 @@ else
             sortCol = colIndex;
             sortAsc = true;
         }
+        SaveTabResultState(Current);
     }
 
     private List<object?[]> GetProcessedRows(ResultSetDto rs)
@@ -670,29 +1112,42 @@ else
     {
         if (last is null || activeResult < 0 || activeResult >= last.ResultSets.Count || Current is null) return;
         var rs = last.ResultSets[activeResult];
-        var auth = await Execution.AuthorizeExportAsync(Me, Current.DatabaseId, rs.Rows.Count, lastRunSql ?? "");
+        var auth = await Execution.AuthorizeExportAsync(Me, Current.DatabaseId, rs.Rows.Count, lastRunSql ?? "", "Csv", Current.Name);
         if (!auth.Ok) { Say(auth.Error!, true); return; }
 
         var csv = ExportFormatters.ToCsv(rs.Columns, rs.Rows);
         await JS.InvokeVoidAsync("dbam.download", $"{Current.Name.Replace(' ', '_')}-{DateTime.Now:yyyyMMdd-HHmmss}.csv", csv, "text/csv;charset=utf-8");
     }
 
-    private async Task ExportExcel()
+    private async Task ExportXlsx()
     {
         if (last is null || activeResult < 0 || activeResult >= last.ResultSets.Count || Current is null) return;
         var rs = last.ResultSets[activeResult];
-        var auth = await Execution.AuthorizeExportAsync(Me, Current.DatabaseId, rs.Rows.Count, lastRunSql ?? "");
+        var auth = await Execution.AuthorizeExportAsync(Me, Current.DatabaseId, rs.Rows.Count, lastRunSql ?? "", "Xlsx", Current.Name);
         if (!auth.Ok) { Say(auth.Error!, true); return; }
 
-        var xml = ExportFormatters.ToExcelXml(rs.Columns, rs.Rows, Current.Name);
-        await JS.InvokeVoidAsync("dbam.download", $"{Current.Name.Replace(' ', '_')}-{DateTime.Now:yyyyMMdd-HHmmss}.xls", xml, "application/vnd.ms-excel;charset=utf-8");
+        var bytes = ExportFormatters.ToXlsx(rs.Columns, rs.Rows, Current.Name);
+        var fileName = $"{Current.Name.Replace(' ', '_')}-{DateTime.Now:yyyyMMdd-HHmmss}.xlsx";
+        await DownloadBinaryAsync(fileName, bytes, ExportFormatters.XlsxMimeType);
+    }
+
+    private async Task ExportXlsb()
+    {
+        if (last is null || activeResult < 0 || activeResult >= last.ResultSets.Count || Current is null) return;
+        var rs = last.ResultSets[activeResult];
+        var auth = await Execution.AuthorizeExportAsync(Me, Current.DatabaseId, rs.Rows.Count, lastRunSql ?? "", "Xlsb", Current.Name);
+        if (!auth.Ok) { Say(auth.Error!, true); return; }
+
+        var bytes = ExportFormatters.ToXlsb(rs.Columns, rs.Rows, Current.Name);
+        var fileName = $"{Current.Name.Replace(' ', '_')}-{DateTime.Now:yyyyMMdd-HHmmss}.xlsb";
+        await DownloadBinaryAsync(fileName, bytes, ExportFormatters.XlsbMimeType);
     }
 
     private async Task ExportJson()
     {
         if (last is null || activeResult < 0 || activeResult >= last.ResultSets.Count || Current is null) return;
         var rs = last.ResultSets[activeResult];
-        var auth = await Execution.AuthorizeExportAsync(Me, Current.DatabaseId, rs.Rows.Count, lastRunSql ?? "");
+        var auth = await Execution.AuthorizeExportAsync(Me, Current.DatabaseId, rs.Rows.Count, lastRunSql ?? "", "Json", Current.Name);
         if (!auth.Ok) { Say(auth.Error!, true); return; }
 
         var json = ExportFormatters.ToJson(rs.Columns, rs.Rows);
@@ -703,7 +1158,7 @@ else
     {
         if (last is null || activeResult < 0 || activeResult >= last.ResultSets.Count || Current is null) return;
         var rs = last.ResultSets[activeResult];
-        var auth = await Execution.AuthorizeExportAsync(Me, Current.DatabaseId, rs.Rows.Count, lastRunSql ?? "");
+        var auth = await Execution.AuthorizeExportAsync(Me, Current.DatabaseId, rs.Rows.Count, lastRunSql ?? "", "Markdown", Current.Name);
         if (!auth.Ok) { Say(auth.Error!, true); return; }
 
         var md = ExportFormatters.ToMarkdown(rs.Columns, rs.Rows);
@@ -714,12 +1169,61 @@ else
     private bool showSqlInsertModal;
     private string sqlInsertTableName = "Products";
     private HashSet<string> selectedInsertCols = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> includedInsertCols = new(StringComparer.OrdinalIgnoreCase);
+
+    private DbObjectInfo? MatchedTable => FindMatchingTable(sqlInsertTableName);
+
+    private DbObjectInfo? FindMatchingTable(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        var clean = name.Trim().Trim('[', ']');
+        if (clean.Contains('.'))
+        {
+            var parts = clean.Split('.', 2);
+            var s = parts[0].Trim('[', ']');
+            var t = parts[1].Trim('[', ']');
+            return objects.FirstOrDefault(o =>
+                o.Schema.Equals(s, StringComparison.OrdinalIgnoreCase) &&
+                o.Name.Equals(t, StringComparison.OrdinalIgnoreCase));
+        }
+        return objects.FirstOrDefault(o => o.Name.Equals(clean, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private bool IsIdentityColumn(string colName)
+    {
+        var table = MatchedTable;
+        if (table != null)
+        {
+            var c = table.ColumnDetails.FirstOrDefault(cd => cd.Name.Equals(colName, StringComparison.OrdinalIgnoreCase));
+            if (c != null) return c.IsIdentity;
+        }
+        return colName.Equals("Id", StringComparison.OrdinalIgnoreCase) ||
+               (colName.EndsWith("_id", StringComparison.OrdinalIgnoreCase) && colName.Length <= 8);
+    }
+
+    private bool IsAutoInsertColumn(string colName)
+    {
+        var table = MatchedTable;
+        if (table != null)
+        {
+            var c = table.ColumnDetails.FirstOrDefault(cd => cd.Name.Equals(colName, StringComparison.OrdinalIgnoreCase));
+            if (c != null && (c.HasDefault || c.IsComputed || c.DataType is "timestamp" or "rowversion"))
+                return true;
+        }
+
+        var clean = colName.Replace("_", "").ToLowerInvariant();
+        return clean is "createdat" or "updatedat" or "createdon" or "updatedon"
+            or "createddate" or "updateddate" or "modifiedat" or "modifiedon"
+            or "modifieddate" or "rowversion" or "timestamp";
+    }
 
     private void OpenSqlInsertDialog()
     {
         if (last is null || activeResult < 0 || activeResult >= last.ResultSets.Count) return;
+        var rs = last.ResultSets[activeResult];
         sqlInsertTableName = ExportFormatters.InferTableName(lastRunSql, "Products");
         selectedInsertCols.Clear();
+        ResetIncludedColsDefaults(rs.Columns);
         showSqlInsertModal = true;
     }
 
@@ -729,14 +1233,54 @@ else
         else selectedInsertCols.Remove(col);
     }
 
+    private void ToggleIncludedCol(string col, bool check)
+    {
+        if (check) includedInsertCols.Add(col);
+        else includedInsertCols.Remove(col);
+    }
+
+    private void SelectAllIncludedCols(IReadOnlyList<string> columns)
+    {
+        includedInsertCols = new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private void ExcludeIdentityCols(IReadOnlyList<string> columns)
+    {
+        foreach (var col in columns)
+        {
+            if (IsIdentityColumn(col)) includedInsertCols.Remove(col);
+        }
+    }
+
+    private void ExcludeAutoCols(IReadOnlyList<string> columns)
+    {
+        foreach (var col in columns)
+        {
+            if (IsAutoInsertColumn(col)) includedInsertCols.Remove(col);
+        }
+    }
+
+    private void ResetIncludedColsDefaults(IReadOnlyList<string> columns)
+    {
+        includedInsertCols = new HashSet<string>(
+            columns.Where(c => !IsIdentityColumn(c) && !IsAutoInsertColumn(c)),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
     private async Task CopySqlInsert()
     {
         if (last is null || activeResult < 0 || activeResult >= last.ResultSets.Count || Current is null) return;
         var rs = last.ResultSets[activeResult];
-        var auth = await Execution.AuthorizeExportAsync(Me, Current.DatabaseId, rs.Rows.Count, lastRunSql ?? "");
+        if (includedInsertCols.Count == 0)
+        {
+            Say("Please select at least one column to insert.", true);
+            return;
+        }
+        var auth = await Execution.AuthorizeExportAsync(Me, Current.DatabaseId, rs.Rows.Count, lastRunSql ?? "", "SqlInsert", Current.Name);
         if (!auth.Ok) { Say(auth.Error!, true); return; }
 
-        var sql = ExportFormatters.ToSqlInsert(rs.Columns, rs.Rows, sqlInsertTableName, selectedInsertCols);
+        var excluded = rs.Columns.Where(c => !includedInsertCols.Contains(c)).ToList();
+        var sql = ExportFormatters.ToSqlInsert(rs.Columns, rs.Rows, sqlInsertTableName, selectedInsertCols, excluded);
         await JS.InvokeVoidAsync("dbam.copy", sql);
         showSqlInsertModal = false;
         Say("SQL INSERT statements copied to clipboard.");
@@ -746,10 +1290,16 @@ else
     {
         if (last is null || activeResult < 0 || activeResult >= last.ResultSets.Count || Current is null) return;
         var rs = last.ResultSets[activeResult];
-        var auth = await Execution.AuthorizeExportAsync(Me, Current.DatabaseId, rs.Rows.Count, lastRunSql ?? "");
+        if (includedInsertCols.Count == 0)
+        {
+            Say("Please select at least one column to insert.", true);
+            return;
+        }
+        var auth = await Execution.AuthorizeExportAsync(Me, Current.DatabaseId, rs.Rows.Count, lastRunSql ?? "", "SqlInsert", Current.Name);
         if (!auth.Ok) { Say(auth.Error!, true); return; }
 
-        var sql = ExportFormatters.ToSqlInsert(rs.Columns, rs.Rows, sqlInsertTableName, selectedInsertCols);
+        var excluded = rs.Columns.Where(c => !includedInsertCols.Contains(c)).ToList();
+        var sql = ExportFormatters.ToSqlInsert(rs.Columns, rs.Rows, sqlInsertTableName, selectedInsertCols, excluded);
         var clean = sqlInsertTableName.Trim().Trim('[', ']').Replace("]", "").Replace(".", "_");
         var fileName = $"{clean}-insert-{DateTime.Now:yyyyMMdd-HHmmss}.sql";
         await JS.InvokeVoidAsync("dbam.download", fileName, sql, "text/plain;charset=utf-8");

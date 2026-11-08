@@ -139,6 +139,7 @@ builder.Services.AddSingleton<WorkspaceService>();
 builder.Services.AddSingleton(sp => new TokenService(jwtKey, sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>()));
 builder.Services.AddScoped<ClientInfo>();
 builder.Services.AddScoped<CircuitHandler, ClientInfoCircuitHandler>();
+builder.Services.AddScoped<ToastService>();
 builder.Services.AddHostedService<MaintenanceWorker>();
 
 var app = builder.Build();

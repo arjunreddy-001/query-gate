@@ -87,4 +87,20 @@ public sealed class PermissionResolverTests
 
         Assert.True(result.IsAllowed);
     }
+
+    [Fact]
+    public void Perm_UnmaskLabel_IsViewUnmaskedData()
+    {
+        Assert.Equal("View unmasked data", Perm.Label(Perm.Unmask));
+    }
+
+    [Fact]
+    public void Perm_AllCatalogCodesHaveValidDescriptions()
+    {
+        foreach (var code in Perm.Catalog)
+        {
+            var desc = Perm.Description(code);
+            Assert.False(string.IsNullOrWhiteSpace(desc));
+        }
+    }
 }

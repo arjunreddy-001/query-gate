@@ -1,0 +1,42 @@
+@using DbAccessManager.Services
+@inject ToastService Toast
+@implements IDisposable
+
+@if (Toast.Toasts.Count > 0)
+{
+    <div class="toast-stack" role="status" aria-live="polite">
+        @foreach (var toast in Toast.Toasts)
+        {
+            <div class="toast @(toast.IsError ? "toast-bad" : toast.IsWarn ? "toast-warn" : "toast-ok")" @key="toast.Id">
+                <div class="toast-icon">
+                    <Icon Name="@(toast.IsError || toast.IsWarn ? "alert" : "check")" />
+                </div>
+                <div class="toast-body">
+                    <div class="toast-title">@(toast.Title ?? (toast.IsError ? "Error" : toast.IsWarn ? "Attention" : "Success"))</div>
+                    <div class="toast-msg">@toast.Message</div>
+                </div>
+                <button type="button" class="toast-close" @onclick="() => Toast.Dismiss(toast.Id)" aria-label="Dismiss notification" title="Dismiss">
+                    <Icon Name="x" />
+                </button>
+                <div class="toast-progress" style="animation-duration:@(toast.DurationMs)ms"></div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    protected override void OnInitialized()
+    {
+        Toast.OnChange += OnToastChanged;
+    }
+
+    private void OnToastChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Toast.OnChange -= OnToastChanged;
+    }
+}

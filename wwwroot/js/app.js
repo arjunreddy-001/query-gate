@@ -282,6 +282,25 @@ window.dbam = (function () {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     },
+    downloadBase64: function (name, base64, mime) {
+      const byteChars = atob(base64);
+      const byteNumbers = new Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) {
+        byteNumbers[i] = byteChars.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], {
+        type: mime || "application/octet-stream",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    },
     copy: (text) =>
       navigator.clipboard
         ? navigator.clipboard.writeText(text)
@@ -466,4 +485,117 @@ window.dbam = (function () {
       metadata = objects || [];
     },
   };
+})();
+
+/* ── Password-peek toggle (SSR-safe, auto-attaches) ── */
+(function () {
+  function attachPasswordToggles() {
+    document.querySelectorAll('.btn-toggle-password[data-password-input]').forEach(function (btn) {
+      if (btn._pwAttached) return;
+      btn._pwAttached = true;
+
+      var inputId = btn.getAttribute('data-password-input');
+      var input = document.getElementById(inputId);
+      if (!input) return;
+
+      function show() { input.type = 'text'; }
+      function hide() { input.type = 'password'; }
+
+      btn.addEventListener('mouseenter', show);
+      btn.addEventListener('mouseleave', hide);
+      btn.addEventListener('pointerdown', show);
+      btn.addEventListener('pointerup', hide);
+      btn.addEventListener('pointercancel', hide);
+      btn.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); });
+    });
+  }
+
+  /* ── Show passkey buttons only when WebAuthn is supported ── */
+  function revealPasskeyButtons() {
+    if (
+      typeof navigator.credentials !== 'undefined' &&
+      typeof window.PublicKeyCredential !== 'undefined'
+    ) {
+      document.querySelectorAll('[data-passkey-btn]').forEach(function (btn) {
+        btn.style.display = '';
+      });
+    }
+  }
+
+  /* ── Documentation sidebar scroll highlighting ── */
+  function attachDocsNavHighlight() {
+    var nav = document.querySelector('.docs-nav');
+    if (!nav) return;
+    var links = nav.querySelectorAll('a[href*="#"]');
+    var sections = [];
+    links.forEach(function (link) {
+      var href = link.getAttribute('href');
+      var hash = href.split('#')[1];
+      if (!hash) return;
+      var sec = document.getElementById(hash);
+      if (sec) sections.push({ link: link, sec: sec });
+    });
+    if (!sections.length) return;
+
+    function onScroll() {
+      var scrollPos = window.scrollY + 120;
+      var activeIndex = 0;
+      for (var i = 0; i < sections.length; i++) {
+        if (sections[i].sec.offsetTop <= scrollPos) {
+          activeIndex = i;
+        }
+      }
+      sections.forEach(function (item, idx) {
+        if (idx === activeIndex) {
+          item.link.classList.add('active');
+        } else {
+          item.link.classList.remove('active');
+        }
+      });
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  }
+
+  /* ── Code block copy buttons ── */
+  function attachCodeCopyButtons() {
+    document.querySelectorAll('.docs-content pre').forEach(function (pre) {
+      if (pre._copyAttached) return;
+      pre._copyAttached = true;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn-code-copy';
+      btn.setAttribute('aria-label', 'Copy code to clipboard');
+      btn.innerText = 'Copy';
+      btn.addEventListener('click', function () {
+        var code = pre.querySelector('code');
+        var text = (code ? code.innerText : pre.innerText).trim();
+        navigator.clipboard.writeText(text).then(function () {
+          btn.classList.add('copied');
+          btn.innerText = 'Copied!';
+          setTimeout(function () {
+            btn.classList.remove('copied');
+            btn.innerText = 'Copy';
+          }, 2000);
+        }).catch(function (e) {
+          console.error('Copy failed', e);
+        });
+      });
+      pre.appendChild(btn);
+    });
+  }
+
+  function init() {
+    attachPasswordToggles();
+    revealPasskeyButtons();
+    attachDocsNavHighlight();
+    attachCodeCopyButtons();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+  document.addEventListener('blazor:enhancedload', init);
 })();

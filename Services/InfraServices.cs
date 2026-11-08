@@ -100,7 +100,13 @@ public sealed class DatabaseAdminService(IDbContextFactory<ApplicationDbContext>
     }
 }
 
-public sealed record DbColumnInfo(string Name, string DataType, bool Nullable);
+public sealed record DbColumnInfo(
+    string Name,
+    string DataType,
+    bool Nullable,
+    bool IsIdentity = false,
+    bool HasDefault = false,
+    bool IsComputed = false);
 public sealed record DbForeignKeyColumn(string Column, string ReferencedColumn);
 public sealed record DbForeignKeyInfo(string Name, string ReferencedSchema, string ReferencedTable, List<DbForeignKeyColumn> Columns);
 public sealed record DbObjectInfo(string Schema, string Name, string Type, List<string> Columns)
@@ -186,7 +192,9 @@ public sealed class MetadataService(IDbContextFactory<ApplicationDbContext> fact
             foreignKey.Columns.Add(new DbForeignKeyColumn(r.GetString(5), r.GetString(6)));
             }
         }
-        await using (var cmd = new SqlCommand(@"SELECT s.name, o.name, c.name, t.name, c.is_nullable FROM sys.columns c JOIN sys.objects o ON o.object_id = c.object_id
+        await using (var cmd = new SqlCommand(@"SELECT s.name, o.name, c.name, t.name, c.is_nullable, c.is_identity, c.is_computed,
+            CASE WHEN c.default_object_id != 0 THEN 1 ELSE 0 END AS has_default
+            FROM sys.columns c JOIN sys.objects o ON o.object_id = c.object_id
             JOIN sys.schemas s ON s.schema_id = o.schema_id JOIN sys.types t ON t.user_type_id = c.user_type_id
             WHERE o.type IN ('U','V','IF','TF') AND o.is_ms_shipped = 0 ORDER BY c.column_id", conn) { CommandTimeout = 30 })
         await using (var r = await cmd.ExecuteReaderAsync())
@@ -195,8 +203,14 @@ public sealed class MetadataService(IDbContextFactory<ApplicationDbContext> fact
                 if (objects.TryGetValue((r.GetString(0), r.GetString(1)), out var o))
                 {
                     var column = r.GetString(2);
+                    var dataType = r.GetString(3);
+                    var isNullable = r.GetBoolean(4);
+                    var isIdentity = r.GetBoolean(5);
+                    var isComputed = r.GetBoolean(6);
+                    var hasDefault = r.GetInt32(7) == 1;
+
                     o.Columns.Add(column);
-                    o.ColumnDetails.Add(new DbColumnInfo(column, r.GetString(3), r.GetBoolean(4)));
+                    o.ColumnDetails.Add(new DbColumnInfo(column, dataType, isNullable, isIdentity, hasDefault, isComputed));
                 }
         }
 

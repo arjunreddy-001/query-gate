@@ -1,8 +1,4 @@
-@if (!string.IsNullOrEmpty(Text))
-{
-    <div class="alert @(IsError ? "bad" : "ok")" role="status">@Text</div>
-}
-
+@* Replaced by global top-center Toast notifications; kept for backward compatibility without shifting layout *@
 @code {
     [Parameter] public string? Text { get; set; }
     [Parameter] public bool IsError { get; set; }

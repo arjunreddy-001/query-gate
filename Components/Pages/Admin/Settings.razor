@@ -19,8 +19,6 @@
     </div>
 </div>
 
-<Banner Text="@Flash" IsError="@FlashIsError" />
-
 @if (!ready)
 {
     <div class="stack"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>
@@ -38,6 +36,10 @@ else
         <button class="tab @(activeTab == "webhooks" ? "active" : "")" @onclick='() => activeTab = "webhooks"'>
             Webhooks & Alerts
             <span class="badge">@webhooks.Count(w => w.IsEnabled) active</span>
+        </button>
+        <button class="tab @(activeTab == "masking" ? "active" : "")" @onclick='() => activeTab = "masking"'>
+            Data Masking
+            <span class="badge @(maskingEnabled ? "ok" : "warn")">@(maskingEnabled ? $"{maskingRules.Count(r => r.IsEnabled)} active" : "Disabled")</span>
         </button>
         <button class="tab @(activeTab == "cache" ? "active" : "")" @onclick='() => activeTab = "cache"'>
             Metadata Cache
@@ -277,7 +279,7 @@ else
                                         <button class="btn btn-sm" @onclick="() => ToggleWebhook(hook)">
                                             @(hook.IsEnabled ? "Disable" : "Enable")
                                         </button>
-                                        <button class="btn btn-sm" style="color:var(--bad)" @onclick="() => DeleteWebhook(hook.Id)">
+                                        <button class="btn btn-sm" style="color:var(--bad)" @onclick="() => PromptDeleteWebhook(hook)">
                                             Delete
                                         </button>
                                     </td>
@@ -286,6 +288,207 @@ else
                         </tbody>
                     </table></div>
                 }
+            </div>
+        </div>
+    }
+    else if (activeTab == "masking")
+    {
+        <div class="stack" style="gap:16px">
+            <div class="card">
+                <div class="card-head cache-head">
+                    <div>
+                        <h3 style="margin:0">Dynamic Data Masking (PII Redaction)</h3>
+                        <span class="muted small">Redacts sensitive columns in-flight when users query databases without the UNMASK permission.</span>
+                    </div>
+                    <div class="actions">
+                        <button class="btn btn-sm" @onclick="PromptToggleGlobalMasking">
+                            @(maskingEnabled ? "Disable Masking" : "Enable Masking")
+                        </button>
+                        <button class="btn btn-sm" @onclick="PromptResetMaskingToDefaults" title="Restore standard default rules">
+                            <Icon Name="refresh" />Reset to Defaults
+                        </button>
+                        <button class="btn btn-sm btn-primary" @onclick="OpenAddRuleModal">
+                            <Icon Name="plus" />Add Rule
+                        </button>
+                    </div>
+                </div>
+                <div class="card-pad">
+                    <div class="grid g2" style="gap:14px;align-items:center">
+                        <div class="row-inline" style="gap:12px">
+                            <span class="badge @(maskingEnabled ? "ok" : "warn")" style="font-size:12px;padding:4px 10px">
+                                <Icon Name="@(maskingEnabled ? "shield" : "lock")" />
+                                @(maskingEnabled ? "Active & Enforcing" : "Disabled Globally")
+                            </span>
+                            <span class="muted small">
+                                @maskingRules.Count(r => r.IsEnabled) of @maskingRules.Count rules active. Columns matching these patterns are redacted before UI display and file exports.
+                            </span>
+                        </div>
+                        <div class="row-inline" style="justify-content:flex-end;gap:8px">
+                            <span class="faint small">Showing <b>@FilteredMaskingRules.Count()</b> of @maskingRules.Count total rules</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Pattern Tester Card -->
+            <div class="card" style="background:var(--bg-sunken);border:1px solid var(--line)">
+                <div class="card-pad" style="padding:12px 16px">
+                    <div class="row-inline" style="gap:8px;margin-bottom:8px">
+                        <b>Test Masking Rule Matcher</b>
+                        <span class="faint small">Verify how a column name and sample value will be masked with current rules.</span>
+                    </div>
+                    <div class="row-inline" style="gap:10px;flex-wrap:wrap">
+                        <div style="flex:1;min-width:180px">
+                            <input type="text" placeholder="Column name (e.g. customer_email, patient_id)" @bind="testColumnName" @bind:event="oninput" />
+                        </div>
+                        <div style="flex:1;min-width:180px">
+                            <input type="text" placeholder="Sample value (e.g. john.doe@example.com, 12345)" @bind="testSampleValue" @bind:event="oninput" />
+                        </div>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(testColumnName))
+                    {
+                        var testResult = DataMaskingService.TestMask(testColumnName, testSampleValue, maskingRules, maskingEnabled);
+                        <div class="row-inline" style="margin-top:10px;gap:8px;font-size:13px">
+                            @if (testResult.Matched)
+                            {
+                                <span class="badge ok"><Icon Name="check" />Matches Rule: @testResult.Rule?.Name (@testResult.Rule?.Strategy)</span>
+                                <span>Masked result: <code class="mono">@(testResult.MaskedValue ?? "NULL")</code></span>
+                            }
+                            else
+                            {
+                                <span class="badge" style="background:var(--bg-elev)"><Icon Name="x" />No rule matched (unmasked)</span>
+                                <span class="muted small">Value will pass through as-is unless a matching pattern is added.</span>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- Rules Table -->
+            <div class="card">
+                <div style="padding:10px 14px;border-bottom:1px solid var(--line);background:var(--bg-sunken);display:flex;flex-direction:column;gap:10px">
+                    <!-- Rule Origin & Search Row -->
+                    <div class="row-inline" style="justify-content:space-between;flex-wrap:wrap;gap:10px">
+                        <div class="row-inline" style="gap:8px;align-items:center;flex-wrap:wrap">
+                            <span class="faint small" style="font-weight:600;margin-right:2px">Rule Origin:</span>
+                            <div class="button-group" style="display:inline-flex;border-radius:var(--radius-sm);border:1px solid var(--line);overflow:hidden">
+                                <button type="button" class="btn btn-sm @(ruleTypeFilter == "All" ? "btn-primary" : "")" style="border-radius:0;border:none" @onclick='() => ruleTypeFilter = "All"'>
+                                    All (@maskingRules.Count)
+                                </button>
+                                <button type="button" class="btn btn-sm @(ruleTypeFilter == "BuiltIn" ? "btn-primary" : "")" style="border-radius:0;border:none;border-left:1px solid var(--line)" @onclick='() => ruleTypeFilter = "BuiltIn"'>
+                                    Built-in (@maskingRules.Count(r => r.IsBuiltIn))
+                                </button>
+                                <button type="button" class="btn btn-sm @(ruleTypeFilter == "Custom" ? "btn-primary" : "")" style="border-radius:0;border:none;border-left:1px solid var(--line)" @onclick='() => ruleTypeFilter = "Custom"'>
+                                    Custom (@maskingRules.Count(r => !r.IsBuiltIn))
+                                </button>
+                            </div>
+                        </div>
+                        <div class="row-inline" style="gap:8px;align-items:center">
+                            <input type="search" placeholder="Search rules, patterns, standards…" @bind="maskingSearch" @bind:event="oninput" style="width:260px" />
+                            @if (!string.IsNullOrEmpty(maskingSearch) || standardFilter != "All" || ruleTypeFilter != "All")
+                            {
+                                <button class="btn btn-sm" type="button" @onclick="ClearMaskingFilters" title="Clear all filters">
+                                    <Icon Name="x" /> Clear
+                                </button>
+                            }
+                        </div>
+                    </div>
+                    <!-- Compliance Framework Row -->
+                    <div class="row-inline" style="gap:6px;align-items:center;flex-wrap:wrap">
+                        <span class="faint small" style="font-weight:600;margin-right:2px">Compliance Framework:</span>
+                        <button class="btn btn-sm @(standardFilter == "All" ? "btn-primary" : "")" type="button" @onclick='() => standardFilter = "All"'>All Standards</button>
+                        @foreach (var std in DataMaskingService.KnownStandards)
+                        {
+                            var s = std;
+                            <button class="btn btn-sm @(standardFilter == s ? "btn-primary" : "")" type="button" @onclick="() => standardFilter = s">@s</button>
+                        }
+                    </div>
+                </div>
+                <div class="card-pad" style="padding:0">
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width:40px">Active</th>
+                                    <th>Rule, Standards & Description</th>
+                                    <th>Column Patterns (Keywords)</th>
+                                    <th>Strategy</th>
+                                    <th>Sample Redaction</th>
+                                    <th class="right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var rule in FilteredMaskingRules)
+                                {
+                                    <tr style="@(!rule.IsEnabled ? "opacity:0.6" : "")">
+                                        <td>
+                                            <input type="checkbox" checked="@rule.IsEnabled" @onchange="() => ToggleRule(rule)" title="Toggle rule active state" />
+                                        </td>
+                                        <td>
+                                            <div class="row-inline" style="gap:6px">
+                                                <b>@rule.Name</b>
+                                                @if (rule.IsBuiltIn)
+                                                {
+                                                    <span class="badge" style="font-size:10px;padding:1px 5px">Built-in</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge ok" style="font-size:10px;padding:1px 5px">Custom</span>
+                                                }
+                                            </div>
+                                            @if (!string.IsNullOrWhiteSpace(rule.Standards))
+                                            {
+                                                <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">
+                                                    @foreach (var std in rule.GetStandardList())
+                                                    {
+                                                        <span class="badge @DataMaskingService.StandardBadgeClass(std)" style="font-size:10px;padding:1px 5px;font-weight:600">@std</span>
+                                                    }
+                                                </div>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(rule.Description))
+                                            {
+                                                <div class="faint small" style="margin-top:3px">@rule.Description</div>
+                                            }
+                                        </td>
+                                        <td>
+                                            <div style="display:flex;flex-wrap:wrap;gap:4px">
+                                                @foreach (var pat in rule.GetPatternList())
+                                                {
+                                                    <code style="background:var(--bg-sunken);border:1px solid var(--line);border-radius:3px;padding:1px 5px;font-size:11px">@pat</code>
+                                                }
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span class="badge">@rule.Strategy</span>
+                                            @if (rule.Strategy == DataMaskingService.MaskingStrategy.CustomText && !string.IsNullOrWhiteSpace(rule.CustomMask))
+                                            {
+                                                <div class="faint small" style="margin-top:2px"><code>@rule.CustomMask</code></div>
+                                            }
+                                        </td>
+                                        <td>
+                                            <span class="mono small" style="color:var(--text-dim)">@DataMaskingService.GetStrategySample(rule.Strategy, rule.CustomMask)</span>
+                                        </td>
+                                        <td class="right nowrap">
+                                            <button class="btn btn-sm" @onclick="() => EditRule(rule)">Edit</button>
+                                            <button class="btn btn-sm" style="color:var(--bad)" @onclick="() => PromptDeleteRule(rule)">Delete</button>
+                                        </td>
+                                    </tr>
+                                }
+                                @if (!FilteredMaskingRules.Any())
+                                {
+                                    <tr>
+                                        <td colspan="6" class="muted center" style="padding:24px">
+                                            No masking rules found matching your filter criteria.
+                                            <div style="margin-top:8px">
+                                                <button class="btn btn-sm" type="button" @onclick="ClearMaskingFilters">Clear Filters</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
     }
@@ -299,7 +502,7 @@ else
                 </div>
                 <div class="actions">
                     <button class="btn btn-sm" @onclick="ToggleCache">@(cacheEnabled ? "Disable cache" : "Enable cache")</button>
-                    <button class="btn btn-sm" @onclick="ClearAll">Clear all</button>
+                    <button class="btn btn-sm" @onclick="PromptClearAllCache">Clear all</button>
                     <button class="btn btn-sm btn-primary" disabled="@busy" @onclick="ReloadAll"><Icon Name="refresh" />Reload all</button>
                 </div>
             </div>
@@ -325,7 +528,7 @@ else
                             <td>@(info?.ObjectCount.ToString() ?? "-")</td>
                             <td class="right nowrap">
                                 <button class="btn btn-sm" disabled="@(busy || !d.IsActive)" @onclick="() => Reload(d)">Reload</button>
-                                <button class="btn btn-sm" disabled="@(info is null)" @onclick="() => Clear(d)">Clear</button>
+                                <button class="btn btn-sm" disabled="@(info is null)" @onclick="() => PromptClearCache(d)">Clear</button>
                             </td>
                         </tr>
                     }
@@ -336,7 +539,161 @@ else
     }
 }
 
+@if (editingRule is not null)
+{
+    <div class="modal-back">
+        <div class="modal" style="max-width:550px">
+            <div class="modal-head">
+                <h2>@(isNewRule ? "Add Masking Rule" : "Edit Masking Rule")</h2>
+            </div>
+            <div class="modal-body stack">
+                <div class="field">
+                    <label>Rule Name</label>
+                    <input type="text" placeholder="e.g. Patient Health Identifiers" @bind="editingRule.Name" maxlength="100" />
+                </div>
+                <div class="field">
+                    <label>Column Name Patterns (comma-separated keywords or substrings)</label>
+                    <input type="text" placeholder="e.g. patient_id, mrn, medical_record" @bind="editingRulePatternsRaw" />
+                    <span class="faint small">Columns containing any of these keywords (case-insensitive) will be matched and redacted.</span>
+                </div>
+                <div class="field">
+                    <label>Masking Strategy</label>
+                    <select @bind="editingRule.Strategy">
+                        <option value="@DataMaskingService.MaskingStrategy.Name">Patient / Person Name (e.g. J***n S***h)</option>
+                        <option value="@DataMaskingService.MaskingStrategy.MedicalRecord">Medical Record / Patient ID / Policy ID (e.g. MRN-••••2014)</option>
+                        <option value="@DataMaskingService.MaskingStrategy.DateOfBirth">Date of Birth / Clinical Dates (e.g. 1985-••-••)</option>
+                        <option value="@DataMaskingService.MaskingStrategy.Address">Physical / Street Address (e.g. ••• [REDACTED STREET])</option>
+                        <option value="@DataMaskingService.MaskingStrategy.ZipCode">Postal / ZIP Code (e.g. 902••)</option>
+                        <option value="@DataMaskingService.MaskingStrategy.Phone">Phone / Fax Number (e.g. •••-•••-1234)</option>
+                        <option value="@DataMaskingService.MaskingStrategy.Email">Email Address (e.g. j***e@domain.com)</option>
+                        <option value="@DataMaskingService.MaskingStrategy.Ssn">SSN / National ID / Tax ID (e.g. •••-••-1234)</option>
+                        <option value="@DataMaskingService.MaskingStrategy.CreditCard">Credit Card / Account / IBAN (e.g. •••• •••• •••• 1234)</option>
+                        <option value="@DataMaskingService.MaskingStrategy.IpAddress">IP Address / Network ID (e.g. 192.168.•••.•••)</option>
+                        <option value="@DataMaskingService.MaskingStrategy.Salary">Salary / Compensation (Numeric 0.00)</option>
+                        <option value="@DataMaskingService.MaskingStrategy.Secret">Secret / Password / Credential ([REDACTED])</option>
+                        <option value="@DataMaskingService.MaskingStrategy.CustomText">Custom Text (specify replacement string)</option>
+                    </select>
+                </div>
+                @if (editingRule.Strategy == DataMaskingService.MaskingStrategy.CustomText)
+                {
+                    <div class="field">
+                        <label>Custom Replacement Text</label>
+                        <input type="text" placeholder="e.g. [CONFIDENTIAL] or ••••" @bind="editingRule.CustomMask" maxlength="50" />
+                    </div>
+                }
+                <div class="field">
+                    <label>Compliance Standards Covered</label>
+                    <div class="row-inline" style="flex-wrap:wrap;gap:8px;margin-bottom:6px">
+                        @foreach (var std in DataMaskingService.KnownStandards)
+                        {
+                            var s = std;
+                            <label class="check small" style="margin:0;background:var(--bg-sunken);border:1px solid var(--line);padding:4px 8px;border-radius:var(--radius-sm)">
+                                <input type="checkbox" checked="@editingStandards.Contains(s)" @onchange="() => ToggleStandard(s)" />
+                                <span>@s</span>
+                            </label>
+                        }
+                    </div>
+                    <input type="text" placeholder="Or add custom compliance standard (comma-separated, e.g. FERPA, ISO 27001)" @bind="customStandardInput" maxlength="100" />
+                    <span class="faint small">Select one or more regulatory standards (GDPR, HIPAA, PCI-DSS, SOC 2, CCPA) or specify custom policies.</span>
+                </div>
+                <div class="field">
+                    <label>Description / Notes (Optional)</label>
+                    <input type="text" placeholder="e.g. Redacts patient identifiers from clinical database" @bind="editingRule.Description" maxlength="200" />
+                </div>
+                <div class="field">
+                    <label class="check">
+                        <input type="checkbox" @bind="editingRule.IsEnabled" />
+                        <span>Rule is active and enforcing</span>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-foot">
+                <button class="btn" @onclick="() => editingRule = null">Cancel</button>
+                <button class="btn btn-primary" @onclick="SaveRule">Save Rule</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (confirmDialog is not null)
+{
+    <div class="modal-back">
+        <div class="modal" style="max-width:540px">
+            <div class="modal-head">
+                <div class="row-inline" style="gap:10px;align-items:center">
+                    <span class="badge @(confirmDialog.IsDanger ? "bad" : "warn")" style="padding:6px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px">
+                        <Icon Name="alert" />
+                    </span>
+                    <h2 style="margin:0;font-size:18px">@confirmDialog.Title</h2>
+                </div>
+            </div>
+            <div class="modal-body stack" style="gap:14px">
+                <p style="margin:0;font-size:14px;line-height:1.5">@confirmDialog.Message</p>
+
+                @if (confirmDialog.Rule is not null)
+                {
+                    var r = confirmDialog.Rule;
+                    <div class="card-pad" style="background:var(--bg-sunken);border:1px solid var(--line);border-radius:var(--radius-sm);padding:12px;display:flex;flex-direction:column;gap:8px">
+                        <div class="row-inline" style="justify-content:space-between">
+                            <b>@r.Name</b>
+                            <span class="badge @(r.IsBuiltIn ? "" : "ok")" style="font-size:11px">@(r.IsBuiltIn ? "Built-in" : "Custom")</span>
+                        </div>
+                        <div class="row-inline" style="gap:6px;font-size:12px">
+                            <span class="faint">Strategy:</span>
+                            <span class="badge">@r.Strategy</span>
+                            <span class="mono faint">(@DataMaskingService.GetStrategySample(r.Strategy, r.CustomMask))</span>
+                        </div>
+                        <div class="row-inline" style="gap:6px;font-size:12px;flex-wrap:wrap">
+                            <span class="faint">Matched Column Patterns:</span>
+                            @foreach (var pat in r.GetPatternList())
+                            {
+                                <code style="background:var(--bg-elev);border:1px solid var(--line);padding:1px 5px;border-radius:3px">@pat</code>
+                            }
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(r.Standards))
+                        {
+                            <div class="row-inline" style="gap:6px;font-size:12px;flex-wrap:wrap">
+                                <span class="faint">Standards:</span>
+                                @foreach (var std in r.GetStandardList())
+                                {
+                                    <span class="badge @DataMaskingService.StandardBadgeClass(std)" style="font-size:10px;padding:1px 5px">@std</span>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+
+                @if (!string.IsNullOrEmpty(confirmDialog.Details))
+                {
+                    <div class="alert @(confirmDialog.IsDanger ? "bad" : "warn")" style="font-size:12px;padding:10px 12px;margin:0;line-height:1.4">
+                        @confirmDialog.Details
+                    </div>
+                }
+            </div>
+            <div class="modal-foot">
+                <button class="btn" @onclick="CloseConfirmDialog">Cancel</button>
+                <button class="btn @(confirmDialog.IsDanger ? "btn-danger" : "btn-primary")" @onclick="ExecuteConfirmDialog">
+                    @confirmDialog.ConfirmText
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
+    private sealed class ConfirmDialogState
+    {
+        public required string Title { get; init; }
+        public required string Message { get; init; }
+        public required string ConfirmText { get; init; }
+        public bool IsDanger { get; init; }
+        public string? Details { get; init; }
+        public MaskingRule? Rule { get; init; }
+        public required Func<Task> OnConfirm { get; init; }
+    }
+
+    private ConfirmDialogState? confirmDialog;
+
     private string activeTab = "general";
     private Dictionary<string, string> values = [];
     private List<ManagedDatabase> dbs = [];
@@ -359,6 +716,55 @@ else
     private string newHookFilter = "All";
     private bool hookTesting;
 
+    private List<MaskingRule> maskingRules = [];
+    private bool maskingEnabled = true;
+    private string maskingSearch = "";
+    private string ruleTypeFilter = "All";
+    private string standardFilter = "All";
+    private string testColumnName = "";
+    private string testSampleValue = "";
+    private MaskingRule? editingRule;
+    private string editingRulePatternsRaw = "";
+    private HashSet<string> editingStandards = new(StringComparer.OrdinalIgnoreCase);
+    private string customStandardInput = "";
+    private bool isNewRule;
+
+    private IEnumerable<MaskingRule> FilteredMaskingRules
+    {
+        get
+        {
+            var source = maskingRules.AsEnumerable();
+            if (ruleTypeFilter == "BuiltIn")
+            {
+                source = source.Where(r => r.IsBuiltIn);
+            }
+            else if (ruleTypeFilter == "Custom")
+            {
+                source = source.Where(r => !r.IsBuiltIn);
+            }
+
+            if (standardFilter != "All")
+            {
+                source = source.Where(r => r.GetStandardList().Contains(standardFilter, StringComparer.OrdinalIgnoreCase));
+            }
+            if (!string.IsNullOrWhiteSpace(maskingSearch))
+            {
+                source = source.Where(r => r.Name.Contains(maskingSearch, StringComparison.OrdinalIgnoreCase) ||
+                                           r.Patterns.Contains(maskingSearch, StringComparison.OrdinalIgnoreCase) ||
+                                           r.Standards.Contains(maskingSearch, StringComparison.OrdinalIgnoreCase) ||
+                                           (r.Description != null && r.Description.Contains(maskingSearch, StringComparison.OrdinalIgnoreCase)));
+            }
+            return source;
+        }
+    }
+
+    private void ClearMaskingFilters()
+    {
+        ruleTypeFilter = "All";
+        standardFilter = "All";
+        maskingSearch = "";
+    }
+
     private bool ready, cacheEnabled, busy;
 
     protected override async Task OnLoadAsync()
@@ -367,6 +773,7 @@ else
         await LoadCache();
         await LoadSmtpConfig();
         await LoadWebhooks();
+        await LoadMaskingConfig();
         ready = true;
     }
 
@@ -472,6 +879,22 @@ else
         Say(hook.IsEnabled ? "Webhook disabled." : "Webhook enabled.");
     }
 
+    private void PromptDeleteWebhook(WebhookSubscription hook)
+    {
+        confirmDialog = new ConfirmDialogState
+        {
+            Title = $"Delete Webhook '{hook.Name}'?",
+            Message = $"Are you sure you want to delete the {hook.Platform} webhook '{hook.Name}'?",
+            Details = $"Endpoint: {hook.Url}. Alerts matching filter '{hook.EventFilter}' will no longer be delivered.",
+            ConfirmText = "Delete Webhook",
+            IsDanger = true,
+            OnConfirm = async () =>
+            {
+                await DeleteWebhook(hook.Id);
+            }
+        };
+    }
+
     private async Task DeleteWebhook(Guid id)
     {
         await Webhooks.DeleteAsync(id);
@@ -521,7 +944,39 @@ else
         if (failed.Count == 0) Say($"Reloaded {ok} database(s)."); else Say($"Reloaded {ok}; failed: {string.Join(", ", failed)}.", true);
     }
 
+    private void PromptClearCache(ManagedDatabase d)
+    {
+        confirmDialog = new ConfirmDialogState
+        {
+            Title = $"Clear Metadata Cache for '{d.Name}'?",
+            Message = $"Purge cached tables, views, procedures, and column autocomplete definitions for {d.Name}?",
+            Details = "The cache will be cleared immediately and refreshed from the SQL Server on the next user query or manual reload.",
+            ConfirmText = "Clear Cache",
+            IsDanger = false,
+            OnConfirm = async () =>
+            {
+                await Clear(d);
+            }
+        };
+    }
+
     private async Task Clear(ManagedDatabase d) { Metadata.Clear(d.Id); await LoadCache(); Say($"Cleared cache for {d.Name}."); }
+
+    private void PromptClearAllCache()
+    {
+        confirmDialog = new ConfirmDialogState
+        {
+            Title = "Clear All Object Metadata Caches?",
+            Message = "Purge cached database schema metadata across all active databases?",
+            Details = "Schema autocomplete definitions and object explorers will reload from scratch as queries run.",
+            ConfirmText = "Clear All Caches",
+            IsDanger = true,
+            OnConfirm = async () =>
+            {
+                await ClearAll();
+            }
+        };
+    }
 
     private async Task ClearAll()
     {
@@ -529,5 +984,238 @@ else
         await AuditSvc.TryWriteAsync(Me, "Settings", "MetadataCacheCleared", "Success");
         await LoadCache();
         Say("Cache cleared.");
+    }
+
+    private async Task LoadMaskingConfig()
+    {
+        var (rules, enabled) = await DataMaskingService.GetConfigAsync(DbFactory);
+        maskingRules = rules;
+        maskingEnabled = enabled;
+    }
+
+    private void PromptToggleGlobalMasking()
+    {
+        if (maskingEnabled)
+        {
+            confirmDialog = new ConfirmDialogState
+            {
+                Title = "Disable Dynamic Data Masking Globally?",
+                Message = "You are about to disable dynamic data masking across all managed databases.",
+                Details = "CRITICAL SECURITY WARNING: When disabled, all sensitive columns (HIPAA patient names, MRNs, dates of birth, credit card numbers, SSNs, compensation, passwords) will be shown in plaintext to all users in both query results and file exports, bypassing UNMASK permission checks.",
+                ConfirmText = "Disable Masking Globally",
+                IsDanger = true,
+                OnConfirm = async () =>
+                {
+                    await SetGlobalMaskingState(false);
+                }
+            };
+        }
+        else
+        {
+            _ = SetGlobalMaskingState(true);
+        }
+    }
+
+    private async Task SetGlobalMaskingState(bool enabled)
+    {
+        try
+        {
+            maskingEnabled = enabled;
+            await DataMaskingService.SaveConfigAsync(DbFactory, maskingRules, maskingEnabled);
+            await AuditSvc.TryWriteAsync(Me, "Settings", maskingEnabled ? "DataMaskingEnabled" : "DataMaskingDisabled", "Success");
+            Say(maskingEnabled ? "Dynamic data masking enabled globally." : "Dynamic data masking disabled globally.");
+        }
+        catch (Exception ex)
+        {
+            Say($"Failed to update masking state: {ex.Message}", true);
+        }
+    }
+
+    private void PromptResetMaskingToDefaults()
+    {
+        var customCount = maskingRules.Count(r => !r.IsBuiltIn);
+        var customNotice = customCount > 0
+            ? $" You currently have {customCount} custom rule(s) which will be permanently removed."
+            : "";
+
+        confirmDialog = new ConfirmDialogState
+        {
+            Title = "Reset Masking Rules to Baseline Standards?",
+            Message = "Are you sure you want to restore the default data masking rules?" + customNotice,
+            Details = "This will restore the 14 standard compliance rules covering GDPR, HIPAA (Safe Harbor PII/PHI), PCI-DSS (cardholder data), SOC 2, CCPA, and FERPA. Any modifications or newly created custom rules will be cleared.",
+            ConfirmText = "Reset to Defaults",
+            IsDanger = true,
+            OnConfirm = async () =>
+            {
+                await ResetMaskingToDefaultsConfirmed();
+            }
+        };
+    }
+
+    private async Task ResetMaskingToDefaultsConfirmed()
+    {
+        try
+        {
+            maskingRules = DataMaskingService.GetDefaultRules();
+            await DataMaskingService.SaveConfigAsync(DbFactory, maskingRules, maskingEnabled);
+            await AuditSvc.TryWriteAsync(Me, "Settings", "DataMaskingResetDefaults", "Success");
+            Say("Data masking rules reset to standard compliance defaults (GDPR, HIPAA, PCI-DSS, SOC 2, CCPA, FERPA).");
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Say($"Failed to reset rules: {ex.Message}", true);
+        }
+    }
+
+    private void ToggleStandard(string std)
+    {
+        if (!editingStandards.Remove(std))
+        {
+            editingStandards.Add(std);
+        }
+    }
+
+    private void OpenAddRuleModal()
+    {
+        editingRule = new MaskingRule
+        {
+            Strategy = DataMaskingService.MaskingStrategy.Secret,
+            IsEnabled = true,
+            IsBuiltIn = false
+        };
+        editingRulePatternsRaw = "";
+        editingStandards = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        customStandardInput = "";
+        isNewRule = true;
+    }
+
+    private void EditRule(MaskingRule rule)
+    {
+        editingRule = new MaskingRule
+        {
+            Id = rule.Id,
+            Name = rule.Name,
+            Patterns = rule.Patterns,
+            Strategy = rule.Strategy,
+            CustomMask = rule.CustomMask,
+            IsEnabled = rule.IsEnabled,
+            IsBuiltIn = rule.IsBuiltIn,
+            Description = rule.Description,
+            Standards = rule.Standards,
+            CreatedAt = rule.CreatedAt
+        };
+        editingRulePatternsRaw = rule.Patterns;
+        editingStandards = new HashSet<string>(rule.GetStandardList(), StringComparer.OrdinalIgnoreCase);
+        customStandardInput = string.Join(", ", rule.GetStandardList().Where(s => !DataMaskingService.KnownStandards.Contains(s, StringComparer.OrdinalIgnoreCase)));
+        isNewRule = false;
+    }
+
+    private async Task SaveRule()
+    {
+        if (editingRule is null) return;
+        if (string.IsNullOrWhiteSpace(editingRule.Name)) { Say("Rule name is required.", true); return; }
+        if (string.IsNullOrWhiteSpace(editingRulePatternsRaw)) { Say("At least one column name pattern is required.", true); return; }
+
+        editingRule.Patterns = string.Join(", ", editingRulePatternsRaw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+        // Merge standard checkboxes and custom standards
+        var finalStandards = new HashSet<string>(editingStandards, StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(customStandardInput))
+        {
+            foreach (var custom in customStandardInput.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                finalStandards.Add(custom.ToUpperInvariant());
+            }
+        }
+        editingRule.Standards = string.Join(", ", finalStandards);
+
+        if (isNewRule)
+        {
+            maskingRules.Add(editingRule);
+        }
+        else
+        {
+            var idx = maskingRules.FindIndex(r => r.Id == editingRule.Id);
+            if (idx >= 0) maskingRules[idx] = editingRule;
+        }
+
+        try
+        {
+            await DataMaskingService.SaveConfigAsync(DbFactory, maskingRules, maskingEnabled);
+            await AuditSvc.TryWriteAsync(Me, "Settings", isNewRule ? "DataMaskingRuleCreated" : "DataMaskingRuleUpdated", "Success", editingRule.Name);
+            editingRule = null;
+            Say("Masking rule saved.");
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Say($"Failed to save masking rule: {ex.Message}", true);
+        }
+    }
+
+    private void PromptDeleteRule(MaskingRule rule)
+    {
+        confirmDialog = new ConfirmDialogState
+        {
+            Title = $"Delete Rule '{rule.Name}'?",
+            Message = rule.IsBuiltIn
+                ? $"This built-in compliance rule protects columns matching {rule.Patterns}. Are you sure you want to delete it?"
+                : $"Are you sure you want to delete the custom masking rule '{rule.Name}'?",
+            Details = "Deleting this rule stops redaction for all matching column patterns. Users querying databases without the UNMASK permission will see raw unmasked values unless another rule covers these columns.",
+            ConfirmText = "Delete Rule",
+            IsDanger = true,
+            Rule = rule,
+            OnConfirm = async () =>
+            {
+                await DeleteRuleConfirmed(rule);
+            }
+        };
+    }
+
+    private async Task DeleteRuleConfirmed(MaskingRule rule)
+    {
+        try
+        {
+            maskingRules.RemoveAll(r => r.Id == rule.Id);
+            await DataMaskingService.SaveConfigAsync(DbFactory, maskingRules, maskingEnabled);
+            await AuditSvc.TryWriteAsync(Me, "Settings", "DataMaskingRuleDeleted", "Success", rule.Name);
+            Say($"Rule '{rule.Name}' deleted.");
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Say($"Failed to delete rule: {ex.Message}", true);
+        }
+    }
+
+    private void CloseConfirmDialog()
+    {
+        confirmDialog = null;
+    }
+
+    private async Task ExecuteConfirmDialog()
+    {
+        if (confirmDialog is not null)
+        {
+            var action = confirmDialog.OnConfirm;
+            confirmDialog = null;
+            await action();
+        }
+    }
+
+    private async Task ToggleRule(MaskingRule rule)
+    {
+        try
+        {
+            rule.IsEnabled = !rule.IsEnabled;
+            await DataMaskingService.SaveConfigAsync(DbFactory, maskingRules, maskingEnabled);
+            Say(rule.IsEnabled ? $"Rule '{rule.Name}' enabled." : $"Rule '{rule.Name}' disabled.");
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Say($"Failed to toggle rule: {ex.Message}", true);
+        }
     }
 }

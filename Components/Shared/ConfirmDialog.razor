@@ -1,0 +1,63 @@
+@namespace DbAccessManager.Components.Shared
+
+@if (IsOpen)
+{
+    <div class="modal-back">
+        <div class="modal" style="max-width:520px">
+            <div class="modal-head">
+                <div class="row-inline" style="gap:10px;align-items:center">
+                    <span class="badge @(IsDanger ? "bad" : "warn")" style="padding:6px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px">
+                        <Icon Name="alert" />
+                    </span>
+                    <h2 style="margin:0;font-size:18px">@Title</h2>
+                </div>
+            </div>
+            <div class="modal-body stack" style="gap:14px">
+                <p style="margin:0;font-size:14px;line-height:1.5">@Message</p>
+
+                @if (ChildContent is not null)
+                {
+                    @ChildContent
+                }
+
+                @if (!string.IsNullOrEmpty(Details))
+                {
+                    <div class="alert @(IsDanger ? "bad" : "warn")" style="font-size:12px;padding:10px 12px;margin:0;line-height:1.4">
+                        @Details
+                    </div>
+                }
+            </div>
+            <div class="modal-foot">
+                <button type="button" class="btn" @onclick="Cancel">@(CancelText ?? "Cancel")</button>
+                <button type="button" class="btn @(IsDanger ? "btn-danger" : "btn-primary")" @onclick="Confirm">
+                    @ConfirmText
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public string Title { get; set; } = "Confirm Action";
+    [Parameter] public string Message { get; set; } = "";
+    [Parameter] public string? Details { get; set; }
+    [Parameter] public string ConfirmText { get; set; } = "Confirm";
+    [Parameter] public string? CancelText { get; set; } = "Cancel";
+    [Parameter] public bool IsDanger { get; set; } = true;
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public EventCallback OnConfirm { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private async Task Confirm()
+    {
+        if (OnConfirm.HasDelegate)
+            await OnConfirm.InvokeAsync();
+    }
+
+    private async Task Cancel()
+    {
+        if (OnCancel.HasDelegate)
+            await OnCancel.InvokeAsync();
+    }
+}

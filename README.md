@@ -46,6 +46,8 @@ Full usage documentation: [docs/USER-GUIDE.md](./docs/USER-GUIDE.md). Admin quic
 
 - Custom-designed UI with light/dark themes, role-based navigation, idle timeout, notifications.
 - Query workspace: Monaco editor with schema-aware completion, tabs, saved queries, history, formatting, dry-run (rollback), timeout, cancel, results grid with column sorting, row filtering, double-click cell copy, and multi-format export: CSV, Excel (.xls), JSON, Markdown table, and SQL INSERT statements (needs `EXPORT`, audited).
+- Estimated Execution Plan: safe query plan compilation with `SET SHOWPLAN_XML ON`, extracting subtree costs, missing index recommendations with one-click DDL generation and editor insertion, and operator bottleneck breakdowns with scan warnings.
+- Dynamic Data Masking: multi-standard in-flight redaction (GDPR, HIPAA, PCI-DSS, SOC 2, CCPA) covering patient names, medical record IDs, dates of birth, street addresses, ZIP codes, credit card PANs, CVVs, SSNs, phone numbers, emails, IP addresses, credentials, and salaries; manageable in the UI with compliance tagging and custom rules.
 - SQL gate (ScriptDom): blocks parse errors, `USE`, cross-database references and security DDL; maps statements to required permissions; confirms unfiltered UPDATE/DELETE.
 - Fail-closed auditing: the audit row is written before execution; failure to write blocks the query.
 - Access and script requests with approval, edit-before-approve, auto-run, expiry and reminders.

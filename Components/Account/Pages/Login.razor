@@ -13,41 +13,80 @@
 <PageTitle>Sign in · Query Gate</PageTitle>
 
 <h1>Welcome back</h1>
-<p class="sub">Sign in with your work account to continue.</p>
+<p class="sub">@(string.IsNullOrEmpty(ReturnUrl) ? "Sign in with your work account to continue." : "Sign in to continue.")</p>
 
 @if (!string.IsNullOrEmpty(errorMessage))
 {
     <div class="alert bad" role="alert">@errorMessage</div>
 }
 
+@* ── Passkey sign-in (shown when browser supports WebAuthn) ── *@
+<form @formname="passkey-login" @onsubmit="PasskeySignIn" method="post" class="passkey-form">
+    <AntiforgeryToken />
+    <PasskeySubmit Operation="PasskeyOperation.Request"
+                   Name="PasskeyInput"
+                   EmailName="Input.Email"
+                   class="btn btn-passkey btn-lg"
+                   data-passkey-btn>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:18px;height:18px"><circle cx="12" cy="8" r="4"/><path d="M20 20c0-4.4-3.6-8-8-8s-8 3.6-8 8"/><path d="M15 11.5l2 2 4-4" stroke-width="2"/></svg>
+        Sign in with a passkey
+    </PasskeySubmit>
+</form>
+
+<div class="auth-divider"><span>or sign in with password</span></div>
+
 <EditForm EditContext="editContext" method="post" OnSubmit="LoginUser" FormName="login">
     <DataAnnotationsValidator />
     <div class="field">
         <label for="email">Email</label>
-        <InputText type="email" @bind-Value="Input.Email" id="email" autocomplete="username" aria-required="true" placeholder="you@company.com" />
+        <InputText type="email" @bind-Value="Input.Email" id="email" autocomplete="email username" aria-required="true" placeholder="you@company.com" />
         <ValidationMessage For="() => Input.Email" />
     </div>
     <div class="field">
         <label for="password">Password</label>
-        <InputText type="password" @bind-Value="Input.Password" id="password" autocomplete="current-password" aria-required="true" placeholder="••••••••••••" />
+        <div class="password-wrapper">
+            <InputText type="password" @bind-Value="Input.Password" id="password" autocomplete="current-password" aria-required="true" placeholder="••••••••••••" />
+            <button type="button" class="btn-toggle-password"
+                    data-password-input="password"
+                    aria-label="Hover to view password"
+                    title="Hover or hold to view password"
+                    tabindex="-1">
+                <svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+                <svg class="eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                    <line x1="1" y1="1" x2="23" y2="23"></line>
+                </svg>
+            </button>
+        </div>
         <ValidationMessage For="() => Input.Password" />
     </div>
-    <label class="check" style="margin-bottom:18px"><InputCheckbox @bind-Value="Input.RememberMe" /> Keep me signed in on this device</label>
+    <div class="login-row">
+        <label class="check"><InputCheckbox @bind-Value="Input.RememberMe" /> Remember me on this device</label>
+    </div>
     <button type="submit" class="btn btn-primary btn-lg">Sign in</button>
 </EditForm>
-<p class="small faint" style="margin-top:22px">Accounts are created by an administrator. After five failed attempts the account is locked for 15 minutes.</p>
+
+<p class="small faint login-hint">
+    Accounts are created by an administrator. After five failed attempts the account is locked for 15&nbsp;minutes.
+    If you've forgotten your password, contact your administrator to reset it.
+</p>
 
 @code {
     private string? errorMessage;
     private EditContext editContext = default!;
 
     [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
-    [SupplyParameterFromForm] private InputModel Input { get; set; } = default!;
+    [SupplyParameterFromForm(FormName = "login")] private InputModel Input { get; set; } = default!;
+    [SupplyParameterFromForm(FormName = "passkey-login")] private PasskeyInputModel PasskeyInput { get; set; } = default!;
     [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
         Input ??= new();
+        PasskeyInput ??= new();
         editContext = new EditContext(Input);
         if (HttpMethods.IsGet(HttpContext.Request.Method))
         {
@@ -57,6 +96,35 @@
 
     private Actor ActorFor(string email, string? id = null) =>
         new(id ?? "", email, HttpContext.Connection.RemoteIpAddress?.ToString(), HttpContext.Request.Headers.UserAgent.ToString());
+
+    public async Task PasskeySignIn()
+    {
+        if (!string.IsNullOrEmpty(PasskeyInput.Error))
+        {
+            errorMessage = PasskeyInput.Error;
+            return;
+        }
+
+        if (string.IsNullOrEmpty(PasskeyInput.CredentialJson))
+        {
+            errorMessage = "No passkey was provided by the browser.";
+            return;
+        }
+
+        var result = await SignInManager.PasskeySignInAsync(PasskeyInput.CredentialJson);
+        if (result.Succeeded)
+        {
+            RedirectManager.RedirectTo(string.IsNullOrEmpty(ReturnUrl) ? "dashboard" : ReturnUrl);
+        }
+        else if (result.IsLockedOut)
+        {
+            RedirectManager.RedirectTo("Account/Lockout");
+        }
+        else
+        {
+            errorMessage = "Passkey sign-in failed. Please try again or use your password.";
+        }
+    }
 
     public async Task LoginUser()
     {

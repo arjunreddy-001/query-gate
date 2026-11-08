@@ -12,8 +12,6 @@
     <div><h1>Script requests</h1><p>Submit a script for an administrator to review and run on your behalf.</p></div>
 </div>
 
-<Banner Text="@Flash" IsError="@FlashIsError" />
-
 <div class="split">
     <div class="card">
         <div class="card-head"><h2>My scripts</h2></div>
@@ -32,7 +30,7 @@
                             <td class="wrap muted small">@(r.ResultSummary ?? r.Comments)</td>
                             <td class="right nowrap">
                                 <button class="btn btn-sm btn-ghost" @onclick="() => viewing = r">View</button>
-                                @if (r.Status == RequestStatus.Pending) { <button class="btn btn-sm btn-ghost" @onclick="() => Cancel(r.Id)">Cancel</button> }
+                                @if (r.Status == RequestStatus.Pending) { <button class="btn btn-sm btn-ghost" @onclick="() => PromptCancel(r)">Cancel</button> }
                             </td>
                         </tr>
                     }
@@ -66,6 +64,15 @@
     </div>
 }
 
+<ConfirmDialog IsOpen="@(cancellingScript is not null)"
+               Title="Cancel Script Request?"
+               Message="@($"Are you sure you want to withdraw the script request '{cancellingScript?.Title}'?")"
+               Details="The pending script review will be cancelled and removed from the administrator review queue."
+               ConfirmText="Cancel Request"
+               IsDanger="true"
+               OnConfirm="ConfirmCancel"
+               OnCancel="() => cancellingScript = null" />
+
 @code {
     private List<ScriptRequest> items = [];
     private List<ManagedDatabase> databases = [];
@@ -93,6 +100,21 @@
     {
         Say(await Requests.SubmitScriptAsync(Me, dbId, title ?? "", script ?? "", justification ?? "", Gate), "Script submitted for review.");
         if (!FlashIsError) { title = script = justification = null; await Refresh(); }
+    }
+
+    private ScriptRequest? cancellingScript;
+
+    private void PromptCancel(ScriptRequest r)
+    {
+        cancellingScript = r;
+    }
+
+    private async Task ConfirmCancel()
+    {
+        if (cancellingScript is null) return;
+        var id = cancellingScript.Id;
+        cancellingScript = null;
+        await Cancel(id);
     }
 
     private async Task Cancel(Guid id)

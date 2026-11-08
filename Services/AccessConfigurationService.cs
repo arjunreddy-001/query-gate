@@ -2,10 +2,15 @@ using DbAccessManager.Data;
 using DbAccessManager.Security;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace DbAccessManager.Services;
 
-public sealed class AccessConfigurationService(IDbContextFactory<ApplicationDbContext> factory, IServiceScopeFactory scopes, AuditService audit)
+public sealed class AccessConfigurationService(
+    IDbContextFactory<ApplicationDbContext> factory,
+    IServiceScopeFactory scopes,
+    AuditService audit,
+    ILogger<AccessConfigurationService>? logger = null)
 {
     public const string CapabilityClaim = "querygate:capability";
     public const string AuditCapability = "audit";
@@ -135,5 +140,132 @@ public sealed class AccessConfigurationService(IDbContextFactory<ApplicationDbCo
         await tx.CommitAsync();
         await audit.TryWriteAsync(actor, "Permission", "EnvironmentDefaultsUpdated", "Success", $"environment={environmentId}; role={roleId}; permissions={string.Join(",", codes)}");
         return OpResult.Success();
+    }
+
+    public async Task<OpResult> SaveGrantsAsync(
+        Actor actor,
+        Guid databaseId,
+        string? roleId,
+        string? userId,
+        IEnumerable<string> finalPermissions,
+        IEnumerable<string> initialPermissions,
+        PermissionEffect effect,
+        DateTime? starts = null,
+        DateTime? ends = null)
+    {
+        try
+        {
+            var cleanRoleId = string.IsNullOrWhiteSpace(roleId) ? null : roleId.Trim();
+            var cleanUserId = string.IsNullOrWhiteSpace(userId) ? null : userId.Trim();
+
+            if (cleanRoleId == null && cleanUserId == null)
+                return OpResult.Fail("Select either a role or a user.");
+            if (cleanRoleId != null && cleanUserId != null)
+                return OpResult.Fail("Cannot assign grant to both a role and a user simultaneously.");
+
+            var finalCodes = finalPermissions
+                .Select(Perm.Normalize)
+                .Where(c => !string.IsNullOrWhiteSpace(c))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (finalCodes.Any(c => c.Length > 128 || !Perm.IsValid(c)))
+                return OpResult.Fail("Invalid permission code.");
+
+            if (starts is not null && ends is not null && ends <= starts)
+                return OpResult.Fail("End time must be after start time.");
+
+            await using var db = await factory.CreateDbContextAsync();
+            var targetDb = await db.ManagedDatabases.FindAsync(databaseId);
+            if (targetDb is null) return OpResult.Fail("Target database was not found.");
+
+            var startsAt = starts.HasValue ? new DateTimeOffset(starts.Value, TimeZoneInfo.Local.GetUtcOffset(starts.Value)) : (DateTimeOffset?)null;
+            var endsAt = ends.HasValue ? new DateTimeOffset(ends.Value, TimeZoneInfo.Local.GetUtcOffset(ends.Value)) : (DateTimeOffset?)null;
+
+            var q = db.PermissionGrants.Where(g => g.DatabaseId == databaseId);
+            if (cleanRoleId != null)
+            {
+                q = q.Where(g => g.RoleId == cleanRoleId);
+            }
+            else
+            {
+                q = q.Where(g => g.UserId == cleanUserId);
+            }
+            var existingGrants = await q.ToListAsync();
+
+            var existingMap = new Dictionary<string, PermissionGrant>(StringComparer.OrdinalIgnoreCase);
+            var duplicateGrantsToRemove = new List<PermissionGrant>();
+            foreach (var g in existingGrants)
+            {
+                var norm = Perm.Normalize(g.PermissionCode);
+                if (!existingMap.TryAdd(norm, g))
+                {
+                    duplicateGrantsToRemove.Add(g);
+                }
+            }
+
+            foreach (var dup in duplicateGrantsToRemove)
+            {
+                db.PermissionGrants.Remove(dup);
+            }
+
+            var removedCount = duplicateGrantsToRemove.Count;
+            var updatedCount = 0;
+            var addedCount = 0;
+
+            // 1. Remove unchecked grants that previously existed
+            var initialSet = initialPermissions.Select(Perm.Normalize).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var uncheckedCodes = initialSet.Where(c => !finalCodes.Contains(c, StringComparer.OrdinalIgnoreCase)).ToList();
+            foreach (var code in uncheckedCodes)
+            {
+                if (existingMap.TryGetValue(code, out var grantToRemove))
+                {
+                    db.PermissionGrants.Remove(grantToRemove);
+                    existingMap.Remove(code);
+                    removedCount++;
+                }
+            }
+
+            // 2. Insert or update finalCodes (duplicate check: if code exists, update it; otherwise insert new)
+            foreach (var code in finalCodes)
+            {
+                if (existingMap.TryGetValue(code, out var existingGrant))
+                {
+                    existingGrant.Effect = effect;
+                    existingGrant.StartsAt = startsAt;
+                    existingGrant.EndsAt = endsAt;
+                    updatedCount++;
+                }
+                else
+                {
+                    db.PermissionGrants.Add(new PermissionGrant
+                    {
+                        DatabaseId = databaseId,
+                        PermissionCode = code,
+                        Effect = effect,
+                        UserId = cleanUserId,
+                        RoleId = cleanRoleId,
+                        StartsAt = startsAt,
+                        EndsAt = endsAt
+                    });
+                    addedCount++;
+                }
+            }
+
+            await db.SaveChangesAsync();
+
+            var subjectKind = cleanRoleId != null ? "role" : "user";
+            var subjectId = cleanRoleId ?? cleanUserId;
+            await audit.TryWriteAsync(actor, "Permission", "GrantsSaved", "Success",
+                $"Applied grants for {subjectKind} {subjectId} on {targetDb.Name}: +{addedCount}, ~{updatedCount}, -{removedCount}",
+                databaseId, targetDb.Name);
+
+            return OpResult.Success($"{addedCount}:{updatedCount}:{removedCount}");
+        }
+        catch (Exception ex)
+        {
+            logger?.LogError(ex, "Failed to save grants for database {DatabaseId}", databaseId);
+            return OpResult.Fail($"Failed to save grants: {ex.InnerException?.Message ?? ex.Message}");
+        }
     }
 }

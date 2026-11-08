@@ -94,6 +94,67 @@ public class ExportFormattersTests
         Assert.Contains("END", sql);
     }
 
+    [Fact]
+    public void ToSqlInsert_Excludes_Specified_Columns()
+    {
+        var cols = new[] { "Id", "Name", "Price", "CreatedAt", "UpdatedAt" };
+        var rows = new List<object?[]>
+        {
+            new object?[] { 101, "Widget", 19.99, "2026-11-01 10:00:00", "2026-11-01 12:00:00" },
+            new object?[] { 102, "Gadget", 49.50, "2026-11-02 11:30:00", null }
+        };
+
+        // Exclude identity column 'Id' and auto-insert column 'CreatedAt', 'UpdatedAt'
+        var sql = ExportFormatters.ToSqlInsert(cols, rows, "Products", duplicateCheckColumns: ["Name"], excludedColumns: ["Id", "CreatedAt", "UpdatedAt"]);
+
+        var lines = sql.Trim().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+        // Verify insert statement only has Name and Price
+        Assert.Contains("INSERT INTO [Products] ([Name], [Price]) VALUES ('Widget', 19.99);", sql);
+        Assert.Contains("INSERT INTO [Products] ([Name], [Price]) VALUES ('Gadget', 49.5);", sql);
+        // Verify excluded columns are nowhere in the INSERT columns or values list
+        Assert.DoesNotContain("[Id]", sql);
+        Assert.DoesNotContain("[CreatedAt]", sql);
+        Assert.DoesNotContain("[UpdatedAt]", sql);
+        Assert.DoesNotContain("101", sql);
+        Assert.DoesNotContain("102", sql);
+        // Duplicate check column 'Name' is properly honored
+        Assert.Contains("IF NOT EXISTS (SELECT 1 FROM [Products] WHERE [Name] = 'Widget')", sql);
+    }
+
+    [Fact]
+    public void ToSqlInsert_Can_Selectively_Include_AutoInsert_Columns()
+    {
+        var cols = new[] { "Id", "SKU", "ProductName", "CreatedAt", "UpdatedAt" };
+        var rows = new List<object?[]>
+        {
+            new object?[] { 1, "SKU100", "Keyboard", "2026-01-01 00:00:00", "2026-01-02 00:00:00" }
+        };
+
+        // User explicitly chose to include CreatedAt (by not excluding it), but excluded Id and UpdatedAt
+        var sql = ExportFormatters.ToSqlInsert(cols, rows, "Products", duplicateCheckColumns: ["SKU"], excludedColumns: ["Id", "UpdatedAt"]);
+
+        Assert.Contains("INSERT INTO [Products] ([SKU], [ProductName], [CreatedAt]) VALUES ('SKU100', 'Keyboard', '2026-01-01 00:00:00');", sql);
+        Assert.DoesNotContain("[Id]", sql);
+        Assert.DoesNotContain("[UpdatedAt]", sql);
+        Assert.Contains("[CreatedAt]", sql);
+    }
+
+    [Fact]
+    public void DbColumnInfo_Tracks_Identity_And_Default_Metadata()
+    {
+        var idCol = new DbColumnInfo("Id", "int", false, IsIdentity: true, HasDefault: false, IsComputed: false);
+        var createdCol = new DbColumnInfo("CreatedAt", "datetime2", false, IsIdentity: false, HasDefault: true, IsComputed: false);
+        var calcCol = new DbColumnInfo("Total", "decimal", true, IsIdentity: false, HasDefault: false, IsComputed: true);
+
+        Assert.True(idCol.IsIdentity);
+        Assert.False(idCol.HasDefault);
+
+        Assert.False(createdCol.IsIdentity);
+        Assert.True(createdCol.HasDefault);
+
+        Assert.True(calcCol.IsComputed);
+    }
+
     [Theory]
     [InlineData("SELECT * FROM Products", "Products")]
     [InlineData("SELECT Id, Name FROM [dbo].[Orders] WHERE Active = 1", "Orders")]

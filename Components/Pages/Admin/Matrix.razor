@@ -10,7 +10,18 @@
 
 <div class="page-head">
     <div><h1>Access matrix</h1><p>Effective permissions per user and database.</p></div>
-    <div class="actions"><button class="btn" disabled="@(rows.Count == 0)" @onclick="Export"><Icon Name="download" />Export CSV</button></div>
+    <div class="actions">
+        <div class="export-dropdown">
+            <button class="btn btn-sm" type="button" disabled="@(rows.Count == 0)">
+                <Icon Name="download" />Export <span style="font-size:9px;margin-left:2px">▾</span>
+            </button>
+            <div class="export-dropdown-menu">
+                <button class="export-dropdown-item" type="button" @onclick="ExportCsv"><Icon Name="file" />CSV (.csv)</button>
+                <button class="export-dropdown-item" type="button" @onclick="ExportXlsx"><Icon Name="table" />Excel (.xlsx)</button>
+                <button class="export-dropdown-item" type="button" @onclick="ExportXlsb"><Icon Name="table" />Excel Binary (.xlsb)</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="toolbar">
@@ -66,12 +77,45 @@
         }
     }
 
-    private async Task Export()
+    private (List<string> Columns, List<object?[]> Rows) GetMatrixExportData()
     {
-        var sb = new System.Text.StringBuilder("User,Active," + string.Join(',', Perm.Catalog) + "\r\n");
-        foreach (var r in rows)
-            sb.AppendLine(string.Join(',', new[] { Csv.Cell(r.User.Email), r.User.IsActive.ToString() }.Concat(Perm.Catalog.Select(c => r.Allowed.Contains(c) ? "Y" : "N"))));
-        await Audit.TryWriteAsync(Me, "Export", "AccessMatrixExport", "Success", null, dbId, dbs.FirstOrDefault(d => d.Id == dbId)?.Name);
-        await Js.InvokeVoidAsync("dbam.download", $"access-matrix-{DateTime.UtcNow:yyyyMMdd}.csv", sb.ToString(), "text/csv");
+        var cols = new List<string> { "User", "Active" };
+        cols.AddRange(Perm.Catalog);
+
+        var dataRows = rows.Select(r =>
+        {
+            var rowVals = new List<object?> { r.User.Email, r.User.IsActive ? "Active" : "Inactive" };
+            rowVals.AddRange(Perm.Catalog.Select(c => r.Allowed.Contains(c) ? "Y" : "N"));
+            return rowVals.ToArray();
+        }).ToList();
+
+        return (cols, dataRows);
+    }
+
+    private async Task ExportCsv()
+    {
+        var (cols, dataRows) = GetMatrixExportData();
+        var csv = ExportFormatters.ToCsv(cols, dataRows);
+        await Audit.TryWriteAsync(Me, "Export", "AccessMatrixExport", "Success", $"{rows.Count} users (CSV)", dbId, dbs.FirstOrDefault(d => d.Id == dbId)?.Name);
+        await DownloadFileAsync($"access-matrix-{DateTime.UtcNow:yyyyMMdd}.csv", csv, ExportFormatters.CsvMimeType);
+        Say($"Exported {rows.Count:N0} matrix row(s).");
+    }
+
+    private async Task ExportXlsx()
+    {
+        var (cols, dataRows) = GetMatrixExportData();
+        var bytes = ExportFormatters.ToXlsx(cols, dataRows, "Access Matrix");
+        await Audit.TryWriteAsync(Me, "Export", "AccessMatrixExport", "Success", $"{rows.Count} users (XLSX)", dbId, dbs.FirstOrDefault(d => d.Id == dbId)?.Name);
+        await DownloadBinaryAsync($"access-matrix-{DateTime.UtcNow:yyyyMMdd}.xlsx", bytes, ExportFormatters.XlsxMimeType);
+        Say($"Exported {rows.Count:N0} matrix row(s).");
+    }
+
+    private async Task ExportXlsb()
+    {
+        var (cols, dataRows) = GetMatrixExportData();
+        var bytes = ExportFormatters.ToXlsb(cols, dataRows, "Access Matrix");
+        await Audit.TryWriteAsync(Me, "Export", "AccessMatrixExport", "Success", $"{rows.Count} users (XLSB)", dbId, dbs.FirstOrDefault(d => d.Id == dbId)?.Name);
+        await DownloadBinaryAsync($"access-matrix-{DateTime.UtcNow:yyyyMMdd}.xlsb", bytes, ExportFormatters.XlsbMimeType);
+        Say($"Exported {rows.Count:N0} matrix row(s).");
     }
 }

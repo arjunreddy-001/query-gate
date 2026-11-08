@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Data;
 using System.Diagnostics;
+using System.Text;
 using DbAccessManager.Data;
 using DbAccessManager.Security;
 using Microsoft.Data.SqlClient;
@@ -63,6 +64,8 @@ public sealed class ResultSetDto
     public List<string> Columns { get; set; } = [];
     public List<object?[]> Rows { get; set; } = [];
     public bool Truncated { get; set; }
+    public bool IsMasked { get; set; }
+    public List<string> MaskedColumns { get; set; } = [];
 }
 
 public sealed class ExecutionResult
@@ -79,6 +82,9 @@ public sealed class ExecutionResult
     public long RowsAffected { get; set; }
     public long RowsReturned { get; set; }
     public long AuditId { get; set; }
+    public bool IsMasked { get; set; }
+    public List<string> MaskedColumns { get; } = [];
+    public ExecutionPlanDto? ExecutionPlan { get; set; }
     public bool Ok => Outcome == "Success";
 }
 
@@ -111,19 +117,43 @@ public sealed class ExecutionService(
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _dbSlots = new();
 
 
-    public async Task<OpResult> AuthorizeExportAsync(Actor actor, Guid databaseId, long rows, string sql)
+    public async Task<OpResult> AuthorizeExportAsync(Actor actor, Guid databaseId, long rows, string sql, string format = "Csv", string? databaseName = null)
     {
+        var action = $"Export{format}";
+        if (string.IsNullOrWhiteSpace(databaseName) && databaseId != Guid.Empty)
+        {
+            try
+            {
+                await using var db = await factory.CreateDbContextAsync();
+                databaseName = await db.ManagedDatabases.Where(d => d.Id == databaseId).Select(d => d.Name).FirstOrDefaultAsync();
+            }
+            catch
+            {
+                // Non-critical database name lookup
+            }
+        }
+
         if (!await permissions.HasAsync(actor.UserId, databaseId, Perm.Export))
         {
-            await audit.TryWriteAsync(actor, "Export", "Export", "Denied", "Missing permission: EXPORT", databaseId);
+            await audit.TryWriteAsync(actor, "Export", action, "Denied", "Missing permission: EXPORT", databaseId, databaseName);
             return OpResult.Fail("You do not have the EXPORT permission on this database.");
         }
         try
         {
             await audit.WriteAsync(new AuditLog
             {
-                UserId = actor.UserId, UserName = actor.UserName, ClientIp = actor.Ip, UserAgent = AuditService.Truncate(actor.UserAgent, 512),
-                DatabaseId = databaseId, Category = "Export", Action = "ExportCsv", SqlText = sql, Outcome = "Success", RowsReturned = rows, Executor = "User"
+                UserId = actor.UserId,
+                UserName = actor.UserName,
+                ClientIp = actor.Ip,
+                UserAgent = AuditService.Truncate(actor.UserAgent, 512),
+                DatabaseId = databaseId,
+                DatabaseName = databaseName,
+                Category = "Export",
+                Action = action,
+                SqlText = sql,
+                Outcome = "Success",
+                RowsReturned = rows,
+                Executor = "User"
             });
         }
         catch (Exception ex)
@@ -246,6 +276,16 @@ public sealed class ExecutionService(
             {
                 await RunAsync(database, options, analysis, result, timeout, maxRows, cts.Token);
                 result.Outcome = "Success";
+
+                var canUnmask = permissions.Resolve(Perm.Unmask, rules);
+                if (!canUnmask)
+                {
+                    var (maskRules, maskEnabled) = await DataMaskingService.GetConfigAsync(factory);
+                    if (maskEnabled)
+                    {
+                        DataMaskingService.ApplyMasking(result, maskRules);
+                    }
+                }
             }
             catch (OperationCanceledException)
             {
@@ -277,7 +317,9 @@ public sealed class ExecutionService(
                     row.DurationMs = result.DurationMs;
                     row.RowsAffected = result.RowsAffected;
                     row.RowsReturned = result.RowsReturned;
-                    row.Details = result.Error is null ? null : AuditService.Truncate(result.Error, 2000);
+                    row.Details = result.Error is null
+                        ? (result.IsMasked ? $"[Masked: {string.Join(", ", result.MaskedColumns)}]" : null)
+                        : AuditService.Truncate(result.Error, 2000);
                     await db2.SaveChangesAsync();
                 }
                 if (!isSystem)
@@ -311,6 +353,173 @@ public sealed class ExecutionService(
             userSlot.Release();
             dbSlot.Release();
         }
+    }
+
+    public async Task<ExecutionResult> GetEstimatedPlanAsync(Actor actor, Guid databaseId, string sql, int? timeoutSeconds = null, CancellationToken ct = default)
+    {
+        var result = new ExecutionResult { RunId = Guid.NewGuid() };
+        var stopwatch = Stopwatch.StartNew();
+
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var database = await db.ManagedDatabases.AsNoTracking().FirstOrDefaultAsync(d => d.Id == databaseId, ct);
+        if (database is null)
+        {
+            result.Outcome = "Denied";
+            result.Error = "Database not found.";
+            return result;
+        }
+
+        using var scope = scopes.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<ApplicationUser>>();
+        var user = await users.FindByIdAsync(actor.UserId);
+        if (user is null || !user.CanSignIn(DateTimeOffset.UtcNow))
+        {
+            result.Outcome = "Denied";
+            result.Error = "Your account is inactive or expired.";
+            return result;
+        }
+        if (!database.IsActive)
+        {
+            result.Outcome = "Denied";
+            result.Error = "This database is disabled.";
+            return result;
+        }
+
+        var analysis = gate.Analyze(sql);
+        if (analysis.HasHardDenial)
+        {
+            foreach (var d in analysis.ParseErrors.Concat(analysis.HardDenials)) result.Denials.Add(d);
+            result.Outcome = "Denied";
+            result.Error = string.Join(" ", result.Denials);
+            await audit.TryWriteAsync(NewAudit(actor, new ExecutionOptions { DatabaseId = databaseId, SqlText = sql }, database, analysis, "Denied", result.Error));
+            return result;
+        }
+
+        var rules = await permissions.GetRulesAsync(db, actor.UserId, database.Id);
+        if (!permissions.Resolve(Perm.Select, rules))
+        {
+            result.Outcome = "Denied";
+            result.Error = "Missing permission: SELECT (required for Explain Plan).";
+            result.Denials.Add(result.Error);
+            await audit.TryWriteAsync(NewAudit(actor, new ExecutionOptions { DatabaseId = databaseId, SqlText = sql }, database, analysis, "Denied", result.Error));
+            return result;
+        }
+
+        var maxTimeout = await settings.GetIntAsync("MaxTimeoutSeconds");
+        var defaultTimeout = database.DefaultTimeoutSeconds > 0 ? database.DefaultTimeoutSeconds : await settings.GetIntAsync("DefaultTimeoutSeconds");
+        var timeout = Math.Min(maxTimeout, timeoutSeconds ?? user?.TimeoutOverrideSeconds ?? defaultTimeout);
+
+        var perUser = Math.Max(1, await settings.GetIntAsync("MaxConcurrentPerUser"));
+        var perDb = Math.Max(1, await settings.GetIntAsync("MaxConcurrentPerDatabase"));
+        var userSlot = _userSlots.GetOrAdd(actor.UserId, _ => new SemaphoreSlim(perUser));
+        var dbSlot = _dbSlots.GetOrAdd(database.Id, _ => new SemaphoreSlim(perDb));
+        if (!await userSlot.WaitAsync(0, ct))
+        {
+            result.Outcome = "Denied";
+            result.Error = "Too many concurrent queries for your account.";
+            return result;
+        }
+        if (!await dbSlot.WaitAsync(0, ct))
+        {
+            userSlot.Release();
+            result.Outcome = "Denied";
+            result.Error = "Too many concurrent queries on this database.";
+            return result;
+        }
+
+        var xmlBuilder = new StringBuilder();
+        try
+        {
+            var connectionString = crypto.Decrypt(database.EncryptedConnectionString);
+            await using var connection = new SqlConnection(connectionString);
+            await connection.OpenAsync(ct);
+
+            await using (var cmdOn = new SqlCommand("SET SHOWPLAN_XML ON;", connection) { CommandTimeout = timeout })
+            {
+                await cmdOn.ExecuteNonQueryAsync(ct);
+            }
+
+            try
+            {
+                foreach (var batch in analysis.Batches)
+                {
+                    await using var cmd = new SqlCommand(batch, connection) { CommandTimeout = timeout };
+                    await using var reader = await cmd.ExecuteReaderAsync(ct);
+                    while (await reader.ReadAsync(ct))
+                    {
+                        if (reader.FieldCount > 0 && !reader.IsDBNull(0))
+                        {
+                            xmlBuilder.Append(reader.GetString(0));
+                        }
+                    }
+                }
+                result.Outcome = "Success";
+            }
+            finally
+            {
+                try
+                {
+                    await using var cmdOff = new SqlCommand("SET SHOWPLAN_XML OFF;", connection) { CommandTimeout = timeout };
+                    await cmdOff.ExecuteNonQueryAsync(CancellationToken.None);
+                }
+                catch { }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            result.Outcome = "Cancelled";
+            result.Error = "Explain plan cancelled.";
+        }
+        catch (SqlException ex)
+        {
+            result.Outcome = ex.Number == -2 ? "Timeout" : "Error";
+            result.Error = ex.Number == -2 ? $"Explain plan timed out after {timeout}s." : ex.Message;
+            result.ErrorLine = ex.LineNumber > 0 ? ex.LineNumber : null;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Explain plan failed");
+            result.Outcome = "Error";
+            result.Error = ex.Message;
+        }
+        finally
+        {
+            userSlot.Release();
+            dbSlot.Release();
+        }
+
+        stopwatch.Stop();
+        result.DurationMs = stopwatch.ElapsedMilliseconds;
+
+        var rawXml = xmlBuilder.ToString();
+        if (result.Ok && !string.IsNullOrWhiteSpace(rawXml))
+        {
+            result.ExecutionPlan = ExecutionPlanParser.Parse(rawXml);
+            result.Messages.Add($"Estimated plan generated in {result.DurationMs}ms (Subtree Cost: {result.ExecutionPlan.TotalCost:F4}).");
+        }
+
+        var auditEntry = new AuditLog
+        {
+            UserId = actor.UserId,
+            UserName = actor.UserName,
+            ClientIp = actor.Ip,
+            UserAgent = AuditService.Truncate(actor.UserAgent, 512),
+            DatabaseId = database.Id,
+            DatabaseName = database.Name,
+            Category = "Query",
+            Action = "ExplainPlan",
+            SqlText = sql,
+            StatementTypes = AuditService.Truncate(string.Join(",", analysis.StatementTypes), 512),
+            Outcome = result.Outcome,
+            DurationMs = result.DurationMs,
+            Details = result.Error is null
+                ? (result.ExecutionPlan is not null ? $"Cost: {result.ExecutionPlan.TotalCost:F4}, Operators: {result.ExecutionPlan.Operators.Count}" : null)
+                : AuditService.Truncate(result.Error, 2000),
+            Executor = "User"
+        };
+        await audit.TryWriteAsync(auditEntry);
+
+        return result;
     }
 
     private async Task RunAsync(ManagedDatabase database, ExecutionOptions options, GateAnalysis analysis, ExecutionResult result, int timeout, int maxRows, CancellationToken ct)
@@ -370,7 +579,7 @@ public sealed class ExecutionService(
         TimeSpan ts => ts.ToString(),
         Guid g => g.ToString(),
         decimal or double or float or int or long or short or byte or bool or string => value,
-        _ => value.ToString()
+        _ => value?.ToString()
     };
 
     private static AuditLog NewAudit(Actor actor, ExecutionOptions options, ManagedDatabase? database, GateAnalysis? analysis, string outcome, string? details) => new()

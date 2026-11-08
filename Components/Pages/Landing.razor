@@ -4,25 +4,30 @@
 <PageTitle>Query Gate · Governed SQL access</PageTitle>
 
 <div class="landing-wrap">
-    <section class="landing-hero">
+    <section class="landing-hero" aria-labelledby="hero-title">
         <div class="landing-copy">
             <span class="landing-eyebrow"><Icon Name="shield" /> A safer way to work with SQL Server</span>
-            <h1>Give your team access.<br /><span>Keep the guardrails.</span></h1>
-            <p>Query Gate brings database access, approvals and auditing together in one workspace. Run the queries you need with controls built in.</p>
+            <h1 id="hero-title">Give your team access.<br /><span>Keep the guardrails.</span></h1>
+            <p>Analyse, approve and audit every SQL statement — without sharing database credentials with every user.</p>
             <div class="landing-actions">
                 <AuthorizeView>
                     <Authorized><a class="btn btn-primary landing-button" href="/query">Open query workspace <Icon Name="chevron" /></a></Authorized>
                     <NotAuthorized><a class="btn btn-primary landing-button" href="/Account/Login">Sign in to Query Gate <Icon Name="chevron" /></a></NotAuthorized>
                 </AuthorizeView>
-                <a class="btn landing-button" href="/documentation">Explore documentation</a>
+                <a class="btn landing-button" href="/documentation"><Icon Name="list" />Explore documentation</a>
             </div>
-            <div class="landing-note">Open source <span> / </span> Built for SQL Server <span> / </span> Powered by .NET</div>
+            <div class="landing-badges">
+                <span class="badge-chip"><Icon Name="github" /> Open source</span>
+                <span class="badge-chip"><Icon Name="db" /> SQL Server</span>
+                <span class="badge-chip"><Icon Name="terminal" /> .NET 10</span>
+                <span class="badge-chip"><Icon Name="lock" /> Passkeys &amp; MFA</span>
+            </div>
         </div>
         <div class="landing-preview" aria-label="Query Gate workflow">
             <div class="preview-top"><span class="preview-dot"></span><span class="preview-dot"></span><span class="preview-dot"></span><span class="preview-title">QUERY WORKSPACE</span></div>
             <div class="preview-body">
                 <div class="preview-heading"><span class="preview-icon"><Icon Name="terminal" /></span><div><strong>SQL workspace</strong><small>One governed doorway to your data</small></div></div>
-                <div class="preview-code"><span>01</span> SELECT *<br /><span>02</span> FROM dbo.Orders<br /><span>03</span> WHERE Status = 'Open';</div>
+                <div class="preview-code"><span>01</span> SELECT OrderId, Status, Total<br /><span>02</span> FROM dbo.Orders<br /><span>03</span> WHERE Status = 'Open';</div>
                 <div class="preview-check"><Icon Name="check" /><div><strong>Checked before execution</strong><small>Permissions verified. Activity recorded.</small></div></div>
             </div>
         </div>
@@ -35,13 +40,15 @@
             <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="list" /></span><h3>Accountability built in</h3><p>Queries require an audit record before execution, giving your team a trail of activity.</p></article>
             <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="terminal" /></span><h3>A workspace for SQL</h3><p>Explore database objects, write and save queries, and review results in one place.</p></article>
             <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="check" /></span><h3>Requests and approvals</h3><p>Request database access or submit scripts for administrators to review.</p></article>
-            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="table" /></span><h3>Results you can use</h3><p>Review results in a grid and export CSV when you have export permission.</p></article>
+            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="lock" /></span><h3>Passkeys and 2FA</h3><p>Sign in with a passkey or TOTP authenticator app for phishing-resistant authentication.</p></article>
         </div>
     </section>
     <section class="landing-section" aria-labelledby="workspace-title">
         <div class="landing-section-head"><span class="landing-kicker">THE WORKSPACE</span><h2 id="workspace-title">From SQL to results in one place.</h2><p>Browse objects, run permitted queries and inspect results without sharing database credentials with every user.</p></div>
         <figure class="landing-screenshot">
-            <img src="/images/query-workspace.jpeg" alt="Query Gate workspace showing a SQL query and two sample order results" loading="lazy" />
+            <picture>
+                <img src="/images/query-workspace.jpeg" alt="Query Gate workspace showing a SQL query and two sample order results" loading="lazy" />
+            </picture>
             <figcaption>Query workspace shown with fictional sample data.</figcaption>
         </figure>
     </section>
@@ -57,15 +64,14 @@
     <section class="landing-section" aria-labelledby="audiences-title">
         <div class="landing-section-head"><span class="landing-kicker">BUILT FOR TEAMS</span><h2 id="audiences-title">A shared workflow, different responsibilities.</h2></div>
         <div class="landing-audience-grid">
-            <article><h3>Developers</h3><p>Explore and query databases with the access needed for the task.</p></article>
-            <article><h3>QA and testers</h3><p>Inspect test data and request the permissions needed for verification.</p></article>
-            <article><h3>Administrators</h3><p>Register databases, manage access and review requests.</p></article>
-            <article><h3>Auditors</h3><p>Review audit logs and the access matrix for visibility into activity and permissions.</p></article>
+            <article><span class="landing-audience-icon"><Icon Name="terminal" /></span><h3>Developers</h3><p>Explore and query databases with the access needed for the task.</p></article>
+            <article><span class="landing-audience-icon"><Icon Name="check" /></span><h3>QA and testers</h3><p>Inspect test data and request the permissions needed for verification.</p></article>
+            <article><span class="landing-audience-icon"><Icon Name="cog" /></span><h3>Administrators</h3><p>Register databases, manage access and review requests.</p></article>
+            <article><span class="landing-audience-icon"><Icon Name="list" /></span><h3>Auditors</h3><p>Review audit logs and the access matrix for visibility into activity and permissions.</p></article>
         </div>
     </section>
     <section class="landing-section landing-start" aria-labelledby="start-title">
-        <div class="landing-section-head"><span class="landing-kicker">GET STARTED</span><h2 id="start-title">Choose where to run Query Gate.</h2><p>Start with a reachable SQL Server application database, initial administrator credentials and production secrets. Hosting requires HTTPS and persistent data protection keys.</p></div>
-        <p>Use Docker with Compose, or publish with the .NET 10 SDK for your chosen host. Follow the deployment guide for migrations, certificates and secure configuration.</p>
+        <div class="landing-section-head"><span class="landing-kicker">GET STARTED</span><h2 id="start-title">Choose where to run Query Gate.</h2><p>You need a reachable SQL Server database, Docker or the .NET 10 SDK, and an HTTPS certificate. Pick a deployment guide below and follow the migration and secrets steps.</p></div>
         <div class="landing-link-list" aria-label="Deployment guides">
             <a href="/documentation#docker">Docker</a><a href="/documentation#iis">IIS</a><a href="/documentation#azure">Azure App Service</a><a href="/documentation#linux">Linux server</a>
         </div>
@@ -79,7 +85,14 @@
         <article class="landing-info-card">
             <span class="landing-kicker">SECURITY AND SCOPE</span><h2>Use guardrails with least privilege.</h2>
             <p>Application permissions complement SQL Server permissions. Use dedicated least-privilege database accounts, HTTPS, protected secrets and secure backups.</p>
-            <p>Query Gate targets SQL Server. CSV is the only export format, object-level permission scope is not supported, and LocalDB is untested.</p>
+            <div class="landing-scope-box">
+                <strong>Scope &amp; constraints:</strong>
+                <ul>
+                    <li>Designed specifically for SQL Server.</li>
+                    <li>Database-level permissions (object-level scoping not included).</li>
+                    <li>CSV is the primary export format.</li>
+                </ul>
+            </div>
             <a href="/documentation#configuration">Read deployment and security guidance</a>
         </article>
     </section>

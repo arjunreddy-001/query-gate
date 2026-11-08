@@ -32,7 +32,8 @@ Initial default grants added at registration (configurable under Permissions):
 - User rule beats role rule. **Deny beats Allow** at the same level. No rule means denied.
 - Time windows are checked when the query runs.
 - Dangerous permissions (CREATE, ALTER, DROP, TRUNCATE, DYNAMIC_SQL, LINKED_SERVER, XP_CMDSHELL, `SYSPROC:*`): grant sparingly. They are required even for approved scripts.
-- `EXPORT` is required for CSV download.
+- `EXPORT` is required for downloading query results in all formats (CSV, Excel, JSON, Markdown, SQL INSERT).
+- `UNMASK` is required to view unmasked PII and sensitive data. Users without `UNMASK` receive in-flight masked data for emails, phone numbers, SSNs, credit cards, salaries, and secrets.
 - Allow one system procedure with `SYSPROC:name`.
 
 ## 3. Daily tasks
@@ -58,7 +59,7 @@ Initial default grants added at registration (configurable under Permissions):
 
 ## 4. Settings (Admin → Settings)
 
-The Settings page is organized into four tabs: **General & Limits**, **Email & SMTP**, **Webhooks & Alerts**, and **Metadata Cache**.
+The Settings page is organized into five tabs: **General & Limits**, **Email & SMTP**, **Webhooks & Alerts**, **Data Masking**, and **Metadata Cache**.
 
 | Setting                                    | Default      |
 | ------------------------------------------ | ------------ |
@@ -70,12 +71,15 @@ The Settings page is organized into four tabs: **General & Limits**, **Email & S
 | Expiry reminder                            | 24 h before  |
 | Object metadata cache (on/off) / TTL       | On / 10 min  |
 | Temporary password length                  | 16           |
+| Dynamic Data Masking (on/off)              | On           |
 
 **Metadata cache:** the _Object metadata cache_ card on the Settings page shows what is cached per database, with the environment in a separate column. Use _Enable/Disable_, per-database _Reload_ / _Clear_, or _Reload all_ / _Clear all_. All actions are audited.
 
 **Email & SMTP:** configure outgoing SMTP server (host, port, SSL/TLS, username, encrypted password, sender address) directly in the UI. Use _Send test email_ to verify delivery immediately. Falls back to environment/appsettings if unconfigured in the UI.
 
 **Collaboration Webhooks:** add webhooks for Slack, Microsoft Teams, Zoho Cliq, Discord, or generic endpoints. Supports event filters (all, access/script requests only, script executions only) and instant _Test_ dispatch.
+
+**Data Masking:** manage dynamic data masking rules directly in the UI with HIPAA Safe Harbor, GDPR, PCI-DSS, SOC 2, and CCPA compliance. Filter rules by Origin (All, Built-in, Custom) and regulatory standards. Configure column patterns, select masking strategies (`Name`, `MedicalRecord`, `DateOfBirth`, `Address`, `ZipCode`, `Email`, `CreditCard`, `Ssn`, `Phone`, `IpAddress`, `Salary`, `Secret`, or `CustomText` with custom strings like `[CONFIDENTIAL]`), enable/disable rules or global masking, add/edit rules, test pattern matching with instant live preview, or reset to defaults. Includes security confirmation modals before destructive actions (deleting rules, disabling global masking, resetting to defaults). All administrative actions across the app (grants, approvals, user lifecycle, settings) report instant feedback through highlighted top-center floating toast notifications with animated drain timers. All rule updates are audited.
 
 ## 5. Who can see what
 
@@ -94,6 +98,7 @@ Audit and Access matrix access is configurable per role; the Auditor column desc
 - Never share the temporary password over chat history you don't control.
 - Leave **self-approval off** unless you have a single admin.
 - Set `Encryption:Key` and `Jwt:Key` in production and back the encryption key up. Losing it makes saved connection strings unreadable.
+- All delete and remove actions (revoking grants, deleting roles/environments, deactivating accounts, removing webhooks, clearing cache, deleting saved queries, cancelling requests) require explicit confirmation dialogs to prevent accidental loss.
 - The audit log is written **before** a query runs. If auditing is down, queries are refused. This is intended.
 
 ## 7. Quick fixes

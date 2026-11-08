@@ -58,7 +58,7 @@ Use **Defaults** beside an environment to configure allow grants for each role, 
 Pick a database, then **Add grant**:
 
 - **Applies to**: a _Role_ (everyone in it) or a single _User_.
-- **Permission**: SELECT, INSERT, UPDATE, DELETE, EXECUTE, CREATE, ALTER, DROP, TRUNCATE, SP_HELP, SP_HELPTEXT, VIEW_DEFINITION, DYNAMIC_SQL, LINKED_SERVER, XP_CMDSHELL, EXPORT. To allow a specific system procedure, type `SYSPROC:name`.
+- **Permission**: SELECT, INSERT, UPDATE, DELETE, EXECUTE, CREATE, ALTER, DROP, TRUNCATE, SP_HELP, SP_HELPTEXT, VIEW_DEFINITION, DYNAMIC_SQL, LINKED_SERVER, XP_CMDSHELL, EXPORT, UNMASK. To allow a specific system procedure, type `SYSPROC:name`.
 - **Effect**: _Allow_ or _Deny_.
 - **Window** (optional): start and end time for temporary access.
 
@@ -71,7 +71,9 @@ Pick a database, then **Add grant**:
 
 Permissions flagged as _dangerous_ (CREATE/ALTER/DROP/TRUNCATE, DYNAMIC_SQL, LINKED_SERVER, XP_CMDSHELL, system procedures) should be granted sparingly and are still required even for approved scripts.
 
-`EXPORT` controls CSV download of results; it is checked and audited separately from SELECT.
+`EXPORT` controls multi-format export of results (CSV, Excel, JSON, Markdown, SQL INSERT); it is checked and audited separately from SELECT.
+
+`UNMASK` controls viewing unredacted PII and sensitive data. Without this permission, columns containing patient names, medical record numbers (MRNs), dates of birth, addresses, ZIP codes, phone numbers, emails, SSNs, IP addresses, credit cards, salaries, and secrets are dynamically masked in accordance with HIPAA Safe Harbor, GDPR, PCI-DSS, SOC 2, and CCPA standards. Administrators can configure custom column patterns, filter rules by origin (built-in vs custom) and compliance frameworks, add or delete rules, choose redaction strategies, and test pattern matching live under **Admin → Settings → Data Masking**. Destructive actions (deleting rules, global disable, reset defaults) are guarded by confirmation dialogs, and actions across the entire application (permissions, queries, approvals, settings) display highlighted top-center floating toast notifications with animated drain timers.
 
 ## 5. Using the application (all users)
 
@@ -95,11 +97,17 @@ On narrow screens the Objects, Saved and History panel starts closed. Use the pa
    - Database dropdown shows enabled databases by default. Turn on **Show disabled** to include disabled entries.
 3. **Run** with `F5` or `Ctrl+Enter`. Select text first to run only the selection.
 4. Other actions:
+   - **Explain**: compiles the query and generates an estimated execution plan using SQL Server's `SET SHOWPLAN_XML ON`. It compiles without executing data modifications or reading data. The resulting **Execution Plan** tab displays:
+     - Estimated Subtree Cost, Optimization Level, Estimated Rows, and compile time metrics.
+     - **Missing Index Recommendations**: identifies missing index groups from the query optimizer with estimated cost impact percentage, one-click **Copy Index Script**, and an **Add to Editor** shortcut that appends the DDL to the SQL editor.
+     - **Operator Breakdown**: sorts operators by cost descending with percentage bars, estimated rows, target objects, and warnings for full index or table scans.
+     - **Showplan XML Viewer**: collapsible view with a one-click **Copy Plan XML** button.
    - **Format** (`Shift+Alt+F`), **Save query** (`Ctrl+S`), **Cancel** a running query.
    - **Dry run**: executes inside a transaction and **rolls back**, so use it to test INSERT/UPDATE/DELETE safely.
    - **Timeout**: override per run (limited by the admin maximum).
    - **Tabs** are remembered in your browser. **Saved queries** (up to 50 per database) and **History** are in the side panel.
 5. Results appear in a grid (the row cap applies); the **Messages** tab shows errors and row counts.
+   - **Dynamic Data Masking**: users without the `UNMASK` permission automatically see sensitive columns (emails, credit cards, SSNs, phone numbers, salaries, passwords/API keys) redacted in-flight. Table headers show a lock icon on redacted columns, and a `Masked (N columns redacted)` badge appears in the results header. Redaction is enforced server-side before delivery, guaranteeing that all exports also contain only masked data.
    - **Export menu**: hover over the compact **Export ▾** button to download as **CSV**, Excel spreadsheet (**Excel** `.xls`), or JSON array (**JSON**). You can also copy results directly as a **Markdown** table or open the **SQL INSERT…** dialog. All export options require the `EXPORT` permission and are audited.
    - **SQL INSERT export**: automatically infers the target table name from your `FROM` clause (e.g. `[Products]`). You can select one or more duplicate check columns to wrap each row in an idempotent `IF NOT EXISTS (SELECT 1 FROM [Products] WHERE col1 = 'val1' AND col2 = 'val2') BEGIN INSERT ... END` block, preventing duplicates when inserting into other databases.
    - **Grid filtering & sorting**: use the search box in the results toolbar to filter displayed rows in real time. Click any column header to sort ascending or descending.

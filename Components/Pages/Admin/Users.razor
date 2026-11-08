@@ -9,11 +9,10 @@
 <div class="page-head">
     <div><h1>Users</h1><p>Create accounts, assign roles and control lifecycle.</p></div>
     <div class="actions">
-        <button class="btn" disabled="@(selected.Count == 0)" @onclick="BulkDeactivate"><Icon Name="lock" />Deactivate selected (@selected.Count)</button>
+        <button class="btn" disabled="@(selected.Count == 0)" @onclick="PromptBulkDeactivate"><Icon Name="lock" />Deactivate selected (@selected.Count)</button>
         <button class="btn btn-primary" @onclick="() => creating = true"><Icon Name="plus" />New user</button>
     </div>
 </div>
-<Banner Text="@Flash" IsError="@FlashIsError" />
 
 @if (secret is not null)
 {
@@ -52,13 +51,31 @@
                 <td class="right nowrap">
                     <button class="btn btn-sm" @onclick="() => Edit(u)">Edit</button>
                     <button class="btn btn-sm" @onclick="() => Reset(u)">Reset pwd</button>
-                    @if (u.Id != UserId) { <button class="btn btn-sm @(u.IsActive ? "btn-danger" : "btn-primary")" @onclick="() => Toggle(u)">@(u.IsActive ? "Deactivate" : "Activate")</button> }
+                    @if (u.Id != UserId) { <button class="btn btn-sm @(u.IsActive ? "btn-danger" : "btn-primary")" @onclick="() => PromptToggle(u)">@(u.IsActive ? "Deactivate" : "Activate")</button> }
                 </td>
             </tr>
         }
         </tbody>
     </table></div>
 </div>
+
+<ConfirmDialog IsOpen="@(confirmingDeactivateUser is not null)"
+               Title="@($"Deactivate User '{confirmingDeactivateUser?.Email}'?")"
+               Message="@($"Are you sure you want to deactivate {confirmingDeactivateUser?.DisplayName ?? confirmingDeactivateUser?.Email}?")"
+               Details="The user's active browser sessions will be revoked and running database queries terminated immediately. They will not be able to log in until reactivated."
+               ConfirmText="Deactivate User"
+               IsDanger="true"
+               OnConfirm="ConfirmDeactivateUser"
+               OnCancel="() => confirmingDeactivateUser = null" />
+
+<ConfirmDialog IsOpen="@confirmingBulkDeactivate"
+               Title="@($"Deactivate {selected.Count} User(s)?")"
+               Message="@($"Are you sure you want to deactivate the {selected.Count} selected user accounts?")"
+               Details="Active sessions and executing queries for all selected users will be terminated immediately."
+               ConfirmText="Deactivate Selected"
+               IsDanger="true"
+               OnConfirm="ConfirmBulkDeactivate"
+               OnCancel="() => confirmingBulkDeactivate = false" />
 
 @if (creating)
 {
@@ -95,7 +112,8 @@
     private DateTime? newExpiry, editExpiry;
     private int? editTimeout;
     private bool creating;
-    private ApplicationUser? editing;
+    private ApplicationUser? editing, confirmingDeactivateUser;
+    private bool confirmingBulkDeactivate;
 
     protected override async Task OnLoadAsync()
     {
@@ -122,8 +140,42 @@
         await Load();
     }
 
+    private void PromptToggle(ApplicationUser u)
+    {
+        if (u.IsActive)
+        {
+            confirmingDeactivateUser = u;
+        }
+        else
+        {
+            _ = Toggle(u);
+        }
+    }
+
+    private async Task ConfirmDeactivateUser()
+    {
+        if (confirmingDeactivateUser is null) return;
+        var u = confirmingDeactivateUser;
+        confirmingDeactivateUser = null;
+        await Toggle(u);
+    }
+
     private async Task Toggle(ApplicationUser u) { Say(await UserAdmin.SetActiveAsync(Me, u.Id, !u.IsActive), u.IsActive ? "User deactivated. Sessions and running queries were terminated." : "User activated."); await Load(); }
     private async Task ChangeRole(string id, string role) { Say(await UserAdmin.SetRoleAsync(Me, id, role), "Role updated."); await Load(); }
+
+    private void PromptBulkDeactivate()
+    {
+        if (selected.Count > 0)
+        {
+            confirmingBulkDeactivate = true;
+        }
+    }
+
+    private async Task ConfirmBulkDeactivate()
+    {
+        confirmingBulkDeactivate = false;
+        await BulkDeactivate();
+    }
 
     private async Task BulkDeactivate()
     {

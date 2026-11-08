@@ -1,4 +1,4 @@
-﻿@inherits LayoutComponentBase
+@inherits LayoutComponentBase
 @implements IDisposable
 @using System.Security.Claims
 @using Microsoft.EntityFrameworkCore
@@ -91,6 +91,8 @@
         </main>
     </div>
 </div>
+
+<ToastHost />
 
 <form id="idle-logout" action="Account/Logout" method="post" hidden>
     <AntiforgeryToken />

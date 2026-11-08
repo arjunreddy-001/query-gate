@@ -9,7 +9,18 @@
 
 <div class="page-head">
     <div><h1>Audit logs</h1><p>Immutable record of queries, access and administration.</p></div>
-    <div class="actions"><button class="btn" @onclick="Export"><Icon Name="download" />Export CSV</button></div>
+    <div class="actions">
+        <div class="export-dropdown">
+            <button class="btn btn-sm" type="button" disabled="@(rows.Count == 0)">
+                <Icon Name="download" />Export <span style="font-size:9px;margin-left:2px">▾</span>
+            </button>
+            <div class="export-dropdown-menu">
+                <button class="export-dropdown-item" type="button" @onclick="ExportCsv"><Icon Name="file" />CSV (.csv)</button>
+                <button class="export-dropdown-item" type="button" @onclick="ExportXlsx"><Icon Name="table" />Excel (.xlsx)</button>
+                <button class="export-dropdown-item" type="button" @onclick="ExportXlsb"><Icon Name="table" />Excel Binary (.xlsb)</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="toolbar audit-toolbar">
@@ -30,19 +41,54 @@
     }
     else
     {
-        <div class="table-wrap"><table>
-            <thead><tr><th>Time</th><th>User</th><th>Category</th><th>Action</th><th>Database</th><th>Outcome</th><th>Rows</th><th>ms</th><th>Detail</th></tr></thead>
+        <div class="table-wrap audit-table-wrap">
+            <table class="audit-table">
+            <thead>
+                <tr>
+                    <th style="width:145px">Time</th>
+                    <th style="width:160px">User</th>
+                    <th style="width:90px">Category</th>
+                    <th style="width:110px">Action</th>
+                    <th style="width:130px">Database</th>
+                    <th style="width:85px">Outcome</th>
+                    <th class="num" style="width:65px">Rows</th>
+                    <th class="num" style="width:65px">ms</th>
+                    <th>Detail Preview</th>
+                </tr>
+            </thead>
             <tbody>
             @foreach (var a in rows)
             {
-                <tr>
-                    <td class="nowrap">@Local(a.Timestamp)</td><td>@a.UserName</td><td>@a.Category</td><td>@a.Action</td><td>@a.DatabaseName</td>
+                <tr class="audit-row" @onclick="() => viewLog = a" title="Click to view complete audit details">
+                    <td class="nowrap font-mono" style="font-size:0.75rem">@Local(a.Timestamp)</td>
+                    <td class="audit-user-cell" title="@a.UserName">@a.UserName</td>
+                    <td><span class="badge" style="font-size:10px;padding:1px 6px">@a.Category</span></td>
+                    <td><b>@a.Action</b></td>
+                    <td class="audit-db-cell">@(a.DatabaseName ?? "—")</td>
                     <td><span class="badge @OutcomeClass(a.Outcome)">@a.Outcome</span></td>
-                    <td>@(a.RowsReturned ?? a.RowsAffected)</td><td>@a.DurationMs</td>
-                    <td class="wrap">
-                        @if (!string.IsNullOrEmpty(a.SqlText)) { <details><summary class="small muted">SQL</summary><pre class="small">@a.SqlText</pre></details> }
-                        <span class="small muted">@a.Details</span>
-                        <div class="faint small">@a.ClientIp @(a.Executor is null ? "" : "· exec: " + a.Executor)</div>
+                    <td class="num font-mono">@(a.RowsReturned ?? a.RowsAffected ?? 0)</td>
+                    <td class="num font-mono">@(a.DurationMs?.ToString() ?? "—")</td>
+                    <td class="audit-detail-cell">
+                        <div class="audit-cell-content">
+                            @if (!string.IsNullOrEmpty(a.SqlText))
+                            {
+                                <div class="audit-snippet" title="@a.SqlText">
+                                    <Icon Name="terminal" Style="width:12px;height:12px;color:var(--brand);margin-right:3px" />
+                                    <code>@TruncateSnippet(a.SqlText, 70)</code>
+                                </div>
+                            }
+                            @if (!string.IsNullOrEmpty(a.Details))
+                            {
+                                <div class="audit-snippet audit-snippet-text" title="@a.Details">
+                                    <Icon Name="activity" Style="width:12px;height:12px;opacity:0.7;margin-right:3px" />
+                                    @TruncateSnippet(a.Details, 80)
+                                </div>
+                            }
+                            <div class="audit-client-info">@a.ClientIp @(a.Executor is null ? "" : "· " + a.Executor)</div>
+                        </div>
+                        <button class="btn btn-sm btn-ghost audit-open-btn" type="button" title="View complete audit record in dialog" @onclick:stopPropagation @onclick="() => viewLog = a">
+                            <Icon Name="eye" />Details
+                        </button>
                     </td>
                 </tr>
             }
@@ -52,11 +98,164 @@
 </div>
 <p class="faint small">Showing the latest @rows.Count matching entries (max 500).</p>
 
+@if (viewLog is not null)
+{
+    var sqlLines = GetLines(viewLog.SqlText);
+    var detailsLines = GetLines(viewLog.Details);
+
+    <div class="modal-back" @onclick="() => viewLog = null">
+        <div class="modal audit-modal @(isMaximized ? "modal-maximized" : "")"
+             style="@(isMaximized ? "width:98vw;max-width:1600px;height:95vh;max-height:95vh;display:flex;flex-direction:column;" : "max-width:1040px;width:94vw;max-height:90vh;display:flex;flex-direction:column;")"
+             @onclick:stopPropagation>
+            <div class="modal-head">
+                <div class="row-inline" style="gap:10px;align-items:center">
+                    <h2 style="margin:0">Audit Record #@viewLog.Id</h2>
+                    <span class="badge @OutcomeClass(viewLog.Outcome)">@viewLog.Outcome</span>
+                    <span class="badge" style="font-size:11px">@viewLog.Category · @viewLog.Action</span>
+                </div>
+                <div class="row-inline" style="gap:6px;margin-left:auto">
+                    <button class="btn btn-sm btn-ghost" type="button" @onclick="() => isMaximized = !isMaximized" title="@(isMaximized ? "Restore window" : "Maximize window")">
+                        <Icon Name="@(isMaximized ? "minimize" : "maximize")" />
+                    </button>
+                    <button class="btn btn-sm btn-ghost" type="button" @onclick="() => viewLog = null" title="Close dialog">
+                        <Icon Name="x" />
+                    </button>
+                </div>
+            </div>
+            <div class="modal-body stack" style="gap:14px;overflow-y:auto;flex:1;padding:16px 20px">
+                <div class="audit-meta-grid">
+                    <div class="audit-meta-card">
+                        <span class="audit-meta-label">Timestamp</span>
+                        <span class="audit-meta-value">@Local(viewLog.Timestamp)</span>
+                    </div>
+                    <div class="audit-meta-card">
+                        <span class="audit-meta-label">User</span>
+                        <span class="audit-meta-value" title="@viewLog.UserName">@viewLog.UserName</span>
+                    </div>
+                    <div class="audit-meta-card">
+                        <span class="audit-meta-label">Client IP / Host</span>
+                        <span class="audit-meta-value">@viewLog.ClientIp @(viewLog.Executor is null ? "" : $"({viewLog.Executor})")</span>
+                    </div>
+                    <div class="audit-meta-card">
+                        <span class="audit-meta-label">Database Target</span>
+                        <span class="audit-meta-value">@(viewLog.DatabaseName ?? "—")</span>
+                    </div>
+                    <div class="audit-meta-card">
+                        <span class="audit-meta-label">Execution Time</span>
+                        <span class="audit-meta-value">@(viewLog.DurationMs.HasValue ? $"{viewLog.DurationMs} ms" : "—")</span>
+                    </div>
+                    <div class="audit-meta-card">
+                        <span class="audit-meta-label">Rows Affected / Returned</span>
+                        <span class="audit-meta-value">@(viewLog.RowsReturned ?? viewLog.RowsAffected ?? 0)</span>
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(viewLog.SqlText))
+                {
+                    <div class="code-viewer-block @(isMaximized ? "grow-flex" : "")">
+                        <div class="code-viewer-header">
+                            <div class="row-inline" style="gap:8px;align-items:center">
+                                <span class="code-viewer-title"><Icon Name="terminal" />SQL Statement</span>
+                                <span class="badge" style="font-size:10px;padding:1px 6px">@sqlLines.Length @(sqlLines.Length == 1 ? "line" : "lines")</span>
+                                <span class="badge" style="font-size:10px;padding:1px 6px">@FormatSize(viewLog.SqlText.Length)</span>
+                            </div>
+                            <div class="row-inline" style="gap:6px">
+                                <button class="btn btn-sm btn-ghost" type="button" @onclick="() => sqlWrap = !sqlWrap" title="Toggle line wrap">
+                                    <Icon Name="format" />@(sqlWrap ? "Wrap on" : "Wrap off")
+                                </button>
+                                <button class="btn btn-sm btn-primary" type="button" @onclick='() => CopyText(viewLog.SqlText, "SQL statement copied.")'>
+                                    <Icon Name="copy" />Copy SQL
+                                </button>
+                            </div>
+                        </div>
+                        <div class="code-viewer-container @(sqlWrap ? "wrap" : "nowrap") @(isMaximized ? "maximized-viewer" : "")">
+                            <div class="code-gutter">
+                                @for (var i = 1; i <= sqlLines.Length; i++)
+                                {
+                                    <span class="gutter-num">@i</span>
+                                }
+                            </div>
+                            <div class="code-area">
+                                <pre class="code-pre">@viewLog.SqlText</pre>
+                            </div>
+                        </div>
+                    </div>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(viewLog.Details))
+                {
+                    <div class="code-viewer-block @(string.IsNullOrWhiteSpace(viewLog.SqlText) && isMaximized ? "grow-flex" : "")">
+                        <div class="code-viewer-header">
+                            <div class="row-inline" style="gap:8px;align-items:center">
+                                <span class="code-viewer-title"><Icon Name="activity" />Details / Response Message</span>
+                                <span class="badge" style="font-size:10px;padding:1px 6px">@detailsLines.Length @(detailsLines.Length == 1 ? "line" : "lines")</span>
+                                <span class="badge" style="font-size:10px;padding:1px 6px">@FormatSize(viewLog.Details.Length)</span>
+                            </div>
+                            <div class="row-inline" style="gap:6px">
+                                <button class="btn btn-sm btn-ghost" type="button" @onclick="() => detailsWrap = !detailsWrap" title="Toggle line wrap">
+                                    <Icon Name="format" />@(detailsWrap ? "Wrap on" : "Wrap off")
+                                </button>
+                                <button class="btn btn-sm" type="button" @onclick='() => CopyText(viewLog.Details, "Details copied.")'>
+                                    <Icon Name="copy" />Copy Details
+                                </button>
+                            </div>
+                        </div>
+                        <div class="code-viewer-container @(detailsWrap ? "wrap" : "nowrap") @(viewLog.Outcome != "Success" ? "code-viewer-err" : "")">
+                            @if (detailsLines.Length > 1)
+                            {
+                                <div class="code-gutter">
+                                    @for (var i = 1; i <= detailsLines.Length; i++)
+                                    {
+                                        <span class="gutter-num">@i</span>
+                                    }
+                                </div>
+                            }
+                            <div class="code-area">
+                                <pre class="code-pre @(viewLog.Outcome != "Success" ? "audit-log-err" : "")">@viewLog.Details</pre>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+            <div class="modal-foot">
+                <button class="btn btn-primary" type="button" @onclick="() => viewLog = null">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private List<AuditLog> rows = [];
+    private AuditLog? viewLog;
+    private bool isMaximized;
+    private bool sqlWrap;
+    private bool detailsWrap = true;
     private string user = "", category = "", outcome = "", text = "";
     private DateTime? from, to;
     private bool loading;
+
+    private static string TruncateSnippet(string? s, int max)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return "";
+        var singleLine = s.Replace("\r", " ").Replace("\n", " ").Trim();
+        return singleLine.Length <= max ? singleLine : singleLine[..max] + "…";
+    }
+
+    private static string[] GetLines(string? text) =>
+        string.IsNullOrEmpty(text) ? [] : text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+
+    private static string FormatSize(int chars)
+    {
+        if (chars < 1024) return $"{chars} chars";
+        return $"{chars / 1024.0:F1} KB";
+    }
+
+    private async Task CopyText(string? text, string successMessage)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        await JS.InvokeVoidAsync("dbam.copy", text);
+        Say(successMessage);
+    }
 
     protected override async Task OnLoadAsync() => await Load();
 
@@ -88,14 +287,57 @@
         if (args.Key == "Enter") await Load();
     }
 
-    private async Task Export()
+    private static readonly string[] AuditExportColumns = ["Timestamp", "User", "Category", "Action", "Database", "Outcome", "RowsReturned", "RowsAffected", "DurationMs", "ClientIp", "Details"];
+
+    private async Task<List<AuditLog>> GetDataForExportAsync()
     {
-        List<AuditLog> data;
-        await using (var db = await DbFactory.CreateDbContextAsync()) data = await Query(db).Take(10000).ToListAsync();
-        var sb = new System.Text.StringBuilder("Timestamp,User,Category,Action,Database,Outcome,RowsReturned,RowsAffected,DurationMs,ClientIp,Details\r\n");
-        foreach (var a in data)
-            sb.AppendLine(string.Join(',', new[] { a.Timestamp.ToString("o"), a.UserName, a.Category, a.Action, a.DatabaseName, a.Outcome, a.RowsReturned?.ToString(), a.RowsAffected?.ToString(), a.DurationMs?.ToString(), a.ClientIp, a.Details }.Select(Csv.Cell)));
-        await AuditSvc.TryWriteAsync(Me, "Export", "AuditLogExport", "Success", $"{data.Count} rows");
-        await Js.InvokeVoidAsync("dbam.download", $"audit-{DateTime.UtcNow:yyyyMMdd-HHmm}.csv", sb.ToString(), "text/csv");
+        await using var db = await DbFactory.CreateDbContextAsync();
+        return await Query(db).Take(10000).ToListAsync();
+    }
+
+    private static List<object?[]> MapAuditRows(List<AuditLog> data) =>
+        data.Select(a => new object?[]
+        {
+            a.Timestamp.ToString("o"),
+            a.UserName,
+            a.Category,
+            a.Action,
+            a.DatabaseName,
+            a.Outcome,
+            a.RowsReturned,
+            a.RowsAffected,
+            a.DurationMs,
+            a.ClientIp,
+            a.Details
+        }).ToList();
+
+    private async Task ExportCsv()
+    {
+        var data = await GetDataForExportAsync();
+        var rows = MapAuditRows(data);
+        var csv = ExportFormatters.ToCsv(AuditExportColumns, rows);
+        await AuditSvc.TryWriteAsync(Me, "Export", "AuditExportCsv", "Success", $"{data.Count} rows (CSV)");
+        await DownloadFileAsync($"audit-{DateTime.UtcNow:yyyyMMdd-HHmm}.csv", csv, ExportFormatters.CsvMimeType);
+        Say($"Exported {data.Count:N0} audit log row(s).");
+    }
+
+    private async Task ExportXlsx()
+    {
+        var data = await GetDataForExportAsync();
+        var rows = MapAuditRows(data);
+        var bytes = ExportFormatters.ToXlsx(AuditExportColumns, rows, "Audit Logs");
+        await AuditSvc.TryWriteAsync(Me, "Export", "AuditExportXlsx", "Success", $"{data.Count} rows (XLSX)");
+        await DownloadBinaryAsync($"audit-{DateTime.UtcNow:yyyyMMdd-HHmm}.xlsx", bytes, ExportFormatters.XlsxMimeType);
+        Say($"Exported {data.Count:N0} audit log row(s).");
+    }
+
+    private async Task ExportXlsb()
+    {
+        var data = await GetDataForExportAsync();
+        var rows = MapAuditRows(data);
+        var bytes = ExportFormatters.ToXlsb(AuditExportColumns, rows, "Audit Logs");
+        await AuditSvc.TryWriteAsync(Me, "Export", "AuditExportXlsb", "Success", $"{data.Count} rows (XLSB)");
+        await DownloadBinaryAsync($"audit-{DateTime.UtcNow:yyyyMMdd-HHmm}.xlsb", bytes, ExportFormatters.XlsbMimeType);
+        Say($"Exported {data.Count:N0} audit log row(s).");
     }
 }

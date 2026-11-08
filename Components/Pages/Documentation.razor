@@ -6,29 +6,55 @@
 <div class="docs-page">
     <div class="docs-heading">
         <span class="landing-kicker">QUERY GATE DOCUMENTATION</span>
-        <h1>Get started with Query Gate</h1>
-        <p>Deploy the application, sign in and give your team controlled access to SQL Server.</p>
+        <h1>Documentation</h1>
+        <p>Deploy, configure and use Query Gate to give your team governed access to SQL Server.</p>
     </div>
     <div class="docs-layout">
         <nav class="docs-nav" aria-label="Documentation sections">
             <a href="/documentation#overview">Overview</a>
+            <a href="/documentation#user-guide">User guide</a>
             <a href="/documentation#iis">IIS</a>
             <a href="/documentation#azure">Azure App Service</a>
             <a href="/documentation#linux">Linux server</a>
             <a href="/documentation#docker">Docker</a>
-            <a href="/documentation#configuration">Configuration and operations</a>
+            <a href="/documentation#configuration">Configuration</a>
             <a href="/documentation#first-steps">First steps</a>
+            <a href="/documentation#troubleshooting">Troubleshooting</a>
             <a href="/documentation#resources">More resources</a>
         </nav>
         <div class="docs-content">
             <section id="overview">
                 <h2>Overview</h2>
-                <p>Query Gate is a .NET application for governed SQL Server access. Users work in a query workspace without seeing database credentials. Permissions, approvals and audit records control and document execution.</p>
+                <p>Query Gate is a .NET 10 Blazor Server application for governed SQL Server access. Users work in a query workspace without seeing database credentials. Permissions, approvals and audit records control and document every execution.</p>
+                <p>Key capabilities: permission-gated SQL, time-boxed access grants, audit-first execution, passkey / TOTP authentication, an access-request workflow, and CSV export with per-user export permissions.</p>
+            </section>
+            <section id="user-guide">
+                <h2>User guide</h2>
+                <p>Query Gate provides engineers and auditors with controlled database access while eliminating credential sprawl.</p>
+                <div class="docs-guide-cards">
+                    <div class="docs-card">
+                        <h3><Icon Name="terminal" /> Query workspace</h3>
+                        <p>Select your database, write T-SQL with Monaco syntax assistance and keyboard shortcuts (<kbd>F5</kbd>, <kbd>Ctrl+Enter</kbd>), and execute queries. Results appear in a responsive data grid.</p>
+                    </div>
+                    <div class="docs-card">
+                        <h3><Icon Name="shield" /> SQL Gate validation</h3>
+                        <p>Queries are parsed and verified using Microsoft ScriptDom before execution. Disallowed statements, cross-database queries, or forbidden system procedures are denied upfront.</p>
+                    </div>
+                    <div class="docs-card">
+                        <h3><Icon Name="key" /> Access requests &amp; approval</h3>
+                        <p>Need temporary or elevated access? Request access directly from the Access page. Administrators review, approve with expiration dates, or reject requests with full audit records.</p>
+                    </div>
+                    <div class="docs-card">
+                        <h3><Icon Name="download" /> Auditing &amp; CSV export</h3>
+                        <p>Every executed statement is recorded with execution duration, outcome, and user identity. Users with <code>EXPORT:CSV</code> permission can download query results directly.</p>
+                    </div>
+                </div>
             </section>
             <section id="iis">
                 <h2>Deploy to IIS on Windows</h2>
-                <p>Install IIS, the WebSocket Protocol feature and the .NET 10 Hosting Bundle. Publish the project with <code>dotnet publish DbAccessManager.csproj -c Release -o ./publish</code> and deploy the published files, including <code>web.config</code>, to an IIS site at the domain root.</p>
-                <p>Configure a dedicated application pool with No Managed Code, bind a trusted HTTPS certificate, and give the pool identity access to a persistent data protection key directory. Set the application configuration and run the first migration with one instance, as described in the <a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/DEPLOYMENT.md#iis-on-windows">IIS guide</a>.</p>
+                <p>Install IIS, the WebSocket Protocol feature and the .NET 10 Hosting Bundle. Publish the project:</p>
+                <pre><code>dotnet publish DbAccessManager.csproj -c Release -r win-x64 --self-contained false -o ./publish</code></pre>
+                <p>Deploy the published files, including <code>web.config</code>, to an IIS site at the domain root. Configure a dedicated application pool with No Managed Code, bind a trusted HTTPS certificate, and give the pool identity access to a persistent data protection key directory. Set the application configuration and run the first migration with one instance, as described in the <a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/DEPLOYMENT.md#iis-on-windows">IIS guide</a>.</p>
             </section>
             <section id="azure">
                 <h2>Deploy to Azure App Service</h2>
@@ -42,30 +68,82 @@
             </section>
             <section id="docker">
                 <h2>Deploy with Docker</h2>
-                <p>Run Query Gate with Docker Compose and an existing, reachable SQL Server. You need Docker with Compose, a SQL Server application database, and a password-protected HTTPS PFX certificate. The certificate must be trusted by your browser and match the host name.</p>
+                <p>Run Query Gate with Docker Compose and an existing, reachable SQL Server. You need Docker with Compose, a SQL Server application database, and a password-protected HTTPS PFX certificate trusted by your browser and matching the host name.</p>
                 <ol>
                     <li>Clone the <a href="https://github.com/arjunreddy-001/query-gate">GitHub repository</a> and copy <code>.env.example</code> to <code>.env</code>.</li>
-                    <li>Set the SQL connection string, bootstrap administrator credentials, encryption and JWT keys, and certificate path and password in <code>.env</code>. Generate the encryption key with <code>openssl rand -base64 32</code> and a separate JWT key with <code>openssl rand -base64 64</code>.</li>
+                    <li>Set the SQL connection string, bootstrap administrator credentials, encryption and JWT keys, and certificate path and password in <code>.env</code>. Generate keys with <code>openssl rand -base64 32</code> (encryption) and <code>openssl rand -base64 64</code> (JWT).</li>
                     <li>Set <code>APPLY_MIGRATIONS=true</code> for the first start. The SQL account needs schema migration permissions. Start a single instance:</li>
                 </ol>
                 <pre><code>docker compose up -d --build
 docker compose logs -f query-gate</code></pre>
-                <p>Open <code>https://localhost:8443</code> (or the host name on your certificate). Once migrations succeed, set <code>APPLY_MIGRATIONS=false</code> and run <code>docker compose up -d</code>. Remove the bootstrap credentials from the environment after the administrator has been created.</p>
+                <ol start="4">
+                    <li>Open <code>https://localhost:8443</code> (or the host name on your certificate) and confirm migrations succeed.</li>
+                    <li>Set <code>APPLY_MIGRATIONS=false</code> and restart: <code>docker compose up -d</code>.</li>
+                    <li>Remove the bootstrap credentials from <code>.env</code> after the administrator account has been created.</li>
+                </ol>
                 <p>A connection string inside a container must use a SQL Server address reachable from the container. <code>localhost</code> refers to the container itself. On Docker Desktop, <code>host.docker.internal</code> can reach a SQL Server on the host.</p>
                 <p>For detailed setup, upgrades, backups and security notes, see the <a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/DOCKER.md">Docker deployment guide</a>.</p>
             </section>
             <section id="configuration">
                 <h2>Configuration and operations</h2>
-                <p>Keep configuration secrets and certificates private. Back up the SQL database, encryption key, JWT key and data protection keys securely. Losing the encryption key makes stored database connections unreadable. Data protection keys are sensitive and must be protected at rest.</p>
-                <p>Keep the same JWT key across restarts. Apply migrations with one instance at a time after a database backup. This Compose setup terminates HTTPS in the application and is intended for a single instance.</p>
+                <p>All secrets and certificates must be kept private and backed up securely. Losing the encryption key makes stored database connections unreadable.</p>
+                <table class="docs-table">
+                    <thead><tr><th>Variable</th><th>Description</th><th>Example</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>ConnectionStrings__Default</code></td><td>SQL Server connection string for the Query Gate application database.</td><td><code>Server=.;Database=QueryGate;...</code></td></tr>
+                        <tr><td><code>Encryption__Key</code></td><td>Base-64 key used to encrypt stored database connection strings. <strong>Back this up.</strong></td><td><code>openssl rand -base64 32</code></td></tr>
+                        <tr><td><code>Jwt__Key</code></td><td>Base-64 key used to sign session tokens. Keep consistent across restarts.</td><td><code>openssl rand -base64 64</code></td></tr>
+                        <tr><td><code>Bootstrap__AdminEmail</code></td><td>Email for the initial administrator account. Remove after first sign-in.</td><td><code>admin@example.com</code></td></tr>
+                        <tr><td><code>Bootstrap__AdminPassword</code></td><td>Password for the initial administrator account. Remove after first sign-in.</td><td>Min 12 chars, mixed case + digit</td></tr>
+                        <tr><td><code>APPLY_MIGRATIONS</code></td><td>Set <code>true</code> to run EF migrations on startup (Docker only). Set <code>false</code> after first run.</td><td><code>true</code> / <code>false</code></td></tr>
+                        <tr><td><code>ASPNETCORE_Kestrel__Certificates__Default__Path</code></td><td>Path to the HTTPS PFX certificate file.</td><td><code>/certs/cert.pfx</code></td></tr>
+                        <tr><td><code>ASPNETCORE_Kestrel__Certificates__Default__Password</code></td><td>Password for the PFX certificate.</td><td>—</td></tr>
+                    </tbody>
+                </table>
+                <p>Keep the same JWT key across restarts. Apply migrations with one instance at a time after a database backup. Data protection keys must be stored on a persistent volume and protected at rest.</p>
             </section>
             <section id="first-steps">
                 <h2>First steps</h2>
-                <ol><li><a href="/Account/Login">Sign in</a> as the bootstrap administrator.</li><li>Register a SQL Server database using a dedicated, least-privilege account.</li><li>Create users and grant permissions or review their access requests.</li><li>Open the query workspace to run permitted SQL and review activity in the audit log.</li></ol>
+                <p>Once deployed, the bootstrap administrator account is created from the <code>Bootstrap__AdminEmail</code> and <code>Bootstrap__AdminPassword</code> environment variables on first start.</p>
+                <ol>
+                    <li><a href="/Account/Login">Sign in</a> as the bootstrap administrator.</li>
+                    <li>Register a SQL Server database using a dedicated, least-privilege account.</li>
+                    <li>Create users and grant permissions or review their access requests.</li>
+                    <li>Open the query workspace to run permitted SQL and review activity in the audit log.</li>
+                    <li>Remove the bootstrap credentials from your environment after setup is complete.</li>
+                </ol>
+            </section>
+            <section id="troubleshooting">
+                <h2>Troubleshooting</h2>
+                <dl class="docs-dl">
+                    <dt>Migrations fail on first start</dt>
+                    <dd>The SQL account must have <code>db_owner</code> or schema-create permissions on the application database during migration. Use a separate migration account and downgrade it afterwards.</dd>
+
+                    <dt>Certificate errors in the browser</dt>
+                    <dd>The PFX certificate must be trusted by the browser and the subject / SAN must match the host name exactly. Self-signed certificates must be added to the OS trust store. On Docker Desktop, use <code>host.docker.internal</code> in both the cert SAN and the browser URL.</dd>
+
+                    <dt>"localhost" cannot reach SQL Server in Docker</dt>
+                    <dd>Inside a container, <code>localhost</code> resolves to the container itself. Use <code>host.docker.internal</code> (Docker Desktop) or the host's LAN IP to reach a SQL Server running on the host machine.</dd>
+
+                    <dt>Data protection key errors after restart</dt>
+                    <dd>The data protection key directory must be on a persistent volume. If the keys are lost, existing authentication cookies and encrypted values become invalid. Mount the key directory as a named volume in your Compose file.</dd>
+
+                    <dt>Users see "Account inactive or expired"</dt>
+                    <dd>An administrator must activate the account and optionally set an expiry date. Check the Users admin page and ensure the account is active.</dd>
+
+                    <dt>Five failed login attempts — account locked</dt>
+                    <dd>Accounts lock for 15 minutes after five consecutive failed password attempts. An administrator can unlock the account early from the Users admin page.</dd>
+                </dl>
             </section>
             <section id="resources">
                 <h2>More resources</h2>
-                <p>Read the <a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/USER-GUIDE.md">user guide</a>, <a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/ADMIN-CHEATSHEET.md">admin cheat sheet</a>, or browse the <a href="https://github.com/arjunreddy-001/query-gate">source on GitHub</a>.</p>
+                <ul class="docs-resources">
+                    <li><a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/USER-GUIDE.md">User guide</a> — step-by-step usage for end users: requesting access, running queries, reading errors and exporting results.</li>
+                    <li><a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/ADMIN-CHEATSHEET.md">Admin cheat sheet</a> — quick reference for database registration, permission management and approvals.</li>
+                    <li><a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/DEPLOYMENT.md">Full deployment guide</a> — detailed steps for IIS, Azure, Linux and Docker including upgrades and backups.</li>
+                    <li><a href="https://github.com/arjunreddy-001/query-gate/blob/main/CONTRIBUTING.md">Contributing guide</a> — local setup, running tests and opening pull requests.</li>
+                    <li><a href="https://github.com/arjunreddy-001/query-gate">Source on GitHub</a> — browse the code, report issues or follow the project.</li>
+                </ul>
             </section>
         </div>
     </div>

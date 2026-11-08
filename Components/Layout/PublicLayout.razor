@@ -25,6 +25,13 @@
     </main>
     <footer class="public-footer">
         <span>Query Gate. Governed access to SQL Server.</span>
-        <a href="https://github.com/arjunreddy-001/query-gate">View on GitHub</a>
+        <nav class="public-footer-nav" aria-label="Footer navigation">
+            <a href="/documentation">Documentation</a>
+            <a href="https://github.com/arjunreddy-001/query-gate">GitHub</a>
+            <AuthorizeView>
+                <Authorized><a href="/dashboard">Dashboard</a></Authorized>
+                <NotAuthorized><a href="/Account/Login">Sign in</a></NotAuthorized>
+            </AuthorizeView>
+        </nav>
     </footer>
 </div>

@@ -12,7 +12,37 @@
     <div><h1>My access</h1><p>See what you can do on each database and request more when you need it.</p></div>
 </div>
 
-<Banner Text="@Flash" IsError="@FlashIsError" />
+<div class="card card-pad" style="margin-bottom:16px">
+    <div class="row-inline" style="justify-content:space-between;margin-bottom:8px">
+        <span class="small bold uppercase" style="letter-spacing:0.04em;color:var(--text-muted)">Permission Guide Toolbar</span>
+        <span class="small muted">Hover any permission to see what access it provides</span>
+    </div>
+    <div class="toolbar perm-guide-toolbar flex-wrap" style="gap:8px">
+        @foreach (var code in Perm.Catalog)
+        {
+            var isHighRisk = Perm.IsHighRisk(code);
+            <div class="perm-guide-item" title="@Perm.Description(code)" tabindex="0">
+                <span class="badge @(isHighRisk ? "warn" : "brand")">@Perm.Label(code)</span>
+                <div class="perm-popover">
+                    <div class="perm-popover-title">
+                        @Perm.Label(code)
+                        @if (isHighRisk)
+                        {
+                            <span class="badge warn" style="font-size:10px;padding:1px 5px;margin-left:6px">High Risk</span>
+                        }
+                    </div>
+                    <div class="perm-popover-desc">@Perm.Description(code)</div>
+                    @if (isHighRisk)
+                    {
+                        <div class="highrisk-warning-note" style="margin-top:6px;font-size:11px;color:var(--warn-fg, #f97316);line-height:1.4">
+                            ⚠ @Perm.HighRiskReason(code)
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+</div>
 
 <div class="split">
     <div class="stack">
@@ -32,9 +62,9 @@
                     <div class="check-grid">
                         @foreach (var p in effective)
                         {
-                            <div class="row-inline" style="padding:8px 10px;border:1px solid var(--line);border-radius:9px">
+                            <div class="row-inline perm-row" title="@Perm.Description(p.PermissionCode)" style="padding:8px 10px;border:1px solid var(--line);border-radius:9px;cursor:help">
                                 <span class="badge @(p.IsAllowed ? "ok" : "")">@(p.IsAllowed ? "Allowed" : "No access")</span>
-                                <span>@Perm.Label(p.PermissionCode)</span>
+                                <span style="font-weight:600">@Perm.Label(p.PermissionCode)</span>
                                 @if (p.IsAllowed) { <span class="faint small" style="margin-left:auto">@p.Source</span> }
                             </div>
                         }
@@ -55,7 +85,7 @@
                         {
                             <tr>
                                 <td>@DbName(g.DatabaseId)</td>
-                                <td><span class="badge brand">@Perm.Label(g.PermissionCode)</span></td>
+                                <td><span class="badge @(Perm.IsHighRisk(g.PermissionCode) ? "warn" : "brand")">@Perm.Label(g.PermissionCode)</span></td>
                                 <td><span class="@(g.EndsAt < DateTimeOffset.UtcNow.AddHours(24) ? "badge warn" : "")">@Local(g.EndsAt)</span></td>
                                 <td class="right"><button class="btn btn-sm" @onclick="() => Extend(g)">Request extension</button></td>
                             </tr>
@@ -81,7 +111,7 @@
                                 <td class="wrap">@r.Permissions @(r.IsExtension ? "(extension)" : "")</td>
                                 <td><span class="badge @OutcomeClass(r.Status)">@r.Status</span></td>
                                 <td class="wrap muted">@r.Comments</td>
-                                <td class="right">@if (r.Status == RequestStatus.Pending) { <button class="btn btn-sm btn-ghost" @onclick="() => Cancel(r.Id)">Cancel</button> }</td>
+                                <td class="right">@if (r.Status == RequestStatus.Pending) { <button class="btn btn-sm btn-ghost" @onclick="() => PromptCancel(r)">Cancel</button> }</td>
                             </tr>
                         }
                     </tbody>
@@ -101,7 +131,15 @@
             <div class="check-grid" style="grid-template-columns:1fr 1fr">
                 @foreach (var code in Perm.Catalog)
                 {
-                    <label class="check"><input type="checkbox" checked="@reqPerms.Contains(code)" @onchange="e => Toggle(code, (bool)e.Value!)" />@Perm.Label(code)</label>
+                    var isHigh = Perm.IsHighRisk(code);
+                    <label class="check" title="@Perm.Description(code)">
+                        <input type="checkbox" checked="@reqPerms.Contains(code)" @onchange="e => Toggle(code, (bool)e.Value!)" />
+                        <span>@Perm.Label(code)</span>
+                        @if (isHigh)
+                        {
+                            <span class="badge warn" style="font-size:9px;padding:1px 4px;margin-left:auto">High Risk</span>
+                        }
+                    </label>
                 }
             </div>
         </div>
@@ -111,6 +149,15 @@
         <button class="btn btn-primary" @onclick="Submit"><Icon Name="plus" />Submit request</button>
     </div>
 </div>
+
+<ConfirmDialog IsOpen="@(cancellingRequest is not null)"
+               Title="Cancel Access Request?"
+               Message="@($"Are you sure you want to withdraw the pending request for {DbName(cancellingRequest?.DatabaseId ?? Guid.Empty)} ({cancellingRequest?.Permissions})?")"
+               Details="The request will be withdrawn and administrators will no longer see it in their pending queue."
+               ConfirmText="Cancel Request"
+               IsDanger="true"
+               OnConfirm="ConfirmCancel"
+               OnCancel="() => cancellingRequest = null" />
 
 @code {
     private List<ManagedDatabase> allDatabases = [];
@@ -155,6 +202,21 @@
     {
         Say(await Requests.SubmitAccessAsync(Me, g.DatabaseId, [g.PermissionCode], "Extension of existing temporary access.", null, 24, true), "Extension requested.");
         await Refresh();
+    }
+
+    private AccessRequest? cancellingRequest;
+
+    private void PromptCancel(AccessRequest r)
+    {
+        cancellingRequest = r;
+    }
+
+    private async Task ConfirmCancel()
+    {
+        if (cancellingRequest is null) return;
+        var id = cancellingRequest.Id;
+        cancellingRequest = null;
+        await Cancel(id);
     }
 
     private async Task Cancel(Guid id)

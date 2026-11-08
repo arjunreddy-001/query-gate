@@ -2,10 +2,25 @@
 @attribute [Authorize(Roles = Roles.Admin)]
 @inherits PageBase
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject AuditService AuditSvc
 
 <PageTitle>Application logs · Query Gate</PageTitle>
 
-<div class="page-head"><div><h1>Application logs</h1><p>Errors and warnings, correlated by request ID.</p></div></div>
+<div class="page-head">
+    <div><h1>Application logs</h1><p>Errors and warnings, correlated by request ID.</p></div>
+    <div class="actions">
+        <div class="export-dropdown">
+            <button class="btn btn-sm" type="button" disabled="@(logs.Count == 0)">
+                <Icon Name="download" />Export <span style="font-size:9px;margin-left:2px">▾</span>
+            </button>
+            <div class="export-dropdown-menu">
+                <button class="export-dropdown-item" type="button" @onclick="ExportCsv"><Icon Name="file" />CSV (.csv)</button>
+                <button class="export-dropdown-item" type="button" @onclick="ExportXlsx"><Icon Name="table" />Excel (.xlsx)</button>
+                <button class="export-dropdown-item" type="button" @onclick="ExportXlsb"><Icon Name="table" />Excel Binary (.xlsb)</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <div class="toolbar logs-toolbar">
     <select class="logs-level" aria-label="Level" @bind="level" @bind:after="Load"><option value="">All levels</option><option>Error</option><option>Warning</option><option>Information</option></select>
@@ -60,5 +75,58 @@
     private async Task OnSearchKeyDown(KeyboardEventArgs args)
     {
         if (args.Key == "Enter") await Load();
+    }
+
+    private static readonly string[] LogExportColumns = ["Timestamp", "Level", "Message", "User", "Endpoint", "CorrelationId", "Exception"];
+
+    private async Task<List<AppLog>> GetDataForExportAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var q = db.AppLogs.AsNoTracking().AsQueryable();
+        if (level != "") q = q.Where(l => l.Level == level);
+        if (!string.IsNullOrWhiteSpace(search)) q = q.Where(l => l.Message.Contains(search) || l.CorrelationId == search);
+        return await q.OrderByDescending(l => l.Id).Take(10000).ToListAsync();
+    }
+
+    private static List<object?[]> MapLogRows(List<AppLog> data) =>
+        data.Select(l => new object?[]
+        {
+            l.Timestamp.ToString("o"),
+            l.Level,
+            l.Message,
+            l.UserName,
+            l.Endpoint,
+            l.CorrelationId,
+            l.Exception
+        }).ToList();
+
+    private async Task ExportCsv()
+    {
+        var data = await GetDataForExportAsync();
+        var rows = MapLogRows(data);
+        var csv = ExportFormatters.ToCsv(LogExportColumns, rows);
+        await AuditSvc.TryWriteAsync(Me, "Export", "AppLogExportCsv", "Success", $"{data.Count} rows (CSV)");
+        await DownloadFileAsync($"app-logs-{DateTime.UtcNow:yyyyMMdd-HHmm}.csv", csv, ExportFormatters.CsvMimeType);
+        Say($"Exported {data.Count:N0} application log row(s).");
+    }
+
+    private async Task ExportXlsx()
+    {
+        var data = await GetDataForExportAsync();
+        var rows = MapLogRows(data);
+        var bytes = ExportFormatters.ToXlsx(LogExportColumns, rows, "App Logs");
+        await AuditSvc.TryWriteAsync(Me, "Export", "AppLogExportXlsx", "Success", $"{data.Count} rows (XLSX)");
+        await DownloadBinaryAsync($"app-logs-{DateTime.UtcNow:yyyyMMdd-HHmm}.xlsx", bytes, ExportFormatters.XlsxMimeType);
+        Say($"Exported {data.Count:N0} application log row(s).");
+    }
+
+    private async Task ExportXlsb()
+    {
+        var data = await GetDataForExportAsync();
+        var rows = MapLogRows(data);
+        var bytes = ExportFormatters.ToXlsb(LogExportColumns, rows, "App Logs");
+        await AuditSvc.TryWriteAsync(Me, "Export", "AppLogExportXlsb", "Success", $"{data.Count} rows (XLSB)");
+        await DownloadBinaryAsync($"app-logs-{DateTime.UtcNow:yyyyMMdd-HHmm}.xlsb", bytes, ExportFormatters.XlsbMimeType);
+        Say($"Exported {data.Count:N0} application log row(s).");
     }
 }
