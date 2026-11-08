@@ -55,3 +55,18 @@ Full usage documentation: [docs/USER-GUIDE.md](./docs/USER-GUIDE.md). Admin quic
 ## Limitations
 
 CSV is the only export format; no object-level permission scope; targets SQL Server; LocalDB is untested.
+
+## AI Agent Skills (Cross-Platform)
+
+This repository maintains all development workflows and runbooks centrally in [`.github/skills/`](./.github/skills/) following the Agent Skills specification.
+
+**There is no need to add skills specific to a platform or IDE** (such as `.claude/skills/`, `.cursor/skills/`, or `.agents/skills/`). The repository is pre-configured with cross-platform configuration files—avoiding symlinks for seamless compatibility across Windows, macOS, and Linux—so all AI coding assistants share `.github/skills/` as the single source of truth:
+
+- **Google Antigravity**: Discovers and indexes skills via [`.agents/skills.json`](./.agents/skills.json).
+- **Claude Code**: Referenced via [`CLAUDE.md`](./CLAUDE.md).
+- **Cursor**: Referenced via [`.cursor/rules/skills.mdc`](./.cursor/rules/skills.mdc).
+- **Codex & General Agents**: Referenced via [`AGENTS.md`](./AGENTS.md).
+
+When adding a new skill, define it once inside `.github/skills/<skill-name>/SKILL.md` and reference it in the platform instruction files (`AGENTS.md`, `CLAUDE.md`, `.cursor/rules/skills.mdc`).
+
+

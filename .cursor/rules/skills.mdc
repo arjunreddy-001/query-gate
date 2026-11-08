@@ -1,0 +1,27 @@
+---
+description: Procedures and runbooks for Query Gate tasks
+globs: *
+alwaysApply: true
+---
+
+# Query Gate Procedures & Skills
+
+When performing development or maintenance tasks in this codebase, reference the relevant procedure document in `.github/skills/`:
+
+- **Build, Run, & Verification**: Refer to `.github/skills/run-and-verify/SKILL.md` for build/test procedures, locked binary troubleshooting, and scratch browser verification.
+- **EF Core Migrations**: Refer to `.github/skills/ef-migrations/SKILL.md` when altering entities, DbContext, creating or resetting migrations, or handling schema mismatches.
+- **SQL Gate & Permissions**: Refer to `.github/skills/sql-gate-and-permissions/SKILL.md` when editing SQL validation, execution pipelines, permission checking, or audit logging.
+- **Blazor Pages & Navigation**: Refer to `.github/skills/blazor-page-conventions/SKILL.md` when creating or modifying Razor components, pages, menus, or first-render state.
+- **UI Design System**: Refer to `.github/skills/ui-design-system/SKILL.md` when modifying CSS styles, themes, sidebar layout, results grid, or editor behavior.
+
+## Skill Management Convention
+
+Whenever a new skill or workflow is created in this project:
+1. **Canonical Location**: Always place the skill inside `.github/skills/<skill-name>/SKILL.md` with valid YAML frontmatter (`name` and `description`). Do not store skills directly in `.agents/skills/`, `.claude/skills/`, or `.cursor/skills/`.
+2. **Synchronize All References**: Update the skills catalog in:
+   - `.cursor/rules/skills.mdc` (Cursor)
+   - `CLAUDE.md` (Claude Code)
+   - `AGENTS.md` (Codex / Antigravity / general agents)
+   *(Antigravity automatically discovers new folders in `.github/skills/` via `.agents/skills.json`)*
+
+
