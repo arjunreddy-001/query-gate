@@ -6,7 +6,7 @@
 <div class="landing-wrap">
     <section class="landing-hero" aria-labelledby="hero-title">
         <div class="landing-copy">
-            <span class="landing-eyebrow"><Icon Name="shield" /> A safer way to work with SQL Server</span>
+            <span class="landing-eyebrow"><Icon Name="shield" /> A safer way to work with SQL Server, PostgreSQL, MySQL &amp; MariaDB</span>
             <h1 id="hero-title">Give your team access.<br /><span>Keep the guardrails.</span></h1>
             <p>Analyse, approve and audit every SQL statement — without sharing database credentials with every user.</p>
             <div class="landing-actions">
@@ -19,6 +19,9 @@
             <div class="landing-badges">
                 <span class="badge-chip"><Icon Name="github" /> Open source</span>
                 <span class="badge-chip"><Icon Name="db" /> SQL Server</span>
+                <span class="badge-chip"><Icon Name="db" /> PostgreSQL</span>
+                <span class="badge-chip"><Icon Name="db" /> MySQL</span>
+                <span class="badge-chip"><Icon Name="db" /> MariaDB</span>
                 <span class="badge-chip"><Icon Name="terminal" /> .NET 10</span>
                 <span class="badge-chip"><Icon Name="lock" /> Passkeys &amp; MFA</span>
             </div>
@@ -55,7 +58,7 @@
     <section class="landing-section" aria-labelledby="workflow-title">
         <div class="landing-section-head"><span class="landing-kicker">HOW IT WORKS</span><h2 id="workflow-title">Four steps to governed access.</h2></div>
         <ol class="landing-steps">
-            <li><span>01</span><h3>Register a database</h3><p>An administrator connects a SQL Server database using a dedicated account.</p></li>
+            <li><span>01</span><h3>Register a database</h3><p>An administrator connects a SQL Server, PostgreSQL, MySQL or MariaDB database using a dedicated account.</p></li>
             <li><span>02</span><h3>Grant access</h3><p>Configure role or user permissions, including optional time windows, or review access requests.</p></li>
             <li><span>03</span><h3>Run checked SQL</h3><p>Users work in the query workspace. The SQL gate checks statements and permissions before execution.</p></li>
             <li><span>04</span><h3>Review activity</h3><p>Queries require an audit record before execution. Review activity in the audit log.</p></li>
@@ -71,7 +74,7 @@
         </div>
     </section>
     <section class="landing-section landing-start" aria-labelledby="start-title">
-        <div class="landing-section-head"><span class="landing-kicker">GET STARTED</span><h2 id="start-title">Choose where to run Query Gate.</h2><p>You need a reachable SQL Server database, Docker or the .NET 10 SDK, and an HTTPS certificate. Pick a deployment guide below and follow the migration and secrets steps.</p></div>
+        <div class="landing-section-head"><span class="landing-kicker">GET STARTED</span><h2 id="start-title">Choose where to run Query Gate.</h2><p>You need a reachable database, Docker or the .NET 10 SDK, and an HTTPS certificate. Pick a deployment guide below and follow the migration and secrets steps.</p></div>
         <div class="landing-link-list" aria-label="Deployment guides">
             <a href="/documentation#docker">Docker</a><a href="/documentation#iis">IIS</a><a href="/documentation#azure">Azure App Service</a><a href="/documentation#linux">Linux server</a>
         </div>
@@ -84,11 +87,11 @@
         </article>
         <article class="landing-info-card">
             <span class="landing-kicker">SECURITY AND SCOPE</span><h2>Use guardrails with least privilege.</h2>
-            <p>Application permissions complement SQL Server permissions. Use dedicated least-privilege database accounts, HTTPS, protected secrets and secure backups.</p>
+            <p>Application permissions complement database server permissions. Use dedicated least-privilege database accounts, HTTPS, protected secrets and secure backups.</p>
             <div class="landing-scope-box">
                 <strong>Scope &amp; constraints:</strong>
                 <ul>
-                    <li>Designed specifically for SQL Server.</li>
+                    <li>Supports SQL Server, PostgreSQL, MySQL and MariaDB targets.</li>
                     <li>Database-level permissions (object-level scoping not included).</li>
                     <li>CSV is the primary export format.</li>
                 </ul>

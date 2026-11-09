@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
 using System.Data;
+using System.Data.Common;
 using System.Diagnostics;
 using System.Text;
 using DbAccessManager.Data;
 using DbAccessManager.Security;
+using DbAccessManager.Services.Providers;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
@@ -20,9 +22,47 @@ public sealed class PermissionService(IDbContextFactory<ApplicationDbContext> fa
         var grants = await db.PermissionGrants.AsNoTracking()
             .Where(g => g.DatabaseId == databaseId && (g.UserId == userId || (g.RoleId != null && roleIds.Contains(g.RoleId))))
             .ToListAsync();
-        return grants.Select(g => new PermissionRule(
+        var rules = grants.Select(g => new PermissionRule(
             g.PermissionCode, g.UserId != null, g.Effect == PermissionEffect.Allow,
-            g.RoleId is null ? null : roleNames.GetValueOrDefault(g.RoleId), g.StartsAt, g.EndsAt)).ToList();
+            g.RoleId is null ? null : roleNames.GetValueOrDefault(g.RoleId), g.StartsAt, g.EndsAt,
+            g.Schema, g.ObjectName)).ToList();
+
+        // 1. Role-level exclusion rules on this database
+        var roleScopeRules = await db.DatabaseRoleScopeRules.AsNoTracking()
+            .Where(r => r.DatabaseId == databaseId && roleIds.Contains(r.RoleId))
+            .ToListAsync();
+
+        foreach (var rsr in roleScopeRules)
+        {
+            if (!string.IsNullOrWhiteSpace(rsr.ExcludedObjects))
+            {
+                var rName = roleNames.GetValueOrDefault(rsr.RoleId);
+                foreach (var exc in ObjectScope.ParseList(rsr.ExcludedObjects))
+                {
+                    var (s, o) = ObjectScope.Parse(exc);
+                    foreach (var code in Perm.Catalog)
+                    {
+                        rules.Add(new PermissionRule(code, false, false, rName, Schema: s, ObjectName: o));
+                    }
+                }
+            }
+        }
+
+        // 2. Database-level exclusion rules (override deny across all roles and users)
+        var database = await db.ManagedDatabases.AsNoTracking().FirstOrDefaultAsync(d => d.Id == databaseId);
+        if (database != null && !string.IsNullOrWhiteSpace(database.ExcludedObjects))
+        {
+            foreach (var exc in ObjectScope.ParseList(database.ExcludedObjects))
+            {
+                var (s, o) = ObjectScope.Parse(exc);
+                foreach (var code in Perm.Catalog)
+                {
+                    rules.Add(new PermissionRule(code, true, false, "DatabasePolicy", Schema: s, ObjectName: o));
+                }
+            }
+        }
+
+        return rules;
     }
 
     public async Task<List<EffectivePermission>> GetEffectiveAsync(string userId, Guid databaseId)
@@ -57,6 +97,9 @@ public sealed class PermissionService(IDbContextFactory<ApplicationDbContext> fa
     }
 
     public bool Resolve(string code, IEnumerable<PermissionRule> rules) => _resolver.Resolve(code, rules, DateTimeOffset.UtcNow).IsAllowed;
+
+    public bool ResolveObject(string code, string? schema, string objectName, IEnumerable<PermissionRule> rules) =>
+        _resolver.ResolveObject(code, schema, objectName, rules, DateTimeOffset.UtcNow).IsAllowed;
 }
 
 public sealed class ResultSetDto
@@ -110,7 +153,8 @@ public sealed class ExecutionService(
     AuditService audit,
     CryptoService crypto,
     SettingsService settings,
-    ILogger<ExecutionService> logger)
+    ILogger<ExecutionService> logger,
+    DatabaseProviderFactory providers)
 {
     private readonly ConcurrentDictionary<Guid, (string UserId, CancellationTokenSource Cts)> _running = new();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _userSlots = new();
@@ -210,10 +254,77 @@ public sealed class ExecutionService(
         if (!isSystem && (user is null || !user.CanSignIn(DateTimeOffset.UtcNow))) return await Deny("Denied", "Your account is inactive or expired.");
         if (!database.IsActive) return await Deny("Denied", "This database is disabled.");
 
-        var analysis = gate.Analyze(options.SqlText);
+        var analysis = gate.Analyze(options.SqlText, database.Engine);
         if (analysis.HasHardDenial)
         {
             foreach (var d in analysis.ParseErrors.Concat(analysis.HardDenials)) result.Denials.Add(d);
+            return await Deny("Denied", string.Join(" ", result.Denials), analysis);
+        }
+
+        // Database-level inclusion and exclusion guardrails
+        if (!string.IsNullOrWhiteSpace(database.ExcludedObjects))
+        {
+            var dbExcluded = ObjectScope.ParseList(database.ExcludedObjects);
+            foreach (var obj in analysis.ObjectRequirements)
+            {
+                if (ObjectScope.MatchesAny(dbExcluded, obj.Schema, obj.ObjectName))
+                {
+                    result.Denials.Add($"Database policy: '{obj.TargetDisplay}' is excluded database-wide on {database.Name}.");
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(database.IncludedObjects))
+        {
+            var dbIncluded = ObjectScope.ParseList(database.IncludedObjects);
+            if (!dbIncluded.Contains("*"))
+            {
+                foreach (var obj in analysis.ObjectRequirements)
+                {
+                    if (!ObjectScope.MatchesAny(dbIncluded, obj.Schema, obj.ObjectName))
+                    {
+                        result.Denials.Add($"Database policy: '{obj.TargetDisplay}' is not in allowed objects list on {database.Name}.");
+                    }
+                }
+            }
+        }
+
+        // Role-level inclusion and exclusion guardrails per database
+        if (!isSystem && user != null)
+        {
+            var roleIds = await db.UserRoles.Where(r => r.UserId == user.Id).Select(r => r.RoleId).ToListAsync();
+            var roleRules = await db.DatabaseRoleScopeRules.AsNoTracking()
+                .Where(r => r.DatabaseId == database.Id && roleIds.Contains(r.RoleId))
+                .ToListAsync();
+
+            if (roleRules.Count > 0)
+            {
+                foreach (var obj in analysis.ObjectRequirements)
+                {
+                    foreach (var rr in roleRules.Where(r => !string.IsNullOrWhiteSpace(r.ExcludedObjects)))
+                    {
+                        if (ObjectScope.MatchesAny(ObjectScope.ParseList(rr.ExcludedObjects), obj.Schema, obj.ObjectName))
+                        {
+                            result.Denials.Add($"Role policy: '{obj.TargetDisplay}' is excluded for your role on {database.Name}.");
+                            break;
+                        }
+                    }
+
+                    var rulesWithInclusion = roleRules.Where(r => !string.IsNullOrWhiteSpace(r.IncludedObjects) && !ObjectScope.ParseList(r.IncludedObjects).Contains("*")).ToList();
+                    if (rulesWithInclusion.Count > 0 && rulesWithInclusion.Count == roleRules.Count)
+                    {
+                        var anyIncluded = rulesWithInclusion.Any(rr => ObjectScope.MatchesAny(ObjectScope.ParseList(rr.IncludedObjects), obj.Schema, obj.ObjectName));
+                        if (!anyIncluded)
+                        {
+                            result.Denials.Add($"Role policy: '{obj.TargetDisplay}' is not in included role scopes on {database.Name}.");
+                        }
+                    }
+                }
+            }
+        }
+
+        if (result.Denials.Count > 0)
+        {
             return await Deny("Denied", string.Join(" ", result.Denials), analysis);
         }
 
@@ -222,7 +333,24 @@ public sealed class ExecutionService(
         foreach (var req in analysis.Requirements)
         {
             if (options.ApprovedScript && !Perm.IsDangerous(req)) continue;
-            if (!permissions.Resolve(req, rules)) missing.Add(req);
+            var matchingObjReqs = analysis.ObjectRequirements
+                .Where(o => string.Equals(o.Permission, req, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (matchingObjReqs.Count > 0)
+            {
+                foreach (var objReq in matchingObjReqs)
+                {
+                    if (!permissions.ResolveObject(objReq.Permission, objReq.Schema, objReq.ObjectName, rules))
+                    {
+                        missing.Add($"{objReq.Permission} on {objReq.TargetDisplay}");
+                    }
+                }
+            }
+            else
+            {
+                if (!permissions.Resolve(req, rules)) missing.Add(req);
+            }
         }
         if (options.Export && !permissions.Resolve(Perm.Export, rules)) missing.Add(Perm.Export);
         if (missing.Count > 0)
@@ -292,17 +420,17 @@ public sealed class ExecutionService(
                 result.Outcome = "Cancelled";
                 result.Error = "Query cancelled.";
             }
-            catch (SqlException ex)
-            {
-                result.Outcome = ex.Number == -2 ? "Timeout" : "Error";
-                result.Error = ex.Number == -2 ? $"Query timed out after {timeout}s." : ex.Message;
-                result.ErrorLine = ex.LineNumber > 0 ? ex.LineNumber : null;
-            }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Query execution failed");
-                result.Outcome = "Error";
-                result.Error = ex.Message;
+                var provider = providers.GetProvider(database.Engine);
+                var (outcome, errorMsg, errorLine) = provider.TranslateException(ex, timeout);
+                if (outcome != "Timeout")
+                {
+                    logger.LogWarning(ex, "Query execution failed");
+                }
+                result.Outcome = outcome;
+                result.Error = errorMsg;
+                result.ErrorLine = errorLine;
             }
 
             stopwatch.Stop();
@@ -385,7 +513,7 @@ public sealed class ExecutionService(
             return result;
         }
 
-        var analysis = gate.Analyze(sql);
+        var analysis = gate.Analyze(sql, database.Engine);
         if (analysis.HasHardDenial)
         {
             foreach (var d in analysis.ParseErrors.Concat(analysis.HardDenials)) result.Denials.Add(d);
@@ -427,42 +555,21 @@ public sealed class ExecutionService(
             return result;
         }
 
-        var xmlBuilder = new StringBuilder();
         try
         {
+            var provider = providers.GetProvider(database.Engine);
             var connectionString = crypto.Decrypt(database.EncryptedConnectionString);
-            await using var connection = new SqlConnection(connectionString);
-            await connection.OpenAsync(ct);
-
-            await using (var cmdOn = new SqlCommand("SET SHOWPLAN_XML ON;", connection) { CommandTimeout = timeout })
+            var plan = await provider.ExplainPlanAsync(connectionString, sql, timeout, ct);
+            if (plan is not null)
             {
-                await cmdOn.ExecuteNonQueryAsync(ct);
-            }
-
-            try
-            {
-                foreach (var batch in analysis.Batches)
-                {
-                    await using var cmd = new SqlCommand(batch, connection) { CommandTimeout = timeout };
-                    await using var reader = await cmd.ExecuteReaderAsync(ct);
-                    while (await reader.ReadAsync(ct))
-                    {
-                        if (reader.FieldCount > 0 && !reader.IsDBNull(0))
-                        {
-                            xmlBuilder.Append(reader.GetString(0));
-                        }
-                    }
-                }
                 result.Outcome = "Success";
+                result.ExecutionPlan = plan;
+                result.Messages.Add($"Estimated plan generated in {stopwatch.ElapsedMilliseconds}ms (Subtree Cost: {plan.TotalCost:F4}).");
             }
-            finally
+            else
             {
-                try
-                {
-                    await using var cmdOff = new SqlCommand("SET SHOWPLAN_XML OFF;", connection) { CommandTimeout = timeout };
-                    await cmdOff.ExecuteNonQueryAsync(CancellationToken.None);
-                }
-                catch { }
+                result.Outcome = "Success";
+                result.Messages.Add($"Estimated plan generated in {stopwatch.ElapsedMilliseconds}ms.");
             }
         }
         catch (OperationCanceledException)
@@ -470,17 +577,14 @@ public sealed class ExecutionService(
             result.Outcome = "Cancelled";
             result.Error = "Explain plan cancelled.";
         }
-        catch (SqlException ex)
-        {
-            result.Outcome = ex.Number == -2 ? "Timeout" : "Error";
-            result.Error = ex.Number == -2 ? $"Explain plan timed out after {timeout}s." : ex.Message;
-            result.ErrorLine = ex.LineNumber > 0 ? ex.LineNumber : null;
-        }
         catch (Exception ex)
         {
+            var provider = providers.GetProvider(database.Engine);
+            var (outcome, errorMsg, errorLine) = provider.TranslateException(ex, timeout);
             logger.LogWarning(ex, "Explain plan failed");
-            result.Outcome = "Error";
-            result.Error = ex.Message;
+            result.Outcome = outcome;
+            result.Error = errorMsg;
+            result.ErrorLine = errorLine;
         }
         finally
         {
@@ -490,13 +594,6 @@ public sealed class ExecutionService(
 
         stopwatch.Stop();
         result.DurationMs = stopwatch.ElapsedMilliseconds;
-
-        var rawXml = xmlBuilder.ToString();
-        if (result.Ok && !string.IsNullOrWhiteSpace(rawXml))
-        {
-            result.ExecutionPlan = ExecutionPlanParser.Parse(rawXml);
-            result.Messages.Add($"Estimated plan generated in {result.DurationMs}ms (Subtree Cost: {result.ExecutionPlan.TotalCost:F4}).");
-        }
 
         var auditEntry = new AuditLog
         {
@@ -524,17 +621,22 @@ public sealed class ExecutionService(
 
     private async Task RunAsync(ManagedDatabase database, ExecutionOptions options, GateAnalysis analysis, ExecutionResult result, int timeout, int maxRows, CancellationToken ct)
     {
+        var provider = providers.GetProvider(database.Engine);
         var connectionString = crypto.Decrypt(database.EncryptedConnectionString);
-        await using var connection = new SqlConnection(connectionString);
-        connection.InfoMessage += (_, e) => result.Messages.Add(e.Message);
+        await using var connection = provider.CreateConnection(connectionString);
+        provider.RegisterMessageListener(connection, msg => result.Messages.Add(msg));
         await connection.OpenAsync(ct);
 
-        SqlTransaction? tx = options.DryRun ? connection.BeginTransaction() : null;
+        DbTransaction? tx = options.DryRun ? await connection.BeginTransactionAsync(ct) : null;
         try
         {
             foreach (var batch in analysis.Batches)
             {
-                await using var cmd = new SqlCommand(batch, connection, tx) { CommandTimeout = timeout };
+                await using var cmd = connection.CreateCommand();
+                cmd.CommandText = batch;
+                cmd.CommandTimeout = timeout;
+                if (tx is not null) cmd.Transaction = tx;
+
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
                 do
                 {
@@ -545,10 +647,11 @@ public sealed class ExecutionService(
                         while (await reader.ReadAsync(ct))
                         {
                             if (set.Rows.Count >= maxRows) { set.Truncated = true; break; }
-                            var values = new object?[reader.FieldCount];
+                            var values = new object[reader.FieldCount];
                             reader.GetValues(values);
-                            for (var i = 0; i < values.Length; i++) values[i] = Normalize(values[i]);
-                            set.Rows.Add(values);
+                            var row = new object?[reader.FieldCount];
+                            for (var i = 0; i < values.Length; i++) row[i] = Normalize(values[i]);
+                            set.Rows.Add(row);
                         }
                         result.RowsReturned += set.Rows.Count;
                         result.ResultSets.Add(set);

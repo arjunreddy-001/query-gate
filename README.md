@@ -1,6 +1,6 @@
 # Query Gate
 
-Blazor Server (.NET 10) tool that brokers access to SQL Server databases with a T-SQL gate, fail-closed auditing, permissions, and approval workflows. See [prd.md](./prd.md).
+Blazor Server (.NET 10) tool that brokers governed access to SQL Server, PostgreSQL, MySQL and MariaDB databases with a SQL gate, fail-closed auditing, permissions, and approval workflows. See [prd.md](./prd.md).
 
 ## Run
 
@@ -45,10 +45,11 @@ Full usage documentation: [docs/USER-GUIDE.md](./docs/USER-GUIDE.md). Admin quic
 ## What's included
 
 - Custom-designed UI with light/dark themes, role-based navigation, idle timeout, notifications.
+- Multi-database support: connects natively to Microsoft SQL Server, PostgreSQL, MySQL, and MariaDB targets with engine-specific metadata extraction, statement splitting, dialect analysis, and execution plan estimation.
 - Query workspace: Monaco editor with schema-aware completion, tabs, saved queries, history, formatting, dry-run (rollback), timeout, cancel, results grid with column sorting, row filtering, double-click cell copy, and multi-format export: CSV, Excel (.xls), JSON, Markdown table, and SQL INSERT statements (needs `EXPORT`, audited).
-- Estimated Execution Plan: safe query plan compilation with `SET SHOWPLAN_XML ON`, extracting subtree costs, missing index recommendations with one-click DDL generation and editor insertion, and operator bottleneck breakdowns with scan warnings.
+- Estimated Execution Plan: safe query plan compilation (SQL Server `SET SHOWPLAN_XML ON`, PostgreSQL `EXPLAIN (FORMAT JSON)`, MySQL/MariaDB `EXPLAIN FORMAT=JSON`), extracting costs, missing indexes, and operator bottleneck breakdowns with scan warnings.
 - Dynamic Data Masking: multi-standard in-flight redaction (GDPR, HIPAA, PCI-DSS, SOC 2, CCPA) covering patient names, medical record IDs, dates of birth, street addresses, ZIP codes, credit card PANs, CVVs, SSNs, phone numbers, emails, IP addresses, credentials, and salaries; manageable in the UI with compliance tagging and custom rules.
-- SQL gate (ScriptDom): blocks parse errors, `USE`, cross-database references and security DDL; maps statements to required permissions; confirms unfiltered UPDATE/DELETE.
+- SQL gate: blocks parse errors, `USE`, cross-database references and security DDL; maps statements to required permissions; confirms unfiltered UPDATE/DELETE.
 - Fail-closed auditing: the audit row is written before execution; failure to write blocks the query.
 - Access and script requests with approval, edit-before-approve, auto-run, expiry and reminders.
 - Admin: approvals, users, databases, permissions (allow/deny, time windows), access matrix, audit log, app logs, settings.
@@ -57,7 +58,7 @@ Full usage documentation: [docs/USER-GUIDE.md](./docs/USER-GUIDE.md). Admin quic
 
 ## Limitations
 
-No object-level permission scope; targets SQL Server; LocalDB is untested.
+No object-level permission scope; LocalDB is untested.
 
 ## AI Agent Skills (Cross-Platform)
 

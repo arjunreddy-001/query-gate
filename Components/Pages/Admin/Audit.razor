@@ -49,7 +49,7 @@
                     <th style="width:160px">User</th>
                     <th style="width:90px">Category</th>
                     <th style="width:110px">Action</th>
-                    <th style="width:130px">Database</th>
+                    <th style="width:170px">Database</th>
                     <th style="width:85px">Outcome</th>
                     <th class="num" style="width:65px">Rows</th>
                     <th class="num" style="width:65px">ms</th>
@@ -64,7 +64,26 @@
                     <td class="audit-user-cell" title="@a.UserName">@a.UserName</td>
                     <td><span class="badge" style="font-size:10px;padding:1px 6px">@a.Category</span></td>
                     <td><b>@a.Action</b></td>
-                    <td class="audit-db-cell">@(a.DatabaseName ?? "—")</td>
+                    <td class="audit-db-cell">
+                        @if (a.DatabaseId.HasValue && dbLookup.TryGetValue(a.DatabaseId.Value, out var managedDb))
+                        {
+                            <div class="audit-db-info">
+                                <span class="audit-db-name" title="@managedDb.Name"><b>@managedDb.Name</b></span>
+                                <div class="audit-db-badges">
+                                    <span class="badge @EnvClass(managedDb.Environment)" style="font-size:10px;padding:0 5px">@managedDb.Environment</span>
+                                    <span class="badge @DatabaseEngineInfo.GetBadgeClass(managedDb.Engine)" style="font-size:10px;padding:0 5px">@DatabaseEngineInfo.GetDisplayName(managedDb.Engine)</span>
+                                </div>
+                            </div>
+                        }
+                        else if (!string.IsNullOrEmpty(a.DatabaseName))
+                        {
+                            <b>@a.DatabaseName</b>
+                        }
+                        else
+                        {
+                            <span class="muted">—</span>
+                        }
+                    </td>
                     <td><span class="badge @OutcomeClass(a.Outcome)">@a.Outcome</span></td>
                     <td class="num font-mono">@(a.RowsReturned ?? a.RowsAffected ?? 0)</td>
                     <td class="num font-mono">@(a.DurationMs?.ToString() ?? "—")</td>
@@ -138,7 +157,20 @@
                     </div>
                     <div class="audit-meta-card">
                         <span class="audit-meta-label">Database Target</span>
-                        <span class="audit-meta-value">@(viewLog.DatabaseName ?? "—")</span>
+                        <span class="audit-meta-value">
+                            @if (viewLog.DatabaseId.HasValue && dbLookup.TryGetValue(viewLog.DatabaseId.Value, out var targetDb))
+                            {
+                                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                                    <b>@targetDb.Name</b>
+                                    <span class="badge @EnvClass(targetDb.Environment)" style="font-size:11px;padding:1px 6px">@targetDb.Environment</span>
+                                    <span class="badge @DatabaseEngineInfo.GetBadgeClass(targetDb.Engine)" style="font-size:11px;padding:1px 6px">@DatabaseEngineInfo.GetDisplayName(targetDb.Engine)</span>
+                                </div>
+                            }
+                            else
+                            {
+                                @(viewLog.DatabaseName ?? "—")
+                            }
+                        </span>
                     </div>
                     <div class="audit-meta-card">
                         <span class="audit-meta-label">Execution Time</span>
@@ -226,6 +258,7 @@
 
 @code {
     private List<AuditLog> rows = [];
+    private Dictionary<Guid, ManagedDatabase> dbLookup = [];
     private AuditLog? viewLog;
     private bool isMaximized;
     private bool sqlWrap;
@@ -277,6 +310,7 @@
         try
         {
             await using var db = await DbFactory.CreateDbContextAsync();
+            dbLookup = await db.ManagedDatabases.AsNoTracking().ToDictionaryAsync(d => d.Id);
             rows = await Query(db).Take(500).ToListAsync();
         }
         finally { loading = false; }
@@ -287,28 +321,35 @@
         if (args.Key == "Enter") await Load();
     }
 
-    private static readonly string[] AuditExportColumns = ["Timestamp", "User", "Category", "Action", "Database", "Outcome", "RowsReturned", "RowsAffected", "DurationMs", "ClientIp", "Details"];
+    private static readonly string[] AuditExportColumns = ["Timestamp", "User", "Category", "Action", "Database", "Environment", "Engine", "Outcome", "RowsReturned", "RowsAffected", "DurationMs", "ClientIp", "Details"];
 
     private async Task<List<AuditLog>> GetDataForExportAsync()
     {
         await using var db = await DbFactory.CreateDbContextAsync();
+        dbLookup = await db.ManagedDatabases.AsNoTracking().ToDictionaryAsync(d => d.Id);
         return await Query(db).Take(10000).ToListAsync();
     }
 
-    private static List<object?[]> MapAuditRows(List<AuditLog> data) =>
-        data.Select(a => new object?[]
+    private List<object?[]> MapAuditRows(List<AuditLog> data) =>
+        data.Select(a =>
         {
-            a.Timestamp.ToString("o"),
-            a.UserName,
-            a.Category,
-            a.Action,
-            a.DatabaseName,
-            a.Outcome,
-            a.RowsReturned,
-            a.RowsAffected,
-            a.DurationMs,
-            a.ClientIp,
-            a.Details
+            var db = a.DatabaseId.HasValue && dbLookup.TryGetValue(a.DatabaseId.Value, out var d) ? d : null;
+            return new object?[]
+            {
+                a.Timestamp.ToString("o"),
+                a.UserName,
+                a.Category,
+                a.Action,
+                a.DatabaseName ?? db?.Name,
+                db?.Environment,
+                db is null ? null : DatabaseEngineInfo.GetDisplayName(db.Engine),
+                a.Outcome,
+                a.RowsReturned,
+                a.RowsAffected,
+                a.DurationMs,
+                a.ClientIp,
+                a.Details
+            };
         }).ToList();
 
     private async Task ExportCsv()

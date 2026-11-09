@@ -783,14 +783,29 @@ html[data-nav="compact"]
   color: #fff;
   text-decoration: none;
 }
-.hero-actions .btn-primary {
-  background: #fff;
-  color: #2a2a9e;
-  border-color: transparent;
+.hero-actions .btn-primary,
+.hero .hero-actions a.btn-primary,
+.hero .hero-actions a.btn-primary:visited {
+  background: #fff !important;
+  color: #1e1b4b !important;
+  font-weight: 600 !important;
+  border-color: transparent !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
 }
-.hero-actions .btn-primary:hover {
-  background: rgba(255,255,255,0.9);
-  color: #2a2a9e;
+.hero-actions .btn-primary svg,
+.hero .hero-actions a.btn-primary svg {
+  color: #1e1b4b !important;
+  stroke: #1e1b4b !important;
+}
+.hero-actions .btn-primary:hover,
+.hero .hero-actions a.btn-primary:hover {
+  background: rgba(255,255,255,0.92) !important;
+  color: #1e1b4b !important;
+}
+.hero-actions .btn-primary:hover svg,
+.hero .hero-actions a.btn-primary:hover svg {
+  color: #1e1b4b !important;
+  stroke: #1e1b4b !important;
 }
 
 /* ---------- Controls ---------- */
@@ -1119,6 +1134,38 @@ td.wrap {
 [data-theme="dark"] .badge.env-prod {
   background: #451923;
   color: #ff8ea0;
+}
+.badge.engine-sqlserver {
+  background: #e6f0fa;
+  color: #0b62a4;
+}
+.badge.engine-postgres {
+  background: #ede9fe;
+  color: #6366f1;
+}
+.badge.engine-mysql {
+  background: #ffedd5;
+  color: #c2410c;
+}
+.badge.engine-mariadb {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+[data-theme="dark"] .badge.engine-sqlserver {
+  background: #172d47;
+  color: #60a5fa;
+}
+[data-theme="dark"] .badge.engine-postgres {
+  background: #2e1065;
+  color: #a78bfa;
+}
+[data-theme="dark"] .badge.engine-mysql {
+  background: #431407;
+  color: #fb923c;
+}
+[data-theme="dark"] .badge.engine-mariadb {
+  background: #082f49;
+  color: #38bdf8;
 }
 .alert {
   padding: 8px 12px;
@@ -2416,12 +2463,27 @@ input[type="password"]::-ms-clear {
 .audit-row:hover {
   background: var(--bg-hover) !important;
 }
-.audit-user-cell,
-.audit-db-cell {
+.audit-user-cell {
   max-width: 150px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.audit-db-cell {
+  min-width: 150px;
+  max-width: 230px;
+  vertical-align: middle;
+}
+.audit-db-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+}
+.audit-db-badges {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 .audit-detail-cell {
   min-width: 280px;
@@ -2777,11 +2839,247 @@ input[type="password"]::-ms-clear {
   color: var(--brand);
   font-weight: 600;
 }
+.combobox-option.highlighted {
+  background: var(--brand-soft) !important;
+  color: var(--brand) !important;
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
+}
+.combobox-option.highlighted svg {
+  color: var(--brand) !important;
+}
 .combobox-empty {
   padding: 8px 12px;
   font-size: 0.8rem;
   color: var(--text-faint);
   font-style: italic;
+}
+
+/* Effective Permissions Modernized Tiles */
+.effective-stat-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 14px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+  font-size: 0.8125rem;
+}
+.effective-stat-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.effective-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+.effective-tile {
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: all 0.15s ease;
+  position: relative;
+}
+.effective-tile:hover {
+  border-color: var(--border-color);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+.effective-tile.allowed {
+  border-color: rgba(34, 197, 94, 0.25);
+  background: linear-gradient(180deg, rgba(34, 197, 94, 0.04) 0%, transparent 100%), var(--bg-card);
+}
+.effective-tile.allowed.highrisk {
+  border-color: rgba(249, 115, 22, 0.35);
+  background: linear-gradient(180deg, rgba(249, 115, 22, 0.04) 0%, transparent 100%), var(--bg-card);
+}
+.effective-tile.denied {
+  opacity: 0.65;
+  background: var(--bg-sunken);
+  border-color: var(--line);
+}
+.effective-tile-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.effective-perm-name {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.effective-scope-trigger {
+  margin-top: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-family: monospace;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  border: 1px solid var(--brand);
+  cursor: pointer;
+  width: fit-content;
+  transition: all 0.15s ease;
+}
+.effective-scope-trigger:hover {
+  background: var(--brand);
+  color: #fff;
+}
+.effective-source-pill {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+  border: 1px solid var(--line);
+  font-weight: 500;
+}
+
+/* Access Matrix Scope Pill & Table Styles */
+.matrix-cell-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+.matrix-check-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+.matrix-check-pill.ok {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+}
+.matrix-check-pill.warn {
+  background: rgba(249, 115, 22, 0.15);
+  color: #f97316;
+  border: 1px solid rgba(249, 115, 22, 0.35);
+}
+.matrix-scoped-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-family: inherit;
+  font-weight: 600;
+  background: var(--brand-soft);
+  color: var(--brand);
+  border: 1px solid var(--brand);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  line-height: 1;
+}
+.matrix-scoped-btn:hover {
+  background: var(--brand);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
+}
+.matrix-scoped-btn.warn {
+  background: rgba(249, 115, 22, 0.15);
+  color: #f97316;
+  border-color: rgba(249, 115, 22, 0.4);
+}
+.matrix-scoped-btn.warn:hover {
+  background: #f97316;
+  color: #fff;
+}
+.matrix-scoped-count {
+  font-size: 10px;
+  font-family: monospace;
+  background: rgba(255, 255, 255, 0.12);
+  padding: 1px 5px;
+  border-radius: 6px;
+}
+.matrix-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 8px 12px;
+  background: var(--bg-sunken);
+  border-radius: var(--radius-sm);
+  margin-top: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.matrix-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Access Matrix Sticky Pinned Columns */
+.matrix-table {
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+  width: max-content;
+  min-width: 100%;
+}
+.matrix-table th,
+.matrix-table td {
+  border-bottom: 1px solid var(--line);
+}
+.matrix-table th.col-user,
+.matrix-table td.col-user {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  background: var(--bg-elev);
+  width: 220px;
+  min-width: 220px;
+  max-width: 220px;
+  box-shadow: 1px 0 0 var(--line);
+}
+.matrix-table th.col-user {
+  z-index: 10;
+  background: var(--bg-sunken);
+}
+.matrix-table th.col-status,
+.matrix-table td.col-status {
+  position: sticky;
+  left: 220px;
+  z-index: 4;
+  background: var(--bg-elev);
+  width: 95px;
+  min-width: 95px;
+  max-width: 95px;
+  box-shadow: 4px 0 8px -3px rgba(0, 0, 0, 0.25), 1px 0 0 var(--line);
+  border-right: 1px solid var(--line);
+}
+.matrix-table th.col-status {
+  z-index: 10;
+  background: var(--bg-sunken);
+}
+.matrix-table tbody tr:hover td.col-user,
+.matrix-table tbody tr:hover td.col-status {
+  background: color-mix(in srgb, var(--brand-soft) 45%, var(--bg-elev));
 }
 
 /* Permission Fieldsets with Legends */

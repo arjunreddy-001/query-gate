@@ -52,7 +52,7 @@
         <div class="gated-control-wrap @(!IsEnvSelected ? "is-locked" : "")">
             <select @bind="dbId" @bind:after="OnFilterDbChanged" style="width:280px;min-width:280px" disabled="@(!IsEnvSelected)">
                 <option value="@Guid.Empty">Select database…</option>
-                @foreach (var d in FilteredDatabases) { <option value="@d.Id">@d.Name (@d.Environment)</option> }
+                @foreach (var d in FilteredDatabases) { <option value="@d.Id">@d.Name (@d.Environment) · @DatabaseEngineInfo.GetDisplayName(d.Engine)</option> }
             </select>
         </div>
     </div>
@@ -137,55 +137,135 @@
     {
         <div class="empty">
             <Icon Name="filter" />
-            <div>Select a database in <b>@filterEnv</b> to view permissions.</div>
-            <p class="small muted" style="margin-top:4px">Database selection enables Role/User filtering and grant management.</p>
+            <div>Select a database in <b>@filterEnv</b> to continue.</div>
+            <p class="small muted" style="margin-top:4px">Select a database to enable Role or User selection.</p>
         </div>
     }
-    else if (grants.Count == 0)
+    else if (string.IsNullOrWhiteSpace(filterSubject))
+    {
+        <div class="empty">
+            <Icon Name="user" />
+            <div>Select a Role or User to view and manage permissions for <b>@GetDbName(dbId)</b>.</div>
+            <p class="small muted" style="margin-top:4px">Role or User selection is required to list and configure permissions.</p>
+        </div>
+    }
+    else if (grantRows.Count == 0)
     {
         <div class="empty">
             <Icon Name="shield" />
-            <div>No grants configured for <b>@GetDbName(dbId)</b>. Click "Add grant" to assign permissions.</div>
+            <div>No grants configured for <b>@subjectSearchText</b> on <b>@GetDbName(dbId)</b>. Click "Add grant" to assign permissions.</div>
         </div>
     }
     else
     {
         <div class="table-wrap"><table>
-            <thead><tr><th>Database</th><th>Subject</th><th>Permission</th><th>Effect</th><th>Window</th><th></th></tr></thead>
+            <thead><tr><th>Database</th><th>Subject</th><th>Permission</th><th>Scope</th><th>Effect</th><th>Window</th><th></th></tr></thead>
             <tbody>
-            @foreach (var g in grants)
+            @foreach (var row in grantRows)
             {
-                var isHigh = Perm.IsHighRisk(g.PermissionCode);
+                var isHigh = Perm.IsHighRisk(row.PermissionCode);
                 <tr>
-                    <td><b>@GetDbName(g.DatabaseId)</b> <span class="badge @EnvClass(GetDbEnv(g.DatabaseId))">@GetDbEnv(g.DatabaseId)</span></td>
-                    <td>@Subject(g)</td>
+                    <td>
+                        <b>@GetDbName(row.DatabaseId)</b>
+                        <span class="badge @EnvClass(GetDbEnv(row.DatabaseId))">@GetDbEnv(row.DatabaseId)</span>
+                        <span class="badge @DatabaseEngineInfo.GetBadgeClass(GetDbEngine(row.DatabaseId))">@DatabaseEngineInfo.GetDisplayName(GetDbEngine(row.DatabaseId))</span>
+                    </td>
+                    <td>@Subject(row.Grants[0])</td>
                     <td>
                         @if (isHigh)
                         {
                             <div class="perm-highrisk-cell">
-                                <span class="badge badge-highrisk" title="@Perm.HighRiskReason(g.PermissionCode)">
-                                    <span style="margin-right:3px">⚠</span>@Perm.Label(g.PermissionCode)
+                                <span class="badge badge-highrisk" title="@Perm.HighRiskReason(row.PermissionCode)">
+                                    <span style="margin-right:3px">⚠</span>@Perm.Label(row.PermissionCode)
                                 </span>
                                 <div class="highrisk-inline-reason">
                                     <Icon Name="alert" />
-                                    <span>@Perm.HighRiskReason(g.PermissionCode)</span>
+                                    <span>@Perm.HighRiskReason(row.PermissionCode)</span>
                                 </div>
                             </div>
                         }
                         else
                         {
-                            <span class="badge @(Perm.IsDangerous(g.PermissionCode) ? "warn" : "brand")">@Perm.Label(g.PermissionCode)</span>
+                            <span class="badge @(Perm.IsDangerous(row.PermissionCode) ? "warn" : "brand")">@Perm.Label(row.PermissionCode)</span>
                         }
                     </td>
-                    <td><span class="badge @(g.Effect == PermissionEffect.Allow ? "ok" : "bad")">@g.Effect</span></td>
-                    <td class="small muted">@(g.StartsAt is null && g.EndsAt is null ? "Always" : $"{Local(g.StartsAt)} → {Local(g.EndsAt)}")</td>
-                    <td class="right"><button class="btn btn-sm btn-danger" @onclick="() => removingGrant = g">Remove</button></td>
+                    <td>
+                        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                            @if (row.Scopes.Count == 1 && row.Scopes[0] == "*")
+                            {
+                                <span class="muted small">All objects</span>
+                            }
+                            else if (row.Scopes.Count == 1)
+                            {
+                                <span class="badge" style="font-family:monospace;font-size:11px;background:var(--bg-card);border:1px solid var(--border-color)">@row.Scopes[0]</span>
+                            }
+                            else
+                            {
+                                @foreach (var s in row.Scopes.Take(2))
+                                {
+                                    <span class="badge" style="font-family:monospace;font-size:11px;background:var(--bg-card);border:1px solid var(--border-color)">@s</span>
+                                }
+                                <button type="button" class="btn btn-sm btn-ghost" style="padding:2px 8px;font-size:11px;font-family:monospace" @onclick="() => viewingScopeRow = row">
+                                    +@(row.Scopes.Count - 2) more (View all)
+                                </button>
+                            }
+                        </div>
+                    </td>
+                    <td><span class="badge @(row.Effect == PermissionEffect.Allow ? "ok" : "bad")">@row.Effect</span></td>
+                    <td class="small muted">@(row.StartsAt is null && row.EndsAt is null ? "Always" : $"{Local(row.StartsAt)} → {Local(row.EndsAt)}")</td>
+                    <td class="right" style="white-space:nowrap">
+                        <button class="btn btn-sm btn-ghost" @onclick="() => EditGrantRow(row)">Edit</button>
+                        <button class="btn btn-sm btn-danger" @onclick="() => removingRow = row">Remove</button>
+                    </td>
                 </tr>
             }
             </tbody>
         </table></div>
     }
 </div>
+
+@if (viewingScopeRow is not null)
+{
+    <div class="modal-back">
+        <div class="modal" style="max-width:540px">
+            <div class="modal-head">
+                <div style="display:flex;align-items:center;gap:8px">
+                    <Icon Name="shield" Style="color:var(--brand)" />
+                    <h2 style="margin:0">Target Scopes: @Perm.Label(viewingScopeRow.PermissionCode)</h2>
+                </div>
+            </div>
+            <div class="modal-body stack" style="gap:12px">
+                <div class="muted small">
+                    Applies to <b>@Subject(viewingScopeRow.Grants[0])</b> on <b>@GetDbName(viewingScopeRow.DatabaseId)</b>
+                    (@viewingScopeRow.Scopes.Count scopes configured)
+                </div>
+                <div style="max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:4px 0">
+                    @foreach (var s in viewingScopeRow.Scopes)
+                    {
+                        <div class="row-inline" style="padding:8px 12px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:6px;justify-content:space-between">
+                            <span style="font-family:monospace;font-weight:600">@s</span>
+                            @if (s == "*")
+                            {
+                                <span class="badge brand" style="font-size:10px;padding:1px 6px">Entire Database</span>
+                            }
+                            else if (s.EndsWith(".*"))
+                            {
+                                <span class="badge warn" style="font-size:10px;padding:1px 6px">Schema Wildcard</span>
+                            }
+                            else
+                            {
+                                <span class="badge ok" style="font-size:10px;padding:1px 6px">Exact Object</span>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+            <div class="modal-foot">
+                <button type="button" class="btn btn-primary" @onclick="() => viewingScopeRow = null">Close</button>
+            </div>
+        </div>
+    </div>
+}
 
 @if (adding)
 {
@@ -199,7 +279,7 @@
             </div>
             <div class="field"><label>Database</label>
                 <select @bind="modalDbId" @bind:after="ReloadSelectedPermissions" disabled="@(ModalFilteredDatabases.Count == 0)">
-                    @foreach (var d in ModalFilteredDatabases) { <option value="@d.Id">@d.Name</option> }
+                    @foreach (var d in ModalFilteredDatabases) { <option value="@d.Id">@d.Name · @DatabaseEngineInfo.GetDisplayName(d.Engine)</option> }
                 </select>
             </div>
             <div class="field"><label>Applies to</label>
@@ -212,12 +292,26 @@
             {
                 <div class="field"><label>User</label><select @bind="userId" @bind:after="ReloadSelectedPermissions" disabled="@(modalDbId == Guid.Empty)">@foreach (var u in users) { <option value="@u.Id">@u.Email</option> }</select></div>
             }
+            <div class="field">
+                <label>Target Scope <span class="muted small">(Exact object like dbo.Customers, wildcard like sales.*, or * for all)</span></label>
+                <ObjectScopeSelector DatabaseId="@modalDbId"
+                                     @bind-Value="modalScope"
+                                     OnChange="OnScopeChanged"
+                                     Disabled="@(modalDbId == Guid.Empty)" />
+            </div>
             @if (permissionsLoading)
             {
                 <div class="alert info small"><span class="spinner"></span> Loading existing permissions…</div>
             }
             <fieldset class="perm-fieldset">
-                <legend class="perm-legend">Standard Permissions</legend>
+                <legend class="perm-legend" style="display:flex;align-items:center;justify-content:space-between;width:100%">
+                    <span>Standard Permissions</span>
+                    <span style="font-size:11px;font-weight:normal;display:inline-flex;gap:6px">
+                        <button type="button" class="btn btn-sm btn-ghost" style="padding:1px 6px;font-size:11px" @onclick="SelectAllStandard">Select all</button>
+                        <span class="muted">·</span>
+                        <button type="button" class="btn btn-sm btn-ghost" style="padding:1px 6px;font-size:11px" @onclick="DeselectAllStandard">Deselect all</button>
+                    </span>
+                </legend>
                 <div class="check-grid" style="grid-template-columns:1fr 1fr;gap:8px">
                     @foreach (var c in Perm.Catalog.Where(x => !Perm.IsHighRisk(x)))
                     {
@@ -259,7 +353,7 @@
                 <div class="field"><label>Ends (optional)</label><input type="datetime-local" @bind="ends" /></div>
             </div>
         </div>
-        <div class="modal-foot"><button class="btn" @onclick="() => adding = false">Cancel</button><button class="btn btn-primary" @onclick="Add">Save grants</button></div>
+        <div class="modal-foot"><button type="button" class="btn" @onclick="() => adding = false">Cancel</button><button type="button" class="btn btn-primary" @onclick="Add">Save grants</button></div>
     </div></div>
 }
 
@@ -315,14 +409,14 @@
         </div><div class="modal-foot"><button class="btn" @onclick="() => defaultsEnvironment = null">Cancel</button><button class="btn btn-primary" @onclick="SaveDefaults">Save</button></div>
     </div></div>
 }
-<ConfirmDialog IsOpen="@(removingGrant is not null)"
+<ConfirmDialog IsOpen="@(removingRow is not null)"
                Title="Remove Permission Grant?"
-               Message="@($"Are you sure you want to remove the {removingGrant?.Effect} {Perm.Label(removingGrant?.PermissionCode ?? "")} grant from {(removingGrant is null ? "" : Subject(removingGrant))}?")"
-               Details="@($"Database: {GetDbName(removingGrant?.DatabaseId ?? Guid.Empty)}. This grant will be revoked immediately and affected users will lose access upon their next query.")"
+               Message="@($"Are you sure you want to remove the {removingRow?.Effect} {Perm.Label(removingRow?.PermissionCode ?? "")} grant from {(removingRow is null || removingRow.Grants.Count == 0 ? "" : Subject(removingRow.Grants[0]))}?")"
+               Details="@($"Database: {GetDbName(removingRow?.DatabaseId ?? Guid.Empty)}. All {removingRow?.Scopes.Count} scopes for this grant will be revoked immediately.")"
                ConfirmText="Remove Grant"
                IsDanger="true"
                OnConfirm="ConfirmRemoveGrant"
-               OnCancel="() => removingGrant = null" />
+               OnCancel="() => removingRow = null" />
 
 <ConfirmDialog IsOpen="@(deleteRole is not null || deleteEnvironment is not null)"
                Title="@(deleteRole is not null ? $"Delete Role '{deleteRole.Name}'?" : $"Delete Environment '{deleteEnvironment?.Name}'?")"
@@ -334,8 +428,24 @@
                OnCancel="CancelDelete" />
 
 @code {
+    public sealed class GrantRowModel
+    {
+        public Guid DatabaseId { get; set; }
+        public string? RoleId { get; set; }
+        public string? UserId { get; set; }
+        public string PermissionCode { get; set; } = "";
+        public PermissionEffect Effect { get; set; }
+        public DateTimeOffset? StartsAt { get; set; }
+        public DateTimeOffset? EndsAt { get; set; }
+        public List<PermissionGrant> Grants { get; set; } = [];
+        public List<string> Scopes => Grants.Select(g => g.TargetScope).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
     private List<ManagedDatabase> dbs = [];
     private List<PermissionGrant> grants = [];
+    private List<GrantRowModel> grantRows = [];
+    private GrantRowModel? viewingScopeRow;
+    private GrantRowModel? removingRow;
     private List<Microsoft.AspNetCore.Identity.IdentityRole> roles = [];
     private List<ApplicationUser> users = [];
     private Guid dbId = Guid.Empty;
@@ -347,7 +457,7 @@
     private string modalEnv = "";
     private bool adding;
     private bool permissionsLoading;
-    private string kind = "role", roleId = "", userId = "", customCode = "";
+    private string kind = "role", roleId = "", userId = "", customCode = "", modalScope = "*";
     private HashSet<string> selectedCodes = [Perm.Select];
     private HashSet<string> initialExistingCodes = new(StringComparer.OrdinalIgnoreCase);
     private PermissionEffect effect = PermissionEffect.Allow;
@@ -359,7 +469,6 @@
     private HashSet<string> auditRoleIds = [];
     private Microsoft.AspNetCore.Identity.IdentityRole? editingRole, deleteRole;
     private DatabaseEnvironment? defaultsEnvironment, deleteEnvironment;
-    private PermissionGrant? removingGrant;
     private string editRoleName = "", environmentName = "", defaultsRoleId = "", defaultProcedure = "";
     private string? environmentError, defaultsError, deleteError;
     private bool editRoleAudit, environmentOpen;
@@ -549,43 +658,49 @@
 
     private async Task Load()
     {
-        if (string.IsNullOrWhiteSpace(filterEnv) && dbId == Guid.Empty && string.IsNullOrWhiteSpace(filterSubject))
+        if (string.IsNullOrWhiteSpace(filterEnv) || dbId == Guid.Empty || string.IsNullOrWhiteSpace(filterSubject))
         {
             grants = [];
+            grantRows = [];
             return;
         }
 
         await using var db = await DbFactory.CreateDbContextAsync();
-        var q = db.PermissionGrants.AsNoTracking().AsQueryable();
+        var q = db.PermissionGrants.AsNoTracking().Where(g => g.DatabaseId == dbId);
 
-        if (dbId != Guid.Empty)
+        if (filterSubject.StartsWith("role:", StringComparison.OrdinalIgnoreCase))
         {
-            q = q.Where(g => g.DatabaseId == dbId);
+            var targetRoleId = filterSubject["role:".Length..];
+            q = q.Where(g => g.RoleId == targetRoleId);
         }
-        else if (!string.IsNullOrWhiteSpace(filterEnv))
+        else if (filterSubject.StartsWith("user:", StringComparison.OrdinalIgnoreCase))
         {
-            var envDbIds = dbs.Where(d => d.Environment.Equals(filterEnv, StringComparison.OrdinalIgnoreCase)).Select(d => d.Id).ToList();
-            q = q.Where(g => envDbIds.Contains(g.DatabaseId));
-        }
-
-        if (!string.IsNullOrWhiteSpace(filterSubject))
-        {
-            if (filterSubject.StartsWith("role:", StringComparison.OrdinalIgnoreCase))
-            {
-                var targetRoleId = filterSubject["role:".Length..];
-                q = q.Where(g => g.RoleId == targetRoleId);
-            }
-            else if (filterSubject.StartsWith("user:", StringComparison.OrdinalIgnoreCase))
-            {
-                var targetUserId = filterSubject["user:".Length..];
-                q = q.Where(g => g.UserId == targetUserId);
-            }
+            var targetUserId = filterSubject["user:".Length..];
+            q = q.Where(g => g.UserId == targetUserId);
         }
 
         grants = await q.OrderBy(g => g.DatabaseId)
                         .ThenBy(g => g.UserId == null ? 0 : 1)
                         .ThenBy(g => g.PermissionCode)
                         .ToListAsync();
+
+        grantRows = grants
+            .GroupBy(g => new { g.DatabaseId, g.RoleId, g.UserId, g.PermissionCode, g.Effect })
+            .Select(grp => new GrantRowModel
+            {
+                DatabaseId = grp.Key.DatabaseId,
+                RoleId = grp.Key.RoleId,
+                UserId = grp.Key.UserId,
+                PermissionCode = grp.Key.PermissionCode,
+                Effect = grp.Key.Effect,
+                StartsAt = grp.Min(x => x.StartsAt),
+                EndsAt = grp.Max(x => x.EndsAt),
+                Grants = grp.ToList()
+            })
+            .OrderBy(r => GetDbName(r.DatabaseId))
+            .ThenBy(r => r.UserId == null ? 0 : 1)
+            .ThenBy(r => r.PermissionCode)
+            .ToList();
     }
 
     private string Subject(PermissionGrant g) => g.UserId is not null
@@ -594,11 +709,28 @@
 
     private string GetDbName(Guid id) => dbs.FirstOrDefault(d => d.Id == id)?.Name ?? "Database";
     private string GetDbEnv(Guid id) => dbs.FirstOrDefault(d => d.Id == id)?.Environment ?? "";
+    private DatabaseEngine GetDbEngine(Guid id) => dbs.FirstOrDefault(d => d.Id == id)?.Engine ?? DatabaseEngine.SqlServer;
 
     private void ToggleCode(string permission, bool on)
     {
         if (on) selectedCodes.Add(permission);
         else selectedCodes.Remove(permission);
+    }
+
+    private void SelectAllStandard()
+    {
+        foreach (var c in Perm.Catalog.Where(x => !Perm.IsHighRisk(x)))
+        {
+            selectedCodes.Add(c);
+        }
+    }
+
+    private void DeselectAllStandard()
+    {
+        foreach (var c in Perm.Catalog.Where(x => !Perm.IsHighRisk(x)))
+        {
+            selectedCodes.Remove(c);
+        }
     }
 
     private async Task OpenAddGrant()
@@ -611,6 +743,11 @@
         if (!IsDbSelected)
         {
             Say("Please select a database first before adding grants.", true);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(filterSubject))
+        {
+            Say("Please select a role or user first before adding grants.", true);
             return;
         }
 
@@ -637,10 +774,51 @@
         }
 
         adding = true;
+        modalScope = "*";
         customCode = "";
         starts = null;
         ends = null;
         await ReloadSelectedPermissions();
+    }
+
+    private void EditGrantRow(GrantRowModel row)
+    {
+        var targetDb = dbs.FirstOrDefault(d => d.Id == row.DatabaseId);
+        if (targetDb != null)
+        {
+            modalEnv = targetDb.Environment;
+            modalDbId = row.DatabaseId;
+        }
+        else
+        {
+            modalEnv = filterEnv;
+            modalDbId = row.DatabaseId;
+        }
+
+        if (row.RoleId != null)
+        {
+            kind = "role";
+            roleId = row.RoleId;
+        }
+        else if (row.UserId != null)
+        {
+            kind = "user";
+            userId = row.UserId;
+        }
+
+        adding = true;
+        modalScope = string.Join(", ", row.Scopes);
+        selectedCodes = [row.PermissionCode];
+        initialExistingCodes = [row.PermissionCode];
+        customCode = "";
+        effect = row.Effect;
+        starts = row.StartsAt?.LocalDateTime;
+        ends = row.EndsAt?.LocalDateTime;
+    }
+
+    private void OnScopeChanged(string newScope)
+    {
+        modalScope = newScope;
     }
 
     private async Task ReloadSelectedPermissions()
@@ -650,8 +828,9 @@
         permissionsLoading = true;
         try
         {
+            var (pSchema, pObj) = ObjectScope.Parse(modalScope);
             await using var db = await DbFactory.CreateDbContextAsync();
-            var q = db.PermissionGrants.AsNoTracking().Where(g => g.DatabaseId == modalDbId);
+            var q = db.PermissionGrants.AsNoTracking().Where(g => g.DatabaseId == modalDbId && g.Schema == pSchema && g.ObjectName == pObj);
             if (kind == "role") q = q.Where(g => g.RoleId == roleId);
             else q = q.Where(g => g.UserId == userId);
 
@@ -743,7 +922,8 @@
             var rId = kind == "role" ? roleId : null;
             var uId = kind == "user" ? userId : null;
 
-            var result = await AccessConfig.SaveGrantsAsync(Me, modalDbId, rId, uId, finalCodes, initialExistingCodes, effect, starts, ends);
+            var parsedScopes = ObjectScope.ParseList(modalScope);
+            var result = await AccessConfig.SaveGrantsAsync(Me, modalDbId, rId, uId, finalCodes, initialExistingCodes, effect, starts, ends, targetScopes: parsedScopes);
             if (!result.Ok)
             {
                 Say(result.Error ?? "Failed to save grants.", true);
@@ -791,20 +971,20 @@
 
     private async Task ConfirmRemoveGrant()
     {
-        if (removingGrant is null) return;
-        var g = removingGrant;
-        removingGrant = null;
-        await Remove(g);
-    }
-
-    private async Task Remove(PermissionGrant g)
-    {
-        await using (var db = await DbFactory.CreateDbContextAsync())
+        if (removingRow is null) return;
+        var r = removingRow;
+        removingRow = null;
+        var ids = r.Grants.Select(x => x.Id).ToList();
+        if (ids.Count > 0)
         {
-            await db.PermissionGrants.Where(x => x.Id == g.Id).ExecuteDeleteAsync();
+            await using (var db = await DbFactory.CreateDbContextAsync())
+            {
+                await db.PermissionGrants.Where(x => ids.Contains(x.Id)).ExecuteDeleteAsync();
+            }
+            var subjectName = r.Grants.Count > 0 ? Subject(r.Grants[0]) : "Subject";
+            await AuditSvc.TryWriteAsync(Me, "Permission", "GrantRemoved", "Success", $"{r.Effect} {r.PermissionCode} ({r.Scopes.Count} scopes) from {subjectName}", r.DatabaseId, GetDbName(r.DatabaseId));
+            Say("Grant removed.");
+            await Load();
         }
-        await AuditSvc.TryWriteAsync(Me, "Permission", "GrantRemoved", "Success", $"{g.Effect} {g.PermissionCode} from {Subject(g)}", g.DatabaseId, GetDbName(g.DatabaseId));
-        Say("Grant removed.");
-        await Load();
     }
 }

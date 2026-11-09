@@ -56,12 +56,13 @@
         {
             <div class="table-wrap">
                 <table>
-                    <thead><tr><th>Name</th><th>Environment</th><th>Description</th><th></th></tr></thead>
+                    <thead><tr><th>Name</th><th>Engine</th><th>Environment</th><th>Description</th><th></th></tr></thead>
                     <tbody>
                         @foreach (var d in databases)
                         {
                             <tr>
                                 <td><b>@d.Name</b></td>
+                                <td><span class="badge @DatabaseEngineInfo.GetBadgeClass(d.Engine)">@DatabaseEngineInfo.GetDisplayName(d.Engine)</span></td>
                                 <td><span class="badge @EnvClass(d.Environment)">@d.Environment</span></td>
                                 <td class="muted">@d.Description</td>
                                 <td class="right"><a class="btn btn-sm btn-primary" href="query?db=@d.Id"><Icon Name="terminal" />Open</a></td>

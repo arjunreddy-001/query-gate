@@ -104,13 +104,17 @@ else
 
         <div class="row-inline ws-bar">
             <select @bind="CurrentDbId" style="width:auto;min-width:200px">
-                @foreach (var d in databases) { <option value="@d.Id">@d.Name · @d.Environment @(d.IsActive ? "" : "(Disabled)")</option> }
+                @foreach (var d in databases) { <option value="@d.Id">@d.Name · @d.Environment [@DatabaseEngineInfo.GetDisplayName(d.Engine)] @(d.IsActive ? "" : "(Disabled)")</option> }
             </select>
             <label class="chip-toggle @(showDisabledDatabases ? "active" : "")" title="Include disabled databases in database list">
                 <input type="checkbox" class="visually-hidden" @bind="showDisabledDatabases" @bind:after="ReloadDatabases" />
                 <span>Show disabled</span>
             </label>
-            @if (Current is not null && databases.FirstOrDefault(d => d.Id == Current.DatabaseId) is { } cd) { <span class="badge @EnvClass(cd.Environment)">@cd.Environment</span> }
+            @if (Current is not null && databases.FirstOrDefault(d => d.Id == Current.DatabaseId) is { } cd)
+            {
+                <span class="badge @EnvClass(cd.Environment)">@cd.Environment</span>
+                <span class="badge @DatabaseEngineInfo.GetBadgeClass(cd.Engine)">@DatabaseEngineInfo.GetDisplayName(cd.Engine)</span>
+            }
             @if (running) { <button class="btn btn-danger" @onclick="CancelRun"><Icon Name="stop" />Cancel</button> }
             else
             {
@@ -769,14 +773,28 @@ else
         if (!savedPreferences.LiveDiagnostics) return [];
         if (sql.Length > 4000) return [new SyntaxDiagnostic(1, 1, "Live diagnostics are unavailable for SQL over 4,000 characters.")];
         var diagnostics = new List<SyntaxDiagnostic>();
-        foreach (var batch in SqlGate.SplitBatches(sql))
+        var currentDb = databases.FirstOrDefault(d => d.Id == Current?.DatabaseId);
+        var engine = currentDb?.Engine ?? DatabaseEngine.SqlServer;
+
+        if (engine == DatabaseEngine.SqlServer)
         {
-            var parser = new TSql160Parser(initialQuotedIdentifiers: true);
-            using var reader = new StringReader(batch.Text);
-            parser.Parse(reader, out var errors);
-            diagnostics.AddRange(errors.Take(20 - diagnostics.Count)
-                .Select(e => new SyntaxDiagnostic(e.Line + batch.LineOffset, e.Column, e.Message)));
-            if (diagnostics.Count >= 20) break;
+            foreach (var batch in SqlGate.SplitBatches(sql, engine))
+            {
+                var parser = new TSql160Parser(initialQuotedIdentifiers: true);
+                using var reader = new StringReader(batch.Text);
+                parser.Parse(reader, out var errors);
+                diagnostics.AddRange(errors.Take(20 - diagnostics.Count)
+                    .Select(e => new SyntaxDiagnostic(e.Line + batch.LineOffset, e.Column, e.Message)));
+                if (diagnostics.Count >= 20) break;
+            }
+        }
+        else
+        {
+            var analysis = Gate.Analyze(sql, engine);
+            if (analysis.ParseErrors.Count > 0)
+            {
+                diagnostics.AddRange(analysis.ParseErrors.Take(20).Select(err => new SyntaxDiagnostic(1, 1, err)));
+            }
         }
         return diagnostics;
     }
@@ -925,7 +943,27 @@ else
 
     private async Task InsertSelect(DbObjectInfo o)
     {
-        var sql = o.Type is "Table" or "View" ? $"SELECT TOP 100 * FROM [{o.Schema}].[{o.Name}];" : $"EXEC [{o.Schema}].[{o.Name}];";
+        var currentDb = databases.FirstOrDefault(d => d.Id == Current?.DatabaseId);
+        var engine = currentDb?.Engine ?? DatabaseEngine.SqlServer;
+        string sql;
+        if (o.Type is "Table" or "View")
+        {
+            sql = engine switch
+            {
+                DatabaseEngine.PostgreSql => $"SELECT * FROM \"{o.Schema}\".\"{o.Name}\" LIMIT 100;",
+                DatabaseEngine.MySql or DatabaseEngine.MariaDb => $"SELECT * FROM `{o.Schema}`.`{o.Name}` LIMIT 100;",
+                _ => $"SELECT TOP 100 * FROM [{o.Schema}].[{o.Name}];"
+            };
+        }
+        else
+        {
+            sql = engine switch
+            {
+                DatabaseEngine.PostgreSql => $"SELECT * FROM \"{o.Schema}\".\"{o.Name}\"();",
+                DatabaseEngine.MySql or DatabaseEngine.MariaDb => $"CALL `{o.Schema}`.`{o.Name}`();",
+                _ => $"EXEC [{o.Schema}].[{o.Name}];"
+            };
+        }
         await LoadSql(sql, null);
     }
 
@@ -1031,11 +1069,24 @@ else
     private async Task FormatSql()
     {
         await SyncCurrent();
+        if (Current is null || string.IsNullOrWhiteSpace(Current.Sql)) return;
+        var currentDb = databases.FirstOrDefault(d => d.Id == Current.DatabaseId);
+        var engine = currentDb?.Engine ?? DatabaseEngine.SqlServer;
         try
         {
-            var parts = SqlGate.SplitBatches(Current!.Sql).Select(b => Gate.Format(b.Text, true, 4).Trim());
-            var formatted = string.Join("\nGO\n", parts);
-            await LoadSql(formatted, null);
+            if (engine == DatabaseEngine.SqlServer)
+            {
+                var parts = SqlGate.SplitBatches(Current.Sql, engine).Select(b => Gate.Format(b.Text, engine, true, 4).Trim());
+                var formatted = string.Join("\nGO\n\n", parts);
+                await LoadSql(formatted, null);
+            }
+            else
+            {
+                var parts = SqlGate.SplitBatches(Current.Sql, engine).Select(b => Gate.Format(b.Text, engine, true, 4).Trim());
+                var formatted = string.Join(";\n\n", parts);
+                if (!formatted.EndsWith(';')) formatted += ";";
+                await LoadSql(formatted, null);
+            }
         }
         catch (Exception ex) { Say(ex.Message, true); }
     }

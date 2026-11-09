@@ -2,6 +2,7 @@ using System.Security.Claims;
 using DbAccessManager.Data;
 using DbAccessManager.Security;
 using DbAccessManager.Services;
+using DbAccessManager.Services.Providers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.SqlClient;
@@ -156,6 +157,7 @@ public class AccessConfigurationSqlServerTests
         collection.AddAuthorization(o => o.AddPolicy("AuditAccess", p => p.RequireAuthenticatedUser().AddRequirements(new AuditRequirement())));
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Encryption:Key"] = Convert.ToBase64String(new byte[32]) }).Build();
         collection.AddSingleton(new CryptoService(config, new TestEnvironment()));
+        collection.AddSingleton<DatabaseProviderFactory>();
         collection.AddSingleton<DatabaseAdminService>();
         await using var services = collection.BuildServiceProvider();
         try { await test(services); }

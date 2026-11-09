@@ -48,6 +48,10 @@ namespace DbAccessManager.Data.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
 
+                    b.Property<string>("ObjectName")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
                     b.Property<string>("Permissions")
                         .IsRequired()
                         .HasMaxLength(1000)
@@ -64,6 +68,10 @@ namespace DbAccessManager.Data.Migrations
                     b.Property<string>("ReviewerId")
                         .HasMaxLength(450)
                         .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("Schema")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -331,6 +339,44 @@ namespace DbAccessManager.Data.Migrations
                     b.ToTable("DatabaseEnvironments");
                 });
 
+            modelBuilder.Entity("DbAccessManager.Data.DatabaseRoleScopeRule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("DatabaseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ExcludedObjects")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("IncludedObjects")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("RoleId")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RoleId");
+
+                    b.HasIndex("DatabaseId", "RoleId")
+                        .IsUnique();
+
+                    b.ToTable("DatabaseRoleScopeRules");
+                });
+
             modelBuilder.Entity("DbAccessManager.Data.EnvironmentDefaultGrant", b =>
                 {
                     b.Property<Guid>("EnvironmentId")
@@ -368,10 +414,25 @@ namespace DbAccessManager.Data.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("Engine")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)")
+                        .HasDefaultValue("SqlServer");
+
                     b.Property<string>("Environment")
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("ExcludedObjects")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("IncludedObjects")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
@@ -452,6 +513,10 @@ namespace DbAccessManager.Data.Migrations
                     b.Property<DateTimeOffset?>("EndsAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<string>("ObjectName")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
                     b.Property<string>("PermissionCode")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -462,6 +527,10 @@ namespace DbAccessManager.Data.Migrations
 
                     b.Property<string>("RoleId")
                         .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("Schema")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
 
                     b.Property<Guid?>("SourceRequestId")
                         .HasColumnType("uniqueidentifier");
@@ -476,9 +545,9 @@ namespace DbAccessManager.Data.Migrations
 
                     b.HasIndex("DatabaseId");
 
-                    b.HasIndex("RoleId", "DatabaseId", "PermissionCode");
+                    b.HasIndex("RoleId", "DatabaseId", "PermissionCode", "Schema", "ObjectName");
 
-                    b.HasIndex("UserId", "DatabaseId", "PermissionCode");
+                    b.HasIndex("UserId", "DatabaseId", "PermissionCode", "Schema", "ObjectName");
 
                     b.ToTable("PermissionGrants", t =>
                         {
@@ -886,6 +955,21 @@ namespace DbAccessManager.Data.Migrations
                     b.HasKey("UserId", "LoginProvider", "Name");
 
                     b.ToTable("AspNetUserTokens", (string)null);
+                });
+
+            modelBuilder.Entity("DbAccessManager.Data.DatabaseRoleScopeRule", b =>
+                {
+                    b.HasOne("DbAccessManager.Data.ManagedDatabase", null)
+                        .WithMany()
+                        .HasForeignKey("DatabaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityRole", null)
+                        .WithMany()
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("DbAccessManager.Data.EnvironmentDefaultGrant", b =>

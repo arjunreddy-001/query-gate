@@ -7,7 +7,7 @@
 <PageTitle>Databases · Query Gate</PageTitle>
 
 <div class="page-head">
-    <div><h1>Databases</h1><p>Register SQL Server targets. Connection strings are encrypted at rest.</p></div>
+    <div><h1>Databases</h1><p>Register SQL Server, PostgreSQL, MySQL and MariaDB targets. Connection strings are encrypted at rest.</p></div>
     <div class="actions">
         <label class="check small"><input type="checkbox" @bind="showDisabled" @bind:after="Load" />Show disabled</label>
         <button class="btn btn-primary" @onclick="New"><Icon Name="plus" />Register database</button>
@@ -19,17 +19,19 @@
     else
     {
         <div class="table-wrap"><table>
-            <thead><tr><th>Name</th><th>Environment</th><th>Timeout</th><th>Max rows</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>Engine</th><th>Environment</th><th>Timeout</th><th>Max rows</th><th>Status</th><th></th></tr></thead>
             <tbody>
             @foreach (var d in list)
             {
                 <tr>
                     <td><b>@d.Name</b><div class="faint small">@d.Description</div></td>
+                    <td><span class="badge @DatabaseEngineInfo.GetBadgeClass(d.Engine)">@DatabaseEngineInfo.GetDisplayName(d.Engine)</span></td>
                     <td><span class="badge @EnvClass(d.Environment)">@d.Environment</span></td>
                     <td>@d.DefaultTimeoutSeconds s</td>
                     <td>@d.MaxRows</td>
                     <td>@if (d.IsActive) { <span class="badge ok">Enabled</span> } else { <span class="badge bad">Disabled</span> }</td>
-                    <td class="right">
+                    <td class="right" style="white-space:nowrap">
+                        <button class="btn btn-sm btn-ghost" @onclick="() => OpenObjectRules(d)" title="Configure database and role level object rules"><Icon Name="shield" />Rules</button>
                         <button class="btn btn-sm" @onclick="() => TestRegistered(d.Id)">Test</button>
                         <button class="btn btn-sm" @onclick="() => Edit(d)">Edit</button>
                     </td>
@@ -42,29 +44,335 @@
 
 @if (open)
 {
-    <div class="modal-back"><div class="modal">
+    <div class="modal-back"><div class="modal" style="max-width:680px">
         <div class="modal-head"><h2>@(editId is null ? "Register database" : "Edit " + name)</h2></div>
         <div class="modal-body">
-            <div class="field"><label>Name</label><input type="text" @bind="name" /></div>
-            <div class="field"><label>Environment</label>
-                <select @bind="env">@foreach (var e in environments) { <option value="@e.Name">@e.Name</option> }</select></div>
+            <div class="grid-2">
+                <div class="field"><label>Engine</label>
+                    <select @bind="engine" @bind:after="OnEngineChanged">
+                        @foreach (var eng in DatabaseEngineInfo.AllEngines)
+                        {
+                            <option value="@eng">@DatabaseEngineInfo.GetDisplayName(eng)</option>
+                        }
+                    </select>
+                </div>
+                <div class="field"><label>Environment</label>
+                    <select @bind="env">@foreach (var e in environments) { <option value="@e.Name">@e.Name</option> }</select>
+                </div>
+            </div>
             @if (environments.Count == 0) { <div class="alert warn">Add an environment under Permissions before registering a database.</div> }
-            <div class="field"><label>Description</label><input type="text" @bind="description" /></div>
+            <div class="field"><label>Name</label><input type="text" @bind="name" placeholder="e.g. OrdersDb" /></div>
+            <div class="field"><label>Description</label><input type="text" @bind="description" placeholder="Optional description" /></div>
             <div class="field"><label>Connection string @(editId is null ? "" : "(leave blank to keep current)")</label>
-                <textarea style="min-height:70px" autocomplete="off" @bind="connection"></textarea></div>
+                <textarea style="min-height:70px" autocomplete="off" placeholder="@DatabaseEngineInfo.GetSampleConnectionString(engine)" @bind="connection"></textarea>
+                <div class="faint small" style="margin-top:4px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px">
+                    <span>Default port: <b>@DatabaseEngineInfo.GetDefaultPort(engine)</b></span>
+                    @if (string.IsNullOrWhiteSpace(connection))
+                    {
+                        <button type="button" class="btn-ghost btn btn-sm" style="padding:2px 8px;font-size:0.75rem" @onclick="FillSampleConnection">Use template</button>
+                    }
+                </div>
+            </div>
             <div class="grid-2">
                 <div class="field"><label>Default timeout (s)</label><input type="number" min="1" @bind="timeout" /></div>
                 <div class="field"><label>Max rows</label><input type="number" min="1" @bind="maxRows" /></div>
             </div>
-            @if (editId is not null) { <label class="check"><input type="checkbox" @bind="active" />Enabled</label> }
+
+            @if (editId is not null) { <label class="check" style="margin-top:12px"><input type="checkbox" @bind="active" />Enabled</label> }
             @if (testMsg is not null) { <div class="alert @(testOk ? "success" : "error")" style="margin-top:10px">@testMsg</div> }
         </div>
         <div class="modal-foot">
-            <button class="btn" @onclick="() => open = false">Cancel</button>
-            <button class="btn" disabled="@string.IsNullOrWhiteSpace(connection)" @onclick="Test">Test connection</button>
-            <button class="btn btn-primary" disabled="@(environments.Count == 0)" @onclick="Save">Save</button>
+            <button type="button" class="btn" @onclick="() => open = false">Cancel</button>
+            <button type="button" class="btn" disabled="@string.IsNullOrWhiteSpace(connection)" @onclick="Test">Test connection</button>
+            <button type="button" class="btn btn-primary" disabled="@(environments.Count == 0)" @onclick="Save">Save</button>
         </div>
     </div></div>
+}
+
+@if (managingRulesDb is not null)
+{
+    var hasDbConflict = ObjectScope.HasConflict(dbIncludedObjects, dbExcludedObjects, out var dbConflict);
+    var hasDbExclusions = !string.IsNullOrWhiteSpace(dbExcludedObjects);
+
+    <div class="modal-back">
+        <div class="modal wide" style="max-width:960px;width:min(960px, 96vw);min-height:680px;display:flex;flex-direction:column">
+            <div class="modal-head" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 24px">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                    <Icon Name="shield" Style="color:var(--brand);width:20px;height:20px" />
+                    <h2 style="margin:0;font-size:1.15rem">Object Rules: <b>@managingRulesDb.Name</b></h2>
+                    <span class="badge @EnvClass(managingRulesDb.Environment)">@managingRulesDb.Environment</span>
+                    <span class="badge @DatabaseEngineInfo.GetBadgeClass(managingRulesDb.Engine)">@DatabaseEngineInfo.GetDisplayName(managingRulesDb.Engine)</span>
+                </div>
+                <button type="button" class="btn btn-ghost btn-sm" @onclick="() => managingRulesDb = null" title="Close">✕</button>
+            </div>
+
+            <div style="display:flex;gap:10px;border-bottom:1px solid var(--line);padding:10px 24px;background:var(--bg-sunken)">
+                <button type="button"
+                        class="btn btn-sm @(rulesTab == "database" ? "btn-primary" : "btn-ghost")"
+                        @onclick='() => rulesTab = "database"'>
+                    <Icon Name="db" /> Database-Level Rules
+                </button>
+                <button type="button"
+                        class="btn btn-sm @(rulesTab == "roles" ? "btn-primary" : "btn-ghost")"
+                        @onclick='() => rulesTab = "roles"'>
+                    <Icon Name="users" /> Role-Level Rules (@roles.Count roles)
+                </button>
+            </div>
+
+            <div class="modal-body stack" style="flex:1;overflow-y:auto;padding:22px 24px 180px 24px;gap:18px">
+                @if (rulesTab == "database")
+                {
+                    <div class="stack" style="gap:16px">
+                        <div class="alert info small" style="display:flex;align-items:flex-start;gap:8px">
+                            <Icon Name="info" Style="width:16px;height:16px;flex-shrink:0;margin-top:2px" />
+                            <div>
+                                <b>Database-level boundaries</b> apply database-wide to all queries on <b>@managingRulesDb.Name</b>.
+                                Any excluded objects cannot be queried by anyone, even administrators. By default, all objects (<code>*</code>) are included.
+                            </div>
+                        </div>
+
+                        @if (hasDbConflict)
+                        {
+                            <div class="alert bad small" style="display:flex;align-items:center;gap:8px">
+                                <Icon Name="alert-triangle" Style="width:16px;height:16px;flex-shrink:0" />
+                                <div>
+                                    <b>Conflict Detected:</b> <code>@dbConflict</code> cannot be simultaneously included and excluded. Please resolve this before saving.
+                                </div>
+                            </div>
+                        }
+
+                        <div class="card" style="padding:16px;background:var(--bg-elev);border:1px solid var(--line);border-radius:12px">
+                            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                                <div>
+                                    <div style="font-weight:650;font-size:0.95rem;display:flex;align-items:center;gap:6px">
+                                        <span style="color:var(--ok)">●</span> Database Included Objects (Whitelist)
+                                    </div>
+                                    <div class="muted small">Objects and schemas allowed for queries on this database (<code>*</code> for entire database)</div>
+                                </div>
+                                <div style="display:flex;gap:6px">
+                                    <button type="button" class="btn btn-sm btn-ghost" @onclick='() => dbIncludedObjects = "*"' title="Include all">* (All Objects)</button>
+                                    <button type="button" class="btn btn-sm btn-ghost" @onclick='() => dbIncludedObjects = ""' title="Clear whitelist">Clear</button>
+                                </div>
+                            </div>
+                            <ObjectScopeSelector DatabaseId="@managingRulesDb.Id" @bind-Value="dbIncludedObjects" Placeholder="* (All objects included)" />
+                        </div>
+
+                        <div class="card" style="padding:16px;background:var(--bg-elev);border:1px solid var(--line);border-radius:12px">
+                            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                                <div>
+                                    <div style="font-weight:650;font-size:0.95rem;display:flex;align-items:center;gap:6px">
+                                        <span style="color:var(--bad)">●</span> Database Excluded Objects (Blacklist)
+                                    </div>
+                                    <div class="muted small">Objects completely blocked from all queries across all roles (e.g. <code>*.passwords</code>, <code>dbo.AuditLogs</code>)</div>
+                                </div>
+                                <div>
+                                    <button type="button"
+                                            class="btn btn-sm btn-ghost"
+                                            style="color:var(--bad);border-color:rgba(224,62,82,0.3)"
+                                            disabled="@(!hasDbExclusions)"
+                                            @onclick="RemoveAllDbExclusions"
+                                            title="Remove all database exclusions">
+                                        Remove all exclusions
+                                    </button>
+                                </div>
+                            </div>
+                            <ObjectScopeSelector DatabaseId="@managingRulesDb.Id" @bind-Value="dbExcludedObjects" IsExclusion="true" AllowEmpty="true" Placeholder="None (No objects excluded)" />
+                        </div>
+
+                        <div style="display:flex;align-items:center;gap:12px;margin-top:6px">
+                            <button type="button" class="btn btn-primary" disabled="@hasDbConflict" @onclick="SaveDbRules">
+                                <Icon Name="check" /> Save Database Rules
+                            </button>
+                            @if (hasDbExclusions)
+                            {
+                                <button type="button" class="btn btn-ghost" style="color:var(--bad)" @onclick="RemoveAllDbExclusions">
+                                    Remove all exclusions
+                                </button>
+                            }
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="stack" style="gap:16px">
+                        <div class="alert info small" style="display:flex;align-items:flex-start;gap:8px">
+                            <Icon Name="info" Style="width:16px;height:16px;flex-shrink:0;margin-top:2px" />
+                            <div>
+                                <b>Role-level object rules</b> define inclusion and exclusion boundaries for specific roles on <b>@managingRulesDb.Name</b>.
+                                Select a role below to configure its boundaries.
+                            </div>
+                        </div>
+
+                        <!-- Role Selector Pills Bar -->
+                        <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px">
+                            @foreach (var r in roles)
+                            {
+                                var isSel = r.Id == selectedRuleRoleId;
+                                var rule = roleScopeRules.FirstOrDefault(x => x.RoleId == r.Id);
+                                var hasInc = !string.IsNullOrWhiteSpace(rule?.IncludedObjects) && rule.IncludedObjects != "*";
+                                var hasExc = !string.IsNullOrWhiteSpace(rule?.ExcludedObjects);
+
+                                <button type="button"
+                                        class="btn btn-sm @(isSel ? "btn-primary" : "btn-ghost")"
+                                        style="display:inline-flex;align-items:center;gap:8px;padding:6px 14px;border-radius:100px"
+                                        @onclick="() => SelectRoleForRuleManagement(r.Id)">
+                                    <b>@r.Name</b>
+                                    @if (hasExc)
+                                    {
+                                        <span class="badge bad" style="font-size:10px;padding:1px 6px">Excluded</span>
+                                    }
+                                    else if (hasInc)
+                                    {
+                                        <span class="badge ok" style="font-size:10px;padding:1px 6px">Custom</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="muted small" style="font-size:10px;opacity:0.7">Default</span>
+                                    }
+                                </button>
+                            }
+                        </div>
+
+                        <!-- Selected Role Editor -->
+                        @if (activeRole is not null)
+                        {
+                            var hasRoleConflict = ObjectScope.HasConflict(roleIncludedObjects, roleExcludedObjects, out var roleConflict);
+                            var hasRoleExclusions = !string.IsNullOrWhiteSpace(roleExcludedObjects);
+
+                            <div class="card" style="padding:18px;background:var(--bg-elev);border:1px solid var(--line);border-radius:12px">
+                                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+                                    <div>
+                                        <h3 style="margin:0;font-size:1.05rem;display:flex;align-items:center;gap:8px">
+                                            <Icon Name="users" Style="color:var(--brand)" /> Configure Rules for Role: <b>@activeRole.Name</b>
+                                        </h3>
+                                        <div class="muted small">Define boundaries for members of <b>@activeRole.Name</b> on @managingRulesDb.Name.</div>
+                                    </div>
+                                    <div>
+                                        <button type="button" class="btn btn-sm btn-ghost" @onclick="ResetActiveRoleRuleToDefault" title="Reset this role to default (all objects, no exclusions)">
+                                            Reset to Default
+                                        </button>
+                                    </div>
+                                </div>
+
+                                @if (hasRoleConflict)
+                                {
+                                    <div class="alert bad small" style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+                                        <Icon Name="alert-triangle" Style="width:16px;height:16px;flex-shrink:0" />
+                                        <div>
+                                            <b>Conflict Detected:</b> <code>@roleConflict</code> cannot be both included and excluded for <b>@activeRole.Name</b>.
+                                        </div>
+                                    </div>
+                                }
+
+                                <div class="grid-2" style="gap:16px">
+                                    <div class="card" style="padding:14px;background:var(--bg-card);border:1px solid var(--line);border-radius:8px">
+                                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                                            <div style="font-weight:650;font-size:0.9rem">
+                                                <span style="color:var(--ok)">●</span> Included Objects
+                                            </div>
+                                            <div style="display:flex;gap:4px">
+                                                <button type="button" class="btn btn-sm btn-ghost" style="padding:1px 6px;font-size:11px" @onclick='() => roleIncludedObjects = "*"' title="Include all">* (All)</button>
+                                                <button type="button" class="btn btn-sm btn-ghost" style="padding:1px 6px;font-size:11px" @onclick='() => roleIncludedObjects = ""'>Clear</button>
+                                            </div>
+                                        </div>
+                                        <ObjectScopeSelector DatabaseId="@managingRulesDb.Id" @bind-Value="roleIncludedObjects" Placeholder="* (All objects included)" />
+                                    </div>
+
+                                    <div class="card" style="padding:14px;background:var(--bg-card);border:1px solid var(--line);border-radius:8px">
+                                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                                            <div style="font-weight:650;font-size:0.9rem">
+                                                <span style="color:var(--bad)">●</span> Excluded Objects
+                                            </div>
+                                            <div>
+                                                <button type="button"
+                                                        class="btn btn-sm btn-ghost"
+                                                        style="color:var(--bad);padding:1px 6px;font-size:11px"
+                                                        disabled="@(!hasRoleExclusions)"
+                                                        @onclick="RemoveAllRoleExclusions"
+                                                        title="Remove all exclusions for this role">
+                                                    Remove all exclusions
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <ObjectScopeSelector DatabaseId="@managingRulesDb.Id" @bind-Value="roleExcludedObjects" IsExclusion="true" AllowEmpty="true" Placeholder="None (No objects excluded)" />
+                                    </div>
+                                </div>
+
+                                <div style="display:flex;align-items:center;gap:10px;margin-top:16px">
+                                    <button type="button" class="btn btn-primary" disabled="@hasRoleConflict" @onclick="SaveCurrentRoleRule">
+                                        <Icon Name="check" /> Save @activeRole.Name Rules
+                                    </button>
+                                    @if (hasRoleExclusions)
+                                    {
+                                        <button type="button" class="btn btn-ghost" style="color:var(--bad)" @onclick="RemoveAllRoleExclusions">
+                                            Remove all exclusions
+                                        </button>
+                                    }
+                                </div>
+                            </div>
+                        }
+
+                        <!-- Roles Overview Table -->
+                        <div class="card" style="padding:14px;background:var(--bg-card);border:1px solid var(--line);border-radius:10px">
+                            <div style="font-weight:650;margin-bottom:8px;font-size:0.88rem">Team Roles Overview on @managingRulesDb.Name</div>
+                            <div class="table-wrap"><table>
+                                <thead>
+                                    <tr><th>Role</th><th>Included Objects</th><th>Excluded Objects</th><th></th></tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var r in roles)
+                                    {
+                                        var rule = roleScopeRules.FirstOrDefault(x => x.RoleId == r.Id);
+                                        var hasInc = !string.IsNullOrWhiteSpace(rule?.IncludedObjects) && rule.IncludedObjects != "*";
+                                        var hasExc = !string.IsNullOrWhiteSpace(rule?.ExcludedObjects);
+                                        var isCur = r.Id == selectedRuleRoleId;
+
+                                        <tr style="@(isCur ? "background:var(--brand-soft);" : "")">
+                                            <td><b>@r.Name</b></td>
+                                            <td>
+                                                @if (hasInc)
+                                                {
+                                                    <span class="badge ok" style="font-family:monospace;font-size:11px">@rule!.IncludedObjects</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="muted small">All objects (*)</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (hasExc)
+                                                {
+                                                    <span class="badge bad" style="font-family:monospace;font-size:11px">@rule!.ExcludedObjects</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="muted small">None</span>
+                                                }
+                                            </td>
+                                            <td class="right">
+                                                @if (!isCur)
+                                                {
+                                                    <button type="button" class="btn btn-sm btn-ghost" @onclick="() => SelectRoleForRuleManagement(r.Id)">Configure</button>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge" style="font-size:11px">Editing</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table></div>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <div class="modal-foot" style="padding:14px 24px">
+                <button type="button" class="btn btn-primary" @onclick="() => managingRulesDb = null">Close</button>
+            </div>
+        </div>
+    </div>
 }
 
 @code {
@@ -73,8 +381,19 @@
     private bool open, active = true, testOk, showDisabled;
     private Guid? editId;
     private string name = "", env = "Development", description = "", connection = "";
+    private DatabaseEngine engine = DatabaseEngine.SqlServer;
     private string? testMsg;
     private int timeout = 30, maxRows = 1000;
+    private string includedObjects = "*", excludedObjects = "";
+
+    private ManagedDatabase? managingRulesDb;
+    private string rulesTab = "database";
+    private string dbIncludedObjects = "*", dbExcludedObjects = "";
+    private List<Microsoft.AspNetCore.Identity.IdentityRole> roles = [];
+    private List<DatabaseRoleScopeRule> roleScopeRules = [];
+    private string selectedRuleRoleId = "";
+    private Microsoft.AspNetCore.Identity.IdentityRole? activeRole => roles.FirstOrDefault(r => r.Id == selectedRuleRoleId);
+    private string roleIncludedObjects = "*", roleExcludedObjects = "";
 
     protected override async Task OnLoadAsync() => await Load();
 
@@ -82,15 +401,58 @@
     {
         await using var db = await DbFactory.CreateDbContextAsync();
         environments = await db.DatabaseEnvironments.AsNoTracking().OrderBy(e => e.Name).ToListAsync();
+        roles = await db.Roles.AsNoTracking().OrderBy(r => r.Name).ToListAsync();
         var query = db.ManagedDatabases.AsNoTracking().AsQueryable();
         if (!showDisabled) query = query.Where(d => d.IsActive);
         list = await query.OrderBy(d => d.Environment).ThenBy(d => d.Name).ToListAsync();
     }
 
-    private void New() { editId = null; name = description = connection = ""; env = environments.FirstOrDefault(e => e.Name == "Development")?.Name ?? environments.FirstOrDefault()?.Name ?? ""; timeout = 30; maxRows = 1000; active = true; testMsg = null; open = true; }
-    private void Edit(ManagedDatabase d) { editId = d.Id; name = d.Name; env = d.Environment; description = d.Description ?? ""; connection = ""; timeout = d.DefaultTimeoutSeconds; maxRows = d.MaxRows; active = d.IsActive; testMsg = null; open = true; }
+    private void New()
+    {
+        editId = null;
+        name = description = connection = "";
+        engine = DatabaseEngine.SqlServer;
+        env = environments.FirstOrDefault(e => e.Name == "Development")?.Name ?? environments.FirstOrDefault()?.Name ?? "";
+        timeout = 30;
+        maxRows = 1000;
+        active = true;
+        testMsg = null;
+        includedObjects = "*";
+        excludedObjects = "";
+        open = true;
+    }
 
-    private async Task Test() { (testOk, testMsg) = await DbAdmin.TestAsync(connection); }
+    private void Edit(ManagedDatabase d)
+    {
+        editId = d.Id;
+        name = d.Name;
+        engine = d.Engine;
+        env = d.Environment;
+        description = d.Description ?? "";
+        connection = "";
+        timeout = d.DefaultTimeoutSeconds;
+        maxRows = d.MaxRows;
+        active = d.IsActive;
+        includedObjects = string.IsNullOrWhiteSpace(d.IncludedObjects) ? "*" : d.IncludedObjects;
+        excludedObjects = d.ExcludedObjects ?? "";
+        testMsg = null;
+        open = true;
+    }
+
+    private void OnEngineChanged()
+    {
+        testMsg = null;
+    }
+
+    private void FillSampleConnection()
+    {
+        connection = DatabaseEngineInfo.GetSampleConnectionString(engine);
+    }
+
+    private async Task Test()
+    {
+        (testOk, testMsg) = await DbAdmin.TestAsync(connection, engine);
+    }
 
     private async Task TestRegistered(Guid id)
     {
@@ -101,10 +463,85 @@
     private async Task Save()
     {
         var result = editId is null
-            ? await DbAdmin.RegisterAsync(Me, name.Trim(), env, description, connection, timeout, maxRows)
-            : await DbAdmin.UpdateAsync(Me, editId.Value, name.Trim(), env, description, string.IsNullOrWhiteSpace(connection) ? null : connection, timeout, maxRows, active);
+            ? await DbAdmin.RegisterAsync(Me, name.Trim(), env, description, connection, timeout, maxRows, engine, includedObjects, excludedObjects)
+            : await DbAdmin.UpdateAsync(Me, editId.Value, name.Trim(), env, description, string.IsNullOrWhiteSpace(connection) ? null : connection, timeout, maxRows, active, engine, includedObjects, excludedObjects);
         Say(result, "Saved.");
         if (result.Ok) { open = false; await Load(); }
         else { testOk = false; testMsg = result.Error; }
+    }
+
+    private async Task OpenObjectRules(ManagedDatabase d)
+    {
+        managingRulesDb = d;
+        rulesTab = "database";
+        dbIncludedObjects = string.IsNullOrWhiteSpace(d.IncludedObjects) ? "*" : d.IncludedObjects;
+        dbExcludedObjects = d.ExcludedObjects ?? "";
+        await using var db = await DbFactory.CreateDbContextAsync();
+        roles = await db.Roles.AsNoTracking().OrderBy(r => r.Name).ToListAsync();
+        roleScopeRules = await DbAdmin.GetRoleScopeRulesAsync(d.Id);
+        var firstRole = roles.FirstOrDefault();
+        if (firstRole is not null)
+        {
+            SelectRoleForRuleManagement(firstRole.Id);
+        }
+    }
+
+    private void SelectRoleForRuleManagement(string roleId)
+    {
+        selectedRuleRoleId = roleId;
+        var r = roles.FirstOrDefault(x => x.Id == roleId);
+        if (r is null) return;
+        var rule = roleScopeRules.FirstOrDefault(x => x.RoleId == roleId);
+        roleIncludedObjects = string.IsNullOrWhiteSpace(rule?.IncludedObjects) ? "*" : rule.IncludedObjects;
+        roleExcludedObjects = rule?.ExcludedObjects ?? "";
+    }
+
+    private async Task SaveDbRules()
+    {
+        if (managingRulesDb is null) return;
+        var res = await DbAdmin.UpdateDatabaseObjectRulesAsync(Me, managingRulesDb.Id, dbIncludedObjects, dbExcludedObjects);
+        Say(res, "Database object rules updated.");
+        if (res.Ok)
+        {
+            managingRulesDb.IncludedObjects = dbIncludedObjects;
+            managingRulesDb.ExcludedObjects = dbExcludedObjects;
+            await Load();
+        }
+    }
+
+    private async Task RemoveAllDbExclusions()
+    {
+        dbExcludedObjects = "";
+        await SaveDbRules();
+    }
+
+    private async Task SaveCurrentRoleRule()
+    {
+        if (managingRulesDb is null || activeRole is null) return;
+        var res = await DbAdmin.SaveRoleScopeRuleAsync(Me, managingRulesDb.Id, activeRole.Id, roleIncludedObjects, roleExcludedObjects);
+        Say(res, $"Role scope rules saved for {activeRole.Name}.");
+        if (res.Ok)
+        {
+            roleScopeRules = await DbAdmin.GetRoleScopeRulesAsync(managingRulesDb.Id);
+        }
+    }
+
+    private async Task RemoveAllRoleExclusions()
+    {
+        roleExcludedObjects = "";
+        await SaveCurrentRoleRule();
+    }
+
+    private async Task ResetActiveRoleRuleToDefault()
+    {
+        if (managingRulesDb is null || activeRole is null) return;
+        var res = await DbAdmin.DeleteRoleScopeRuleAsync(Me, managingRulesDb.Id, activeRole.Id);
+        Say(res, $"Reset rules for {activeRole.Name} to default.");
+        if (res.Ok)
+        {
+            roleScopeRules = await DbAdmin.GetRoleScopeRulesAsync(managingRulesDb.Id);
+            roleIncludedObjects = "*";
+            roleExcludedObjects = "";
+        }
     }
 }

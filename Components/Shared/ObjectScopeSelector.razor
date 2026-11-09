@@ -1,0 +1,479 @@
+@namespace DbAccessManager.Components.Shared
+@using DbAccessManager.Services
+@inject MetadataService MetadataSvc
+@inject IJSRuntime Js
+
+<div class="combobox-wrapper" style="@(isOpen ? "position:relative;z-index:1045;" + Style : Style)">
+    @if (SelectedScopes.Count > 0)
+    {
+        <div class="scope-chips-bar" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">
+            @foreach (var s in SelectedScopes)
+            {
+                <span class="badge" style="display:inline-flex;align-items:center;gap:6px;font-family:monospace;padding:3px 8px;font-size:12px;background:@(IsExclusion ? "rgba(239,68,68,0.08)" : "var(--bg-card)");border:1px solid @(IsExclusion ? "rgba(239,68,68,0.35)" : "var(--border-color)");border-radius:6px;color:@(IsExclusion ? "#ef4444" : "inherit")">
+                    @if (s == "*")
+                    {
+                        <Icon Name="db" Style="@(IsExclusion ? "width:12px;height:12px;color:#ef4444" : "width:12px;height:12px;color:var(--brand)")" />
+                        <span>* (All Objects)</span>
+                    }
+                    else if (s.EndsWith(".*"))
+                    {
+                        <Icon Name="grid" Style="@(IsExclusion ? "width:12px;height:12px;color:#ef4444" : "width:12px;height:12px;color:var(--brand)")" />
+                        <span>@s</span>
+                    }
+                    else
+                    {
+                        <Icon Name="table" Style="@(IsExclusion ? "width:12px;height:12px;color:#ef4444" : "width:12px;height:12px;color:var(--text-muted)")" />
+                        <span>@s</span>
+                    }
+                    <button type="button"
+                            style="background:none;border:none;padding:0;cursor:pointer;color:@(IsExclusion ? "#ef4444" : "var(--text-muted)");font-size:14px;line-height:1;display:inline-flex;align-items:center"
+                            @onclick="() => RemoveScope(s)"
+                            @onclick:stopPropagation="true"
+                            title="Remove @s">×</button>
+                </span>
+            }
+            <button type="button" class="btn btn-sm btn-ghost" style="padding:1px 8px;font-size:11px;color:@(IsExclusion ? "#ef4444" : "inherit")" @onclick="ClearAll">
+                @(IsExclusion ? "Remove all exclusions" : "Clear all")
+            </button>
+        </div>
+    }
+    else if (IsExclusion || AllowEmpty)
+    {
+        <div class="scope-chips-bar" style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+            <span class="muted small" style="font-style:italic">@(IsExclusion ? "None (No objects excluded)" : "None")</span>
+        </div>
+    }
+
+    <div class="combobox-input-wrap">
+        <input type="text"
+               class="combobox-input"
+               placeholder="@(SelectedScopes.Count > 0 ? "Add another object or wildcard…" : Placeholder)"
+               value="@searchText"
+               @oninput="OnInputChanged"
+               @onfocus="OnFocus"
+               @onkeydown="OnKeyDown"
+               disabled="@(Disabled || DatabaseId == Guid.Empty)"
+               style="padding-right:28px;font-family:monospace" />
+        @if (!string.IsNullOrWhiteSpace(searchText))
+        {
+            <button type="button" class="combobox-clear" @onclick="() => { searchText = string.Empty; highlightedIndex = -1; }" title="Clear input">×</button>
+        }
+        else
+        {
+            <span class="combobox-caret" @onclick="ToggleDropdown">▾</span>
+        }
+    </div>
+
+    @if (isOpen && !Disabled && DatabaseId != Guid.Empty)
+    {
+        <div class="combobox-backdrop" @onclick="CloseDropdown"></div>
+        <div class="combobox-menu" @ref="menuRef" style="max-height:250px;min-width:320px;z-index:1100">
+            @if (loading)
+            {
+                <div class="combobox-empty" style="padding:16px"><span class="spinner"></span> Loading database objects…</div>
+            }
+            else
+            {
+                var flatList = GetFlatSuggestions();
+                var filteredWildcards = GetFilteredWildcards();
+                var filteredObjects = GetFilteredObjects();
+                var runningIndex = 0;
+
+                @if (filteredWildcards.Count > 0)
+                {
+                    <div class="combobox-group-title">Wildcard Scopes</div>
+                    @foreach (var w in filteredWildcards)
+                    {
+                        var optIndex = runningIndex++;
+                        var isSel = SelectedScopes.Contains(w.Scope, StringComparer.OrdinalIgnoreCase);
+                        var isHighlighted = highlightedIndex == optIndex;
+                        <div class="combobox-option @(isSel ? "selected" : "") @(isHighlighted ? "highlighted" : "")"
+                             data-index="@optIndex"
+                             @onclick="async () => { await ToggleScope(w.Scope); isOpen = false; }">
+                            <Icon Name="db" Style="color:var(--brand);width:14px;height:14px" />
+                            <b style="font-family:monospace">@w.Scope</b>
+                            @if (isSel)
+                            {
+                                <span class="badge ok" style="font-size:10px;padding:1px 5px;margin-left:6px">Selected</span>
+                            }
+                            <span class="muted small" style="margin-left:auto">@w.Description</span>
+                        </div>
+                    }
+                }
+
+                @if (filteredObjects.Count > 0)
+                {
+                    <div class="combobox-group-title">Database Objects (@filteredObjects.Count)</div>
+                    @foreach (var o in filteredObjects.Take(100))
+                    {
+                        var optIndex = runningIndex++;
+                        var scope = $"{o.Schema}.{o.Name}";
+                        var isSel = SelectedScopes.Contains(scope, StringComparer.OrdinalIgnoreCase) ||
+                                    (o.Schema.Equals("dbo", StringComparison.OrdinalIgnoreCase) && SelectedScopes.Contains(o.Name, StringComparer.OrdinalIgnoreCase));
+                        var isHighlighted = highlightedIndex == optIndex;
+                        <div class="combobox-option @(isSel ? "selected" : "") @(isHighlighted ? "highlighted" : "")"
+                             data-index="@optIndex"
+                             @onclick="async () => { await ToggleScope(scope); isOpen = false; }">
+                            <Icon Name="@GetIconForType(o.Type)" Style="width:14px;height:14px" />
+                            <span style="font-family:monospace">@o.Schema.<b>@o.Name</b></span>
+                            @if (isSel)
+                            {
+                                <span class="badge ok" style="font-size:10px;padding:1px 5px;margin-left:6px">Selected</span>
+                            }
+                            <span class="badge @GetTypeBadgeClass(o.Type)" style="font-size:10px;padding:0 5px;margin-left:auto">@o.Type</span>
+                        </div>
+                    }
+                    @if (filteredObjects.Count > 100)
+                    {
+                        <div class="muted small" style="padding:8px 12px;text-align:center;background:var(--bg-card);border-top:1px solid var(--border-color)">
+                            Showing top 100 matches. Type to refine…
+                        </div>
+                    }
+                }
+
+                @if (filteredWildcards.Count == 0 && filteredObjects.Count == 0)
+                {
+                    <div class="combobox-empty" style="padding:16px">
+                        @if (!string.IsNullOrWhiteSpace(searchText))
+                        {
+                            <div>Press <b>Enter</b> to add <code>@searchText.Trim()</code> as custom scope</div>
+                        }
+                        else
+                        {
+                            <div>No matching objects found.</div>
+                        }
+                    </div>
+                }
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public Guid DatabaseId { get; set; }
+    [Parameter] public string Value { get; set; } = "*";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public List<string>? Values { get; set; }
+    [Parameter] public EventCallback<List<string>> ValuesChanged { get; set; }
+    [Parameter] public EventCallback<string> OnChange { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public string Placeholder { get; set; } = "* (All Objects)";
+    [Parameter] public string? Style { get; set; }
+    [Parameter] public bool IsExclusion { get; set; }
+    [Parameter] public bool AllowEmpty { get; set; }
+    [Parameter] public IReadOnlyList<string>? DisallowedScopes { get; set; }
+
+    public List<string> SelectedScopes { get; private set; } = [];
+
+    private ElementReference menuRef;
+    private bool isOpen;
+    private bool loading;
+    private string searchText = "";
+    private int highlightedIndex = -1;
+    private Guid loadedDbId;
+    private List<DbObjectInfo> objects = [];
+    private string lastSyncedValue = "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var defaultToAll = !AllowEmpty && !IsExclusion;
+        if (Values != null)
+        {
+            var parsed = ObjectScope.ParseList(Values, defaultToAll: defaultToAll);
+            if (!SelectedScopes.SequenceEqual(parsed, StringComparer.OrdinalIgnoreCase))
+            {
+                SelectedScopes = parsed;
+            }
+        }
+        else if (Value != lastSyncedValue)
+        {
+            lastSyncedValue = Value;
+            SelectedScopes = ObjectScope.ParseList(Value, defaultToAll: defaultToAll);
+        }
+
+        if (DatabaseId != Guid.Empty && DatabaseId != loadedDbId)
+        {
+            await LoadMetadataAsync(DatabaseId);
+        }
+    }
+
+    private async Task LoadMetadataAsync(Guid dbId)
+    {
+        loadedDbId = dbId;
+        loading = true;
+        try
+        {
+            objects = await MetadataSvc.GetAsync(dbId);
+        }
+        catch
+        {
+            objects = [];
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private void OnFocus()
+    {
+        isOpen = true;
+        highlightedIndex = -1;
+    }
+
+    private void ToggleDropdown()
+    {
+        if (isOpen)
+        {
+            CloseDropdown();
+        }
+        else
+        {
+            isOpen = true;
+            highlightedIndex = -1;
+        }
+    }
+
+    private void CloseDropdown()
+    {
+        isOpen = false;
+        highlightedIndex = -1;
+    }
+
+    private void OnInputChanged(ChangeEventArgs e)
+    {
+        searchText = e.Value?.ToString() ?? "";
+        isOpen = true;
+        highlightedIndex = 0;
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        var flat = GetFlatSuggestions();
+        if (e.Key == "ArrowDown")
+        {
+            if (!isOpen)
+            {
+                isOpen = true;
+                highlightedIndex = 0;
+            }
+            else if (flat.Count > 0)
+            {
+                highlightedIndex = (highlightedIndex + 1) % flat.Count;
+            }
+            if (flat.Count > 0)
+            {
+                await Js.InvokeVoidAsync("dbam.scrollHighlightedOption", menuRef, highlightedIndex);
+            }
+        }
+        else if (e.Key == "ArrowUp")
+        {
+            if (isOpen && flat.Count > 0)
+            {
+                highlightedIndex = (highlightedIndex - 1 + flat.Count) % flat.Count;
+                await Js.InvokeVoidAsync("dbam.scrollHighlightedOption", menuRef, highlightedIndex);
+            }
+        }
+        else if (e.Key is "Enter" or "," or "Tab")
+        {
+            if (isOpen && highlightedIndex >= 0 && highlightedIndex < flat.Count)
+            {
+                await ToggleScope(flat[highlightedIndex].Scope);
+                isOpen = false;
+                highlightedIndex = -1;
+            }
+            else if (!string.IsNullOrWhiteSpace(searchText))
+            {
+                await AddCustomScope(searchText.Trim().TrimEnd(','));
+                isOpen = false;
+                highlightedIndex = -1;
+            }
+            else if (e.Key == "Tab")
+            {
+                CloseDropdown();
+            }
+        }
+        else if (e.Key == "Escape")
+        {
+            CloseDropdown();
+        }
+        else if (e.Key == "Backspace" && string.IsNullOrEmpty(searchText) && SelectedScopes.Count > 0 && SelectedScopes[0] != "*")
+        {
+            var last = SelectedScopes[^1];
+            await RemoveScope(last);
+        }
+    }
+
+    private async Task ToggleScope(string scope)
+    {
+        if (string.IsNullOrWhiteSpace(scope)) return;
+        if (DisallowedScopes != null && DisallowedScopes.Contains(scope, StringComparer.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (IsExclusion || AllowEmpty)
+        {
+            if (scope == "*")
+            {
+                if (SelectedScopes.Contains("*")) SelectedScopes.Remove("*");
+                else SelectedScopes = ["*"];
+            }
+            else
+            {
+                SelectedScopes.Remove("*");
+                if (SelectedScopes.Contains(scope, StringComparer.OrdinalIgnoreCase))
+                {
+                    SelectedScopes.RemoveAll(s => string.Equals(s, scope, StringComparison.OrdinalIgnoreCase));
+                }
+                else
+                {
+                    SelectedScopes.Add(scope);
+                }
+            }
+        }
+        else
+        {
+            if (scope == "*")
+            {
+                SelectedScopes = ["*"];
+            }
+            else
+            {
+                SelectedScopes.Remove("*");
+                if (SelectedScopes.Contains(scope, StringComparer.OrdinalIgnoreCase))
+                {
+                    SelectedScopes.RemoveAll(s => string.Equals(s, scope, StringComparison.OrdinalIgnoreCase));
+                    if (SelectedScopes.Count == 0) SelectedScopes.Add("*");
+                }
+                else
+                {
+                    SelectedScopes.Add(scope);
+                }
+            }
+        }
+
+        searchText = "";
+        highlightedIndex = -1;
+        await NotifyChanged();
+    }
+
+    private async Task AddCustomScope(string scope)
+    {
+        if (string.IsNullOrWhiteSpace(scope)) return;
+        var (s, o) = ObjectScope.Parse(scope);
+        var formatted = ObjectScope.Format(s, o);
+        await ToggleScope(formatted);
+    }
+
+    private async Task RemoveScope(string scope)
+    {
+        SelectedScopes.RemoveAll(s => string.Equals(s, scope, StringComparison.OrdinalIgnoreCase));
+        if (!AllowEmpty && !IsExclusion && SelectedScopes.Count == 0) SelectedScopes.Add("*");
+        await NotifyChanged();
+    }
+
+    private async Task ClearAll()
+    {
+        if (AllowEmpty || IsExclusion)
+        {
+            SelectedScopes.Clear();
+        }
+        else
+        {
+            SelectedScopes = ["*"];
+        }
+        searchText = "";
+        await NotifyChanged();
+    }
+
+    private async Task NotifyChanged()
+    {
+        var joined = string.Join(", ", SelectedScopes);
+        lastSyncedValue = joined;
+        Value = joined;
+        await ValueChanged.InvokeAsync(joined);
+        if (ValuesChanged.HasDelegate)
+        {
+            await ValuesChanged.InvokeAsync(new List<string>(SelectedScopes));
+        }
+        await OnChange.InvokeAsync(joined);
+    }
+
+    private sealed record WildcardItem(string Scope, string Description);
+    private sealed record SuggestionItem(string Scope, string Label, string Type);
+
+    private List<SuggestionItem> GetFlatSuggestions()
+    {
+        var list = new List<SuggestionItem>();
+        foreach (var w in GetFilteredWildcards())
+        {
+            list.Add(new(w.Scope, w.Scope, "Wildcard"));
+        }
+        foreach (var o in GetFilteredObjects().Take(100))
+        {
+            list.Add(new($"{o.Schema}.{o.Name}", $"{o.Schema}.{o.Name}", o.Type));
+        }
+        return list;
+    }
+
+    private List<WildcardItem> GetFilteredWildcards()
+    {
+        var list = new List<WildcardItem>();
+        if (!IsExclusion)
+        {
+            list.Add(new("*", "All objects (Entire database)"));
+        }
+
+        var distinctSchemas = objects
+            .Select(o => o.Schema)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(s => s);
+
+        foreach (var s in distinctSchemas)
+        {
+            list.Add(new($"{s}.*", $"All objects in '{s}'"));
+        }
+
+        if (string.IsNullOrWhiteSpace(searchText))
+        {
+            return list;
+        }
+
+        return list.Where(w =>
+            w.Scope.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+            w.Description.Contains(searchText, StringComparison.OrdinalIgnoreCase)
+        ).ToList();
+    }
+
+    private List<DbObjectInfo> GetFilteredObjects()
+    {
+        if (string.IsNullOrWhiteSpace(searchText))
+        {
+            return objects;
+        }
+
+        return objects.Where(o =>
+            o.Name.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+            o.Schema.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+            $"{o.Schema}.{o.Name}".Contains(searchText, StringComparison.OrdinalIgnoreCase)
+        ).ToList();
+    }
+
+    private static string GetIconForType(string type) => type?.ToLowerInvariant() switch
+    {
+        "view" => "eye",
+        "procedure" => "code",
+        "function" => "terminal",
+        _ => "table"
+    };
+
+    private static string GetTypeBadgeClass(string type) => type?.ToLowerInvariant() switch
+    {
+        "view" => "badge-info",
+        "procedure" => "warn",
+        "function" => "brand",
+        _ => "ok"
+    };
+}

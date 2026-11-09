@@ -279,25 +279,27 @@ public sealed class RequestService(
     SettingsService settings,
     NotificationService notifications,
     AuditService audit,
-    ExecutionService execution,
-    PermissionService permissions)
+    ExecutionService execution)
 {
-    public async Task<OpResult> SubmitAccessAsync(Actor actor, Guid databaseId, string[] perms, string justification, string? ticket, int hours, bool extension)
+    public async Task<OpResult> SubmitAccessAsync(Actor actor, Guid databaseId, string[] perms, string justification, string? ticket, int hours, bool extension, string? targetScope = null)
     {
         if (perms.Length == 0 || string.IsNullOrWhiteSpace(justification)) return OpResult.Fail("Select permissions and provide a justification.");
         if (perms.Any(p => !Perm.IsValid(p))) return OpResult.Fail("Unknown permission requested.");
         if (hours is < 1 or > 24 * 90) return OpResult.Fail("Duration must be between 1 hour and 90 days.");
+        var (schema, obj) = Security.ObjectScope.Parse(targetScope);
         await using var db = await factory.CreateDbContextAsync();
         var req = new AccessRequest
         {
             RequesterId = actor.UserId, DatabaseId = databaseId, Permissions = string.Join(",", perms.Select(p => p.ToUpperInvariant()).Distinct()),
+            Schema = schema, ObjectName = obj,
             Justification = justification.Trim(), Ticket = ticket?.Trim(), DurationHours = hours, IsExtension = extension
         };
         db.AccessRequests.Add(req);
         db.RequestStatusHistory.Add(new RequestStatusHistory { RequestType = "Access", RequestId = req.Id, Status = RequestStatus.Pending, ChangedBy = actor.UserName });
         await db.SaveChangesAsync();
-        await audit.TryWriteAsync(actor, "Request", "SubmitAccess", "Success", $"{req.Permissions} {hours}h", databaseId, null, req.Id);
-        await notifications.NotifyRoleAsync(Roles.Admin, "New access request", $"{actor.UserName} requested {req.Permissions}.", "/admin/approvals", actor.UserId);
+        var scopeStr = Security.ObjectScope.Format(schema, obj);
+        await audit.TryWriteAsync(actor, "Request", "SubmitAccess", "Success", $"{req.Permissions} [{scopeStr}] {hours}h", databaseId, null, req.Id);
+        await notifications.NotifyRoleAsync(Roles.Admin, "New access request", $"{actor.UserName} requested {req.Permissions} on {scopeStr}.", "/admin/approvals", actor.UserId);
         return OpResult.Success(req.Id.ToString());
     }
 
@@ -320,7 +322,9 @@ public sealed class RequestService(
             {
                 db.PermissionGrants.Add(new PermissionGrant
                 {
-                    UserId = req.RequesterId, DatabaseId = req.DatabaseId, PermissionCode = code, Effect = PermissionEffect.Allow,
+                    UserId = req.RequesterId, DatabaseId = req.DatabaseId, PermissionCode = code,
+                    Schema = req.Schema, ObjectName = req.ObjectName,
+                    Effect = PermissionEffect.Allow,
                     StartsAt = now, EndsAt = ends, SourceRequestId = req.Id
                 });
             }

@@ -301,6 +301,16 @@ window.dbam = (function () {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     },
+    scrollHighlightedOption: function (target, index) {
+      try {
+        const menu = typeof target === "string" ? document.querySelector(target) : target;
+        if (!menu) return;
+        const option = menu.querySelector(`[data-index="${index}"]`);
+        if (option) {
+          option.scrollIntoView({ block: "nearest" });
+        }
+      } catch (e) {}
+    },
     copy: (text) =>
       navigator.clipboard
         ? navigator.clipboard.writeText(text)
@@ -585,11 +595,25 @@ window.dbam = (function () {
     });
   }
 
+  let comboboxHandlerAttached = false;
+  function attachComboboxKeydownHandler() {
+    if (comboboxHandlerAttached) return;
+    comboboxHandlerAttached = true;
+    document.addEventListener("keydown", function (e) {
+      if (e.target && e.target.classList && e.target.classList.contains("combobox-input")) {
+        if (e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+        }
+      }
+    });
+  }
+
   function init() {
     attachPasswordToggles();
     revealPasskeyButtons();
     attachDocsNavHighlight();
     attachCodeCopyButtons();
+    attachComboboxKeydownHandler();
   }
 
   if (document.readyState === 'loading') {

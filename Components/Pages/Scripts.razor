@@ -25,7 +25,22 @@
                     {
                         <tr>
                             <td><b>@r.Title</b><div class="faint small">@Ago(r.CreatedAt)</div></td>
-                            <td>@DbName(r.DatabaseId)</td>
+                            <td>
+                                @if (databases.FirstOrDefault(d => d.Id == r.DatabaseId) is { } d)
+                                {
+                                    <div>
+                                        <b>@d.Name</b>
+                                        <div style="display:flex;gap:4px;margin-top:2px;flex-wrap:wrap">
+                                            <span class="badge @EnvClass(d.Environment)" style="font-size:10px;padding:0 5px">@d.Environment</span>
+                                            <span class="badge @DatabaseEngineInfo.GetBadgeClass(d.Engine)" style="font-size:10px;padding:0 5px">@DatabaseEngineInfo.GetDisplayName(d.Engine)</span>
+                                        </div>
+                                    </div>
+                                }
+                                else
+                                {
+                                    @DbName(r.DatabaseId)
+                                }
+                            </td>
                             <td><span class="badge @OutcomeClass(r.Status)">@r.Status</span> @if (r.ModifiedScriptText is not null) { <span class="badge warn" title="Reviewer changed the script">modified</span> }</td>
                             <td class="wrap muted small">@(r.ResultSummary ?? r.Comments)</td>
                             <td class="right nowrap">
@@ -41,7 +56,7 @@
 
     <div class="card card-pad" style="align-self:start">
         <h2>New script</h2>
-        <div class="field"><label>Database</label><select @bind="dbId">@foreach (var d in databases) { <option value="@d.Id">@d.Name (@d.Environment)</option> }</select></div>
+        <div class="field"><label>Database</label><select @bind="dbId">@foreach (var d in databases) { <option value="@d.Id">@d.Name (@d.Environment) · @DatabaseEngineInfo.GetDisplayName(d.Engine)</option> }</select></div>
         <div class="field"><label>Title</label><input type="text" @bind="title" maxlength="200" /></div>
         <div class="field"><label>Script</label><textarea @bind="script" style="font-family:var(--mono);min-height:180px" spellcheck="false"></textarea></div>
         <div class="field"><label>Justification</label><textarea @bind="justification" maxlength="1000"></textarea></div>

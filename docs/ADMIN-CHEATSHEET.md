@@ -29,6 +29,7 @@ Initial default grants added at registration (configurable under Permissions):
 - Enable a role's audit capability to allow the Audit log and Access matrix. The initial Auditor role has this capability.
 - Use an environment's **Defaults** to set allow grants per role for future database registrations only. Changing defaults or a registered database's environment leaves existing grants unchanged. Environment renames update associated databases without changing their grants.
 - Delete a role only after removing its users, database grants and defaults. Delete an environment only after removing its databases and defaults.
+- **Granular object scoping**: Grants can target the entire database (`*`), a whole schema (`sales.*`), or a specific table, view, or stored procedure (`dbo.Customers`). Specific object rules override schema rules, which override database-wide rules.
 - User rule beats role rule. **Deny beats Allow** at the same level. No rule means denied.
 - Time windows are checked when the query runs.
 - Dangerous permissions (CREATE, ALTER, DROP, TRUNCATE, DYNAMIC_SQL, LINKED_SERVER, XP_CMDSHELL, `SYSPROC:*`): grant sparingly. They are required even for approved scripts.

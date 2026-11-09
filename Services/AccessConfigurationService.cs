@@ -151,10 +151,15 @@ public sealed class AccessConfigurationService(
         IEnumerable<string> initialPermissions,
         PermissionEffect effect,
         DateTime? starts = null,
-        DateTime? ends = null)
+        DateTime? ends = null,
+        string? targetScope = null,
+        IEnumerable<string>? targetScopes = null)
     {
         try
         {
+            var rawScopes = targetScopes != null ? targetScopes.ToList() : (targetScope != null ? [targetScope] : null);
+            var parsedScopes = ObjectScope.ParseList(rawScopes);
+
             var cleanRoleId = string.IsNullOrWhiteSpace(roleId) ? null : roleId.Trim();
             var cleanUserId = string.IsNullOrWhiteSpace(userId) ? null : userId.Trim();
 
@@ -193,62 +198,77 @@ public sealed class AccessConfigurationService(
             }
             var existingGrants = await q.ToListAsync();
 
-            var existingMap = new Dictionary<string, PermissionGrant>(StringComparer.OrdinalIgnoreCase);
-            var duplicateGrantsToRemove = new List<PermissionGrant>();
-            foreach (var g in existingGrants)
-            {
-                var norm = Perm.Normalize(g.PermissionCode);
-                if (!existingMap.TryAdd(norm, g))
-                {
-                    duplicateGrantsToRemove.Add(g);
-                }
-            }
-
-            foreach (var dup in duplicateGrantsToRemove)
-            {
-                db.PermissionGrants.Remove(dup);
-            }
-
-            var removedCount = duplicateGrantsToRemove.Count;
+            var removedCount = 0;
             var updatedCount = 0;
             var addedCount = 0;
 
-            // 1. Remove unchecked grants that previously existed
+            // 1. Remove unchecked permissions completely
             var initialSet = initialPermissions.Select(Perm.Normalize).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var uncheckedCodes = initialSet.Where(c => !finalCodes.Contains(c, StringComparer.OrdinalIgnoreCase)).ToList();
             foreach (var code in uncheckedCodes)
             {
-                if (existingMap.TryGetValue(code, out var grantToRemove))
+                var toRemove = existingGrants.Where(g => string.Equals(Perm.Normalize(g.PermissionCode), code, StringComparison.OrdinalIgnoreCase)).ToList();
+                foreach (var g in toRemove)
                 {
-                    db.PermissionGrants.Remove(grantToRemove);
-                    existingMap.Remove(code);
+                    db.PermissionGrants.Remove(g);
+                    existingGrants.Remove(g);
                     removedCount++;
                 }
             }
 
-            // 2. Insert or update finalCodes (duplicate check: if code exists, update it; otherwise insert new)
+            // 2. For finalCodes, synchronize target scopes
             foreach (var code in finalCodes)
             {
-                if (existingMap.TryGetValue(code, out var existingGrant))
+                var currentForCode = existingGrants
+                    .Where(g => string.Equals(Perm.Normalize(g.PermissionCode), code, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                var scopesToKeep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var scopeStr in parsedScopes)
                 {
-                    existingGrant.Effect = effect;
-                    existingGrant.StartsAt = startsAt;
-                    existingGrant.EndsAt = endsAt;
-                    updatedCount++;
-                }
-                else
-                {
-                    db.PermissionGrants.Add(new PermissionGrant
+                    var (schema, obj) = ObjectScope.Parse(scopeStr);
+                    scopesToKeep.Add(ObjectScope.Format(schema, obj));
+
+                    var existing = currentForCode.FirstOrDefault(g =>
+                        string.Equals(g.Schema, schema, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(g.ObjectName, obj, StringComparison.OrdinalIgnoreCase));
+
+                    if (existing != null)
                     {
-                        DatabaseId = databaseId,
-                        PermissionCode = code,
-                        Effect = effect,
-                        UserId = cleanUserId,
-                        RoleId = cleanRoleId,
-                        StartsAt = startsAt,
-                        EndsAt = endsAt
-                    });
-                    addedCount++;
+                        existing.Effect = effect;
+                        existing.StartsAt = startsAt;
+                        existing.EndsAt = endsAt;
+                        updatedCount++;
+                    }
+                    else
+                    {
+                        db.PermissionGrants.Add(new PermissionGrant
+                        {
+                            DatabaseId = databaseId,
+                            PermissionCode = code,
+                            Schema = schema,
+                            ObjectName = obj,
+                            Effect = effect,
+                            UserId = cleanUserId,
+                            RoleId = cleanRoleId,
+                            StartsAt = startsAt,
+                            EndsAt = endsAt
+                        });
+                        addedCount++;
+                    }
+                }
+
+                // Remove any existing grants for this code whose scope is no longer in parsedScopes
+                var obsoleteGrants = currentForCode
+                    .Where(g => !scopesToKeep.Contains(ObjectScope.Format(g.Schema, g.ObjectName)))
+                    .ToList();
+
+                foreach (var obs in obsoleteGrants)
+                {
+                    db.PermissionGrants.Remove(obs);
+                    existingGrants.Remove(obs);
+                    removedCount++;
                 }
             }
 
@@ -256,8 +276,9 @@ public sealed class AccessConfigurationService(
 
             var subjectKind = cleanRoleId != null ? "role" : "user";
             var subjectId = cleanRoleId ?? cleanUserId;
+            var scopeSummary = string.Join(", ", parsedScopes);
             await audit.TryWriteAsync(actor, "Permission", "GrantsSaved", "Success",
-                $"Applied grants for {subjectKind} {subjectId} on {targetDb.Name}: +{addedCount}, ~{updatedCount}, -{removedCount}",
+                $"Applied grants for {subjectKind} {subjectId} on {targetDb.Name} (scopes: {scopeSummary}): +{addedCount}, ~{updatedCount}, -{removedCount}",
                 databaseId, targetDb.Name);
 
             return OpResult.Success($"{addedCount}:{updatedCount}:{removedCount}");

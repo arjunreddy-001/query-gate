@@ -29,7 +29,7 @@
         }
         tokens.push({ kind: "comment", start, end: i, unclosed: depth > 0 }); continue;
       }
-      if (c === "'" || c === "[" || c === '"') {
+      if (c === "'" || c === "[" || c === '"' || c === "`") {
         const close = c === "[" ? "]" : c;
         i++; let value = "", closed = false;
         while (i < sql.length) {

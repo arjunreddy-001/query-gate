@@ -511,6 +511,7 @@ else
                     <thead>
                         <tr>
                             <th>Database</th>
+                            <th>Engine</th>
                             <th>Environment</th>
                             <th>Cached Since</th>
                             <th>Objects Count</th>
@@ -523,6 +524,7 @@ else
                         var info = status.FirstOrDefault(s => s.DatabaseId == d.Id);
                         <tr>
                             <td><b>@d.Name</b></td>
+                            <td><span class="badge @DatabaseEngineInfo.GetBadgeClass(d.Engine)">@DatabaseEngineInfo.GetDisplayName(d.Engine)</span></td>
                             <td><span class="badge @EnvClass(d.Environment)">@d.Environment</span></td>
                             <td>@(info is null ? "-" : Ago(info.LoadedAt))</td>
                             <td>@(info?.ObjectCount.ToString() ?? "-")</td>
@@ -950,7 +952,7 @@ else
         {
             Title = $"Clear Metadata Cache for '{d.Name}'?",
             Message = $"Purge cached tables, views, procedures, and column autocomplete definitions for {d.Name}?",
-            Details = "The cache will be cleared immediately and refreshed from the SQL Server on the next user query or manual reload.",
+            Details = "The cache will be cleared immediately and refreshed from the database on the next user query or manual reload.",
             ConfirmText = "Clear Cache",
             IsDanger = false,
             OnConfirm = async () =>

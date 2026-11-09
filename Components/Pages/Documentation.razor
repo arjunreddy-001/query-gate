@@ -7,7 +7,7 @@
     <div class="docs-heading">
         <span class="landing-kicker">QUERY GATE DOCUMENTATION</span>
         <h1>Documentation</h1>
-        <p>Deploy, configure and use Query Gate to give your team governed access to SQL Server.</p>
+        <p>Deploy, configure and use Query Gate to give your team governed access to SQL Server, PostgreSQL, MySQL and MariaDB.</p>
     </div>
     <div class="docs-layout">
         <nav class="docs-nav" aria-label="Documentation sections">
@@ -25,8 +25,8 @@
         <div class="docs-content">
             <section id="overview">
                 <h2>Overview</h2>
-                <p>Query Gate is a .NET 10 Blazor Server application for governed SQL Server access. Users work in a query workspace without seeing database credentials. Permissions, approvals and audit records control and document every execution.</p>
-                <p>Key capabilities: permission-gated SQL, time-boxed access grants, audit-first execution, passkey / TOTP authentication, an access-request workflow, and CSV export with per-user export permissions.</p>
+                <p>Query Gate is a .NET 10 Blazor Server application for governed database access across SQL Server, PostgreSQL, MySQL and MariaDB. Users work in a query workspace without seeing database credentials. Permissions, approvals and audit records control and document every execution.</p>
+                <p>Key capabilities: permission-gated SQL, multi-engine support (SQL Server, PostgreSQL, MySQL, MariaDB), time-boxed access grants, audit-first execution, passkey / TOTP authentication, an access-request workflow, and CSV export with per-user export permissions.</p>
             </section>
             <section id="user-guide">
                 <h2>User guide</h2>
@@ -34,7 +34,7 @@
                 <div class="docs-guide-cards">
                     <div class="docs-card">
                         <h3><Icon Name="terminal" /> Query workspace</h3>
-                        <p>Select your database, write T-SQL with Monaco syntax assistance and keyboard shortcuts (<kbd>F5</kbd>, <kbd>Ctrl+Enter</kbd>), and execute queries. Results appear in a responsive data grid.</p>
+                        <p>Select your database (SQL Server, PostgreSQL, MySQL, MariaDB), write SQL with Monaco syntax assistance and keyboard shortcuts (<kbd>F5</kbd>, <kbd>Ctrl+Enter</kbd>), and execute queries. Results appear in a responsive data grid.</p>
                     </div>
                     <div class="docs-card">
                         <h3><Icon Name="shield" /> SQL Gate validation</h3>
@@ -107,7 +107,7 @@ docker compose logs -f query-gate</code></pre>
                 <p>Once deployed, the bootstrap administrator account is created from the <code>Bootstrap__AdminEmail</code> and <code>Bootstrap__AdminPassword</code> environment variables on first start.</p>
                 <ol>
                     <li><a href="/Account/Login">Sign in</a> as the bootstrap administrator.</li>
-                    <li>Register a SQL Server database using a dedicated, least-privilege account.</li>
+                    <li>Register a target database (SQL Server, PostgreSQL, MySQL, or MariaDB) using a dedicated, least-privilege account.</li>
                     <li>Create users and grant permissions or review their access requests.</li>
                     <li>Open the query workspace to run permitted SQL and review activity in the audit log.</li>
                     <li>Remove the bootstrap credentials from your environment after setup is complete.</li>

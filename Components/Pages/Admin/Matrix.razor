@@ -24,27 +24,76 @@
     </div>
 </div>
 
-<div class="toolbar">
-    <select @bind="dbId" @bind:after="Load" style="min-width:240px">
+<div class="toolbar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <select @bind="dbId" @bind:after="Load" style="min-width:280px">
         <option value="@Guid.Empty">Select database…</option>
-        @foreach (var d in dbs) { <option value="@d.Id">@d.Name (@d.Environment)</option> }
+        @foreach (var d in dbs) { <option value="@d.Id">@d.Name (@d.Environment) · @DatabaseEngineInfo.GetDisplayName(d.Engine)</option> }
     </select>
+    @if (dbs.FirstOrDefault(d => d.Id == dbId) is { } selectedDb)
+    {
+        <span class="badge @EnvClass(selectedDb.Environment)">@selectedDb.Environment</span>
+        <span class="badge @DatabaseEngineInfo.GetBadgeClass(selectedDb.Engine)">@DatabaseEngineInfo.GetDisplayName(selectedDb.Engine)</span>
+    }
+    @if (rows.Count > 0)
+    {
+        <input type="search" class="search" placeholder="Filter users…" @bind="userSearch" @bind:event="oninput" style="max-width:240px;margin-left:auto" />
+    }
 </div>
 
 @if (rows.Count > 0)
 {
-    <div class="card"><div class="table-wrap"><table>
-        <thead><tr><th>User</th><th>Status</th>@foreach (var c in Perm.Catalog) { <th class="small">@Perm.Label(c)</th> }</tr></thead>
-        <tbody>
-        @foreach (var r in rows)
-        {
+    var filteredRows = rows.Where(r => string.IsNullOrWhiteSpace(userSearch) || (r.User.Email != null && r.User.Email.Contains(userSearch, StringComparison.OrdinalIgnoreCase))).ToList();
+
+    <div class="matrix-legend">
+        <span class="matrix-legend-item"><span class="matrix-check-pill ok">✓</span> <span>Full database access</span></span>
+        <span class="matrix-legend-item"><span class="matrix-scoped-btn">✓ <span class="matrix-scoped-count">3 objs</span></span> <span>Object-scoped (click to view)</span></span>
+        <span class="matrix-legend-item"><span class="faint" style="font-size:16px">-</span> <span>No access</span></span>
+        <span style="margin-left:auto" class="muted small">Showing @filteredRows.Count of @rows.Count users</span>
+    </div>
+
+    <div class="card"><div class="table-wrap"><table class="matrix-table">
+        <thead>
             <tr>
-                <td><b>@r.User.Email</b></td>
-                <td>@if (r.User.IsActive) { <span class="badge ok">Active</span> } else { <span class="badge bad">Inactive</span> }</td>
+                <th class="col-user">User</th>
+                <th class="col-status">Status</th>
                 @foreach (var c in Perm.Catalog)
                 {
-                    var allowed = r.Allowed.Contains(c);
-                    <td>@if (allowed) { <span class="badge @(Perm.IsDangerous(c) ? "warn" : "ok")">✓</span> } else { <span class="faint">-</span> }</td>
+                    <th class="small" style="text-align:center;min-width:65px;white-space:nowrap">@Perm.Label(c)</th>
+                }
+            </tr>
+        </thead>
+        <tbody>
+        @foreach (var r in filteredRows)
+        {
+            <tr>
+                <td class="col-user" style="white-space:nowrap"><b>@r.User.Email</b></td>
+                <td class="col-status">@if (r.User.IsActive) { <span class="badge ok">Active</span> } else { <span class="badge bad">Inactive</span> }</td>
+                @foreach (var c in Perm.Catalog)
+                {
+                    var hasPerm = r.Permissions.TryGetValue(c, out var perm) && perm.IsAllowed;
+                    <td style="text-align:center;vertical-align:middle;white-space:nowrap">
+                        @if (hasPerm && perm is not null)
+                        {
+                            var isScoped = IsScoped(perm.AllowedScopes);
+                            if (isScoped)
+                            {
+                                <div class="matrix-cell-wrap">
+                                    <button type="button" class="matrix-scoped-btn @(Perm.IsDangerous(c) ? "warn" : "")" @onclick='() => viewingScope = new ScopeViewModel(r.User.Email ?? "", c, perm.AllowedScopes, perm.DeniedScopes)' title="@Perm.Label(c): Scoped to @perm.AllowedScopes.Count object(s) (Click to inspect)">
+                                        <span>✓</span>
+                                        <span class="matrix-scoped-count">@(perm.AllowedScopes.Count == 1 ? perm.AllowedScopes[0] : $"{perm.AllowedScopes.Count} objs")</span>
+                                    </button>
+                                </div>
+                            }
+                            else
+                            {
+                                <span class="matrix-check-pill @(Perm.IsDangerous(c) ? "warn" : "ok")" title="@Perm.Label(c): Full database access">✓</span>
+                            }
+                        }
+                        else
+                        {
+                            <span class="faint">-</span>
+                        }
+                    </td>
                 }
             </tr>
         }
@@ -52,11 +101,82 @@
     </table></div></div>
 }
 
+@if (viewingScope is not null)
+{
+    <div class="modal-back">
+        <div class="modal" style="max-width:540px">
+            <div class="modal-head">
+                <div style="display:flex;align-items:center;gap:8px">
+                    <Icon Name="shield" Style="color:var(--brand)" />
+                    <h2 style="margin:0">@Perm.Label(viewingScope.PermissionCode) Scopes</h2>
+                </div>
+            </div>
+            <div class="modal-body stack" style="gap:12px">
+                <div class="muted small">
+                    User: <b>@viewingScope.UserEmail</b> · Database: <b>@(dbs.FirstOrDefault(d => d.Id == dbId)?.Name)</b>
+                </div>
+
+                @if (viewingScope.AllowedScopes.Count > 0)
+                {
+                    <div>
+                        <div class="small" style="font-weight:600;margin-bottom:6px;color:var(--ok)">Allowed Scopes</div>
+                        <div style="display:flex;flex-direction:column;gap:6px;max-height:240px;overflow-y:auto">
+                            @foreach (var s in viewingScope.AllowedScopes)
+                            {
+                                <div class="row-inline" style="padding:6px 10px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:6px;justify-content:space-between">
+                                    <span style="font-family:monospace;font-size:12px;font-weight:600">@s</span>
+                                    @if (s == "*")
+                                    {
+                                        <span class="badge brand" style="font-size:10px;padding:1px 6px">Entire Database</span>
+                                    }
+                                    else if (s.EndsWith(".*"))
+                                    {
+                                        <span class="badge warn" style="font-size:10px;padding:1px 6px">Schema Wildcard</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge ok" style="font-size:10px;padding:1px 6px">Exact Object</span>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+
+                @if (viewingScope.DeniedScopes.Count > 0)
+                {
+                    <div>
+                        <div class="small" style="font-weight:600;margin-bottom:6px;color:var(--bad)">Explicitly Denied Scopes</div>
+                        <div style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto">
+                            @foreach (var s in viewingScope.DeniedScopes)
+                            {
+                                <div class="row-inline" style="padding:6px 10px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:6px;justify-content:space-between">
+                                    <span style="font-family:monospace;font-size:12px;font-weight:600">@s</span>
+                                    <span class="badge bad" style="font-size:10px;padding:1px 6px">Denied</span>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+            <div class="modal-foot">
+                <button type="button" class="btn btn-primary" @onclick="() => viewingScope = null">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
-    private sealed record Row(ApplicationUser User, HashSet<string> Allowed);
+    private sealed record ScopeViewModel(string UserEmail, string PermissionCode, IReadOnlyList<string> AllowedScopes, IReadOnlyList<string> DeniedScopes);
+    private sealed record Row(ApplicationUser User, Dictionary<string, EffectivePermission> Permissions);
     private List<ManagedDatabase> dbs = [];
     private List<Row> rows = [];
     private Guid dbId;
+    private string userSearch = "";
+    private ScopeViewModel? viewingScope;
+
+    private static bool IsScoped(IReadOnlyList<string>? scopes) =>
+        scopes != null && scopes.Count > 0 && !(scopes.Count == 1 && scopes[0] == "*");
 
     protected override async Task OnLoadAsync()
     {
@@ -73,7 +193,8 @@
         foreach (var u in users)
         {
             var eff = await Permissions.GetEffectiveAsync(u.Id, dbId);
-            rows.Add(new Row(u, eff.Where(e => e.IsAllowed).Select(e => e.PermissionCode).ToHashSet(StringComparer.OrdinalIgnoreCase)));
+            var map = eff.ToDictionary(e => e.PermissionCode, StringComparer.OrdinalIgnoreCase);
+            rows.Add(new Row(u, map));
         }
     }
 
@@ -85,7 +206,14 @@
         var dataRows = rows.Select(r =>
         {
             var rowVals = new List<object?> { r.User.Email, r.User.IsActive ? "Active" : "Inactive" };
-            rowVals.AddRange(Perm.Catalog.Select(c => r.Allowed.Contains(c) ? "Y" : "N"));
+            rowVals.AddRange(Perm.Catalog.Select(c =>
+            {
+                if (r.Permissions.TryGetValue(c, out var perm) && perm.IsAllowed)
+                {
+                    return IsScoped(perm.AllowedScopes) ? $"Y ({string.Join(", ", perm.AllowedScopes)})" : "Y";
+                }
+                return "N";
+            }));
             return rowVals.ToArray();
         }).ToList();
 

@@ -21,14 +21,39 @@
         else
         {
             <div class="table-wrap"><table>
-                <thead><tr><th>Requester</th><th>Database</th><th>Permissions</th><th>For</th><th>Justification</th><th>Status</th><th></th></tr></thead>
+                <thead><tr><th>Requester</th><th>Database</th><th>Permissions</th><th>Scope</th><th>For</th><th>Justification</th><th>Status</th><th></th></tr></thead>
                 <tbody>
                 @foreach (var r in access)
                 {
                     <tr>
                         <td>@Name(r.RequesterId)<div class="faint small">@Ago(r.CreatedAt)</div></td>
-                        <td>@DbName(r.DatabaseId)</td>
+                        <td>
+                            @if (dbs.TryGetValue(r.DatabaseId, out var d))
+                            {
+                                <div>
+                                    <b>@d.Name</b>
+                                    <div style="display:flex;gap:4px;margin-top:2px;flex-wrap:wrap">
+                                        <span class="badge @EnvClass(d.Environment)" style="font-size:10px;padding:0 5px">@d.Environment</span>
+                                        <span class="badge @DatabaseEngineInfo.GetBadgeClass(d.Engine)" style="font-size:10px;padding:0 5px">@DatabaseEngineInfo.GetDisplayName(d.Engine)</span>
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <span>-</span>
+                            }
+                        </td>
                         <td class="wrap">@r.Permissions @(r.IsExtension ? "· extension" : "")</td>
+                        <td>
+                            @if (!string.IsNullOrEmpty(r.Schema) || !string.IsNullOrEmpty(r.ObjectName))
+                            {
+                                <span class="badge" style="font-family:monospace;font-size:11px;background:var(--bg-card);border:1px solid var(--border-color)">@r.TargetScope</span>
+                            }
+                            else
+                            {
+                                <span class="muted small">* (All Objects)</span>
+                            }
+                        </td>
                         <td>@r.DurationHours h</td>
                         <td class="wrap">@r.Justification @if (!string.IsNullOrEmpty(r.Ticket)) { <div class="faint small">Ticket: @r.Ticket</div> }</td>
                         <td><span class="badge @OutcomeClass(r.Status)">@r.Status</span></td>
@@ -56,7 +81,22 @@ else
                     <tr>
                         <td>@Name(s.RequesterId)<div class="faint small">@Ago(s.CreatedAt)</div></td>
                         <td><b>@s.Title</b></td>
-                        <td>@DbName(s.DatabaseId)</td>
+                        <td>
+                            @if (dbs.TryGetValue(s.DatabaseId, out var sd))
+                            {
+                                <div>
+                                    <b>@sd.Name</b>
+                                    <div style="display:flex;gap:4px;margin-top:2px;flex-wrap:wrap">
+                                        <span class="badge @EnvClass(sd.Environment)" style="font-size:10px;padding:0 5px">@sd.Environment</span>
+                                        <span class="badge @DatabaseEngineInfo.GetBadgeClass(sd.Engine)" style="font-size:10px;padding:0 5px">@DatabaseEngineInfo.GetDisplayName(sd.Engine)</span>
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <span>-</span>
+                            }
+                        </td>
                         <td><span class="badge @OutcomeClass(s.Status)">@s.Status</span> @if (s.AutoRun && s.Status == RequestStatus.Approved) { <span class="badge info">auto-run queued</span> }</td>
                         <td class="wrap small muted">@s.ResultSummary</td>
                         <td class="right nowrap">
@@ -77,7 +117,30 @@ else
         <div class="modal">
             <div class="modal-head"><h2>Review access request</h2></div>
             <div class="modal-body">
-                <p><b>@Name(reviewAccess.RequesterId)</b> requests <b>@reviewAccess.Permissions</b> on <b>@DbName(reviewAccess.DatabaseId)</b>.</p>
+                <p>
+                    <b>@Name(reviewAccess.RequesterId)</b> requests <b>@reviewAccess.Permissions</b> on
+                    @if (dbs.TryGetValue(reviewAccess.DatabaseId, out var targetDb))
+                    {
+                        <b>@targetDb.Name</b>
+                        <span class="badge @EnvClass(targetDb.Environment)" style="font-size:10px;padding:1px 5px;margin-left:4px">@targetDb.Environment</span>
+                        <span class="badge @DatabaseEngineInfo.GetBadgeClass(targetDb.Engine)" style="font-size:10px;padding:1px 5px;margin-left:4px">@DatabaseEngineInfo.GetDisplayName(targetDb.Engine)</span>
+                    }
+                    else
+                    {
+                        <b>-</b>
+                    }
+                </p>
+                <p>
+                    <b>Scope:</b>
+                    @if (!string.IsNullOrEmpty(reviewAccess.Schema) || !string.IsNullOrEmpty(reviewAccess.ObjectName))
+                    {
+                        <span class="badge" style="font-family:monospace;font-size:11px;background:var(--bg-card);border:1px solid var(--border-color);margin-left:4px">@reviewAccess.TargetScope</span>
+                    }
+                    else
+                    {
+                        <span class="muted small" style="margin-left:4px">* (All Objects / Entire Database)</span>
+                    }
+                </p>
                 <p class="muted">@reviewAccess.Justification</p>
                 <div class="field"><label>Grant duration (hours)</label><input type="number" min="1" @bind="hoursOverride" /></div>
                 <div class="field"><label>Comment (required to reject)</label><textarea @bind="comment"></textarea></div>
@@ -97,7 +160,19 @@ else
         <div class="modal wide">
             <div class="modal-head"><h2>@reviewScript.Title</h2></div>
             <div class="modal-body">
-                <p class="muted">@Name(reviewScript.RequesterId) on <b>@DbName(reviewScript.DatabaseId)</b>: @reviewScript.Justification</p>
+                <p class="muted">
+                    @Name(reviewScript.RequesterId) on
+                    @if (dbs.TryGetValue(reviewScript.DatabaseId, out var sDb))
+                    {
+                        <b>@sDb.Name</b>
+                        <span class="badge @EnvClass(sDb.Environment)" style="font-size:10px;padding:1px 5px;margin-left:4px">@sDb.Environment</span>
+                        <span class="badge @DatabaseEngineInfo.GetBadgeClass(sDb.Engine)" style="font-size:10px;padding:1px 5px;margin-left:4px">@DatabaseEngineInfo.GetDisplayName(sDb.Engine)</span>
+                    }
+                    else
+                    {
+                        <b>-</b>
+                    }: @reviewScript.Justification
+                </p>
                 @if (analysis is not null)
                 {
                     <div class="row-inline" style="margin-bottom:10px">
@@ -126,7 +201,7 @@ else
     private List<AccessRequest> access = [];
     private List<ScriptRequest> scripts = [];
     private Dictionary<string, string> users = [];
-    private Dictionary<Guid, string> dbs = [];
+    private Dictionary<Guid, ManagedDatabase> dbs = [];
     private AccessRequest? reviewAccess;
     private ScriptRequest? reviewScript;
     private GateAnalysis? analysis;
@@ -142,11 +217,11 @@ else
         access = await db.AccessRequests.AsNoTracking().OrderBy(r => r.Status == RequestStatus.Pending ? 0 : 1).ThenByDescending(r => r.CreatedAt).Take(100).ToListAsync();
         scripts = await db.ScriptRequests.AsNoTracking().OrderBy(r => r.Status == RequestStatus.Pending ? 0 : 1).ThenByDescending(r => r.CreatedAt).Take(100).ToListAsync();
         users = await db.Users.AsNoTracking().ToDictionaryAsync(u => u.Id, u => u.Email ?? u.UserName ?? u.Id);
-        dbs = await db.ManagedDatabases.AsNoTracking().ToDictionaryAsync(d => d.Id, d => d.Name);
+        dbs = await db.ManagedDatabases.AsNoTracking().ToDictionaryAsync(d => d.Id);
     }
 
     private string Name(string id) => users.GetValueOrDefault(id, "unknown");
-    private string DbName(Guid id) => dbs.GetValueOrDefault(id, "-");
+    private string DbName(Guid id) => dbs.TryGetValue(id, out var d) ? d.Name : "-";
 
     private void OpenAccess(AccessRequest r) { reviewAccess = r; hoursOverride = r.DurationHours ?? 24; comment = null; }
 
@@ -160,10 +235,15 @@ else
     private void OpenScript(ScriptRequest s)
     {
         reviewScript = s; editedScript = s.ScriptText; comment = null; autoRun = false;
-        analysis = Gate.Analyze(s.ScriptText);
+        var engine = dbs.TryGetValue(s.DatabaseId, out var sdb) ? sdb.Engine : DatabaseEngine.SqlServer;
+        analysis = Gate.Analyze(s.ScriptText, engine);
     }
 
-    private void Reanalyse() => analysis = Gate.Analyze(editedScript ?? "");
+    private void Reanalyse()
+    {
+        var engine = reviewScript is not null && dbs.TryGetValue(reviewScript.DatabaseId, out var sdb) ? sdb.Engine : DatabaseEngine.SqlServer;
+        analysis = Gate.Analyze(editedScript ?? "", engine);
+    }
 
     private async Task DecideScript(bool approve)
     {

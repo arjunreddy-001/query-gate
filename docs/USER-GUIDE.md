@@ -58,16 +58,20 @@ Use **Defaults** beside an environment to configure allow grants for each role, 
 Pick a database, then **Add grant**:
 
 - **Applies to**: a _Role_ (everyone in it) or a single _User_.
+- **Target Scope** (optional): `*` for the whole database, `schema.*` (e.g. `sales.*`) for all objects in a schema, or `schema.object` (e.g. `dbo.Customers`, `dbo.usp_Calculate`) for a specific table, view, or stored procedure.
 - **Permission**: SELECT, INSERT, UPDATE, DELETE, EXECUTE, CREATE, ALTER, DROP, TRUNCATE, SP_HELP, SP_HELPTEXT, VIEW_DEFINITION, DYNAMIC_SQL, LINKED_SERVER, XP_CMDSHELL, EXPORT, UNMASK. To allow a specific system procedure, type `SYSPROC:name`.
 - **Effect**: _Allow_ or _Deny_.
 - **Window** (optional): start and end time for temporary access.
 
 **How rules combine**
 
-1. A **user rule** overrides a **role rule**.
-2. Within the same level, **Deny wins** over Allow.
-3. No matching rule = denied.
-4. Time windows are checked at the moment a query runs.
+1. **Scope specificity**: An exact **object-level rule** (`dbo.Salaries`) overrides a **schema-level rule** (`dbo.*`), which overrides a **database-wide rule** (`*`).
+2. A **user rule** overrides a **role rule** at the highest matching tier.
+3. Within the same tier, **Deny wins** over Allow.
+4. Database-wide grants automatically cover all objects unless an explicit object-level or schema-level Deny exists.
+5. Users without database-wide access can be granted access to specific tables or schemas only.
+6. No matching rule = denied.
+7. Time windows are checked at the moment a query runs.
 
 Permissions flagged as _dangerous_ (CREATE/ALTER/DROP/TRUNCATE, DYNAMIC_SQL, LINKED_SERVER, XP_CMDSHELL, system procedures) should be granted sparingly and are still required even for approved scripts.
 

@@ -89,6 +89,8 @@ public sealed class AccessRequest
     public required string RequesterId { get; set; }
     public Guid DatabaseId { get; set; }
     public required string Permissions { get; set; }
+    public string? Schema { get; set; }
+    public string? ObjectName { get; set; }
     public required string Justification { get; set; }
     public string? Ticket { get; set; }
     public int? DurationHours { get; set; }
@@ -98,6 +100,8 @@ public sealed class AccessRequest
     public DateTimeOffset? ReviewedAt { get; set; }
     public string? Comments { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public string TargetScope => Security.ObjectScope.Format(Schema, ObjectName);
 }
 
 public sealed class ScriptRequest

@@ -20,6 +20,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<SettingEntry> Settings => Set<SettingEntry>();
     public DbSet<DatabaseEnvironment> DatabaseEnvironments => Set<DatabaseEnvironment>();
     public DbSet<EnvironmentDefaultGrant> EnvironmentDefaultGrants => Set<EnvironmentDefaultGrant>();
+    public DbSet<DatabaseRoleScopeRule> DatabaseRoleScopeRules => Set<DatabaseRoleScopeRule>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -52,20 +53,36 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.HasIndex(database => new { database.Name, database.Environment }).IsUnique();
             entity.Property(database => database.Name).HasMaxLength(128).IsRequired();
             entity.Property(database => database.Environment).HasMaxLength(32).IsRequired();
+            entity.Property(database => database.Engine).HasConversion<string>().HasMaxLength(32).HasDefaultValue(DatabaseEngine.SqlServer);
             entity.Property(database => database.Description).HasMaxLength(512);
             entity.Property(database => database.EncryptedConnectionString).IsRequired();
+            entity.Property(database => database.IncludedObjects).HasMaxLength(4000);
+            entity.Property(database => database.ExcludedObjects).HasMaxLength(4000);
+        });
+
+        builder.Entity<DatabaseRoleScopeRule>(entity =>
+        {
+            entity.HasKey(r => r.Id);
+            entity.HasIndex(r => new { r.DatabaseId, r.RoleId }).IsUnique();
+            entity.Property(r => r.RoleId).HasMaxLength(450).IsRequired();
+            entity.Property(r => r.IncludedObjects).HasMaxLength(4000);
+            entity.Property(r => r.ExcludedObjects).HasMaxLength(4000);
+            entity.HasOne<ManagedDatabase>().WithMany().HasForeignKey(r => r.DatabaseId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<IdentityRole>().WithMany().HasForeignKey(r => r.RoleId).OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<PermissionGrant>(entity =>
         {
             entity.HasKey(grant => grant.Id);
             entity.Property(grant => grant.PermissionCode).HasMaxLength(128).IsRequired();
+            entity.Property(grant => grant.Schema).HasMaxLength(128);
+            entity.Property(grant => grant.ObjectName).HasMaxLength(128);
             entity.Property(grant => grant.Effect).HasConversion<string>().HasMaxLength(8).IsRequired();
             entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(grant => grant.UserId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne<IdentityRole>().WithMany().HasForeignKey(grant => grant.RoleId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne<ManagedDatabase>().WithMany().HasForeignKey(grant => grant.DatabaseId).OnDelete(DeleteBehavior.Cascade);
-            entity.HasIndex(grant => new { grant.UserId, grant.DatabaseId, grant.PermissionCode });
-            entity.HasIndex(grant => new { grant.RoleId, grant.DatabaseId, grant.PermissionCode });
+            entity.HasIndex(grant => new { grant.UserId, grant.DatabaseId, grant.PermissionCode, grant.Schema, grant.ObjectName });
+            entity.HasIndex(grant => new { grant.RoleId, grant.DatabaseId, grant.PermissionCode, grant.Schema, grant.ObjectName });
             entity.ToTable(table => table.HasCheckConstraint(
                 "CK_PermissionGrants_ExactlyOnePrincipal",
                 "(CASE WHEN [UserId] IS NULL THEN 0 ELSE 1 END + CASE WHEN [RoleId] IS NULL THEN 0 ELSE 1 END) = 1"));
@@ -127,6 +144,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.Property(r => r.RequesterId).HasMaxLength(450);
             entity.Property(r => r.ReviewerId).HasMaxLength(450);
             entity.Property(r => r.Permissions).HasMaxLength(1000);
+            entity.Property(r => r.Schema).HasMaxLength(128);
+            entity.Property(r => r.ObjectName).HasMaxLength(128);
             entity.Property(r => r.Justification).HasMaxLength(2000);
             entity.Property(r => r.Ticket).HasMaxLength(100);
             entity.Property(r => r.Status).HasMaxLength(16);

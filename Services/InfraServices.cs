@@ -4,30 +4,21 @@ using System.Security.Cryptography;
 using System.Text;
 using DbAccessManager.Data;
 using DbAccessManager.Security;
+using DbAccessManager.Services.Providers;
 using Microsoft.AspNetCore.Components.Server.Circuits;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.IdentityModel.Tokens;
 
 namespace DbAccessManager.Services;
 
-public sealed class DatabaseAdminService(IDbContextFactory<ApplicationDbContext> factory, CryptoService crypto, AuditService audit)
+public sealed class DatabaseAdminService(IDbContextFactory<ApplicationDbContext> factory, CryptoService crypto, AuditService audit, DatabaseProviderFactory providers)
 {
-    public async Task<(bool Ok, string Message)> TestAsync(string connectionString)
+    public async Task<(bool Ok, string Message)> TestAsync(string connectionString, DatabaseEngine engine = DatabaseEngine.SqlServer)
     {
-        try
-        {
-            var builder = new SqlConnectionStringBuilder(connectionString) { ConnectTimeout = 10 };
-            await using var conn = new SqlConnection(builder.ConnectionString);
-            await conn.OpenAsync();
-            return (true, $"Connected to {conn.DataSource} / {conn.Database} (SQL Server {conn.ServerVersion}).");
-        }
-        catch (Exception ex)
-        {
-            return (false, ex.Message);
-        }
+        var provider = providers.GetProvider(engine);
+        return await provider.TestAsync(connectionString);
     }
 
     public async Task<(bool Ok, string Message)> TestRegisteredAsync(Guid id)
@@ -35,13 +26,15 @@ public sealed class DatabaseAdminService(IDbContextFactory<ApplicationDbContext>
         await using var db = await factory.CreateDbContextAsync();
         var database = await db.ManagedDatabases.AsNoTracking().FirstOrDefaultAsync(d => d.Id == id);
         if (database is null) return (false, "Database not found.");
-        return await TestAsync(crypto.Decrypt(database.EncryptedConnectionString));
+        return await TestAsync(crypto.Decrypt(database.EncryptedConnectionString), database.Engine);
     }
 
-    public async Task<OpResult> RegisterAsync(Actor actor, string name, string environment, string? description, string connectionString, int timeout, int maxRows)
+    public async Task<OpResult> RegisterAsync(Actor actor, string name, string environment, string? description, string connectionString, int timeout, int maxRows, DatabaseEngine engine = DatabaseEngine.SqlServer, string? includedObjects = null, string? excludedObjects = null)
     {
-        try { _ = new SqlConnectionStringBuilder(connectionString); }
-        catch (Exception) { return OpResult.Fail("The connection string is not valid."); }
+        var provider = providers.GetProvider(engine);
+        var (valid, error) = provider.ValidateConnectionString(connectionString);
+        if (!valid) return OpResult.Fail(error ?? "The connection string is not valid.");
+
         await using var db = await factory.CreateDbContextAsync();
         await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
         var env = await db.DatabaseEnvironments.FirstOrDefaultAsync(e => e.Name == environment);
@@ -51,10 +44,17 @@ public sealed class DatabaseAdminService(IDbContextFactory<ApplicationDbContext>
         if (string.IsNullOrWhiteSpace(trimmedName)) return OpResult.Fail("Name is required.");
         if (await db.ManagedDatabases.AnyAsync(d => d.Name == trimmedName && d.Environment == environment))
             return OpResult.Fail("A database with that name and environment is already registered.");
+        var cleanInc = string.IsNullOrWhiteSpace(includedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(includedObjects));
+        var cleanExc = string.IsNullOrWhiteSpace(excludedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(excludedObjects, defaultToAll: false));
+        if (DbAccessManager.Security.ObjectScope.HasConflict(cleanInc, cleanExc, out var conflict))
+            return OpResult.Fail($"Conflict detected: '{conflict}' cannot be simultaneously included and excluded.");
+
         var entity = new ManagedDatabase
         {
-            Name = trimmedName, Environment = environment, Description = description,
-            EncryptedConnectionString = crypto.Encrypt(connectionString), DefaultTimeoutSeconds = timeout, MaxRows = maxRows
+            Name = trimmedName, Environment = environment, Engine = engine, Description = description,
+            EncryptedConnectionString = crypto.Encrypt(connectionString), DefaultTimeoutSeconds = timeout, MaxRows = maxRows,
+            IncludedObjects = cleanInc,
+            ExcludedObjects = cleanExc
         };
         db.ManagedDatabases.Add(entity);
         var defaults = await db.EnvironmentDefaultGrants.Where(g => g.EnvironmentId == env.Id).ToListAsync();
@@ -62,11 +62,11 @@ public sealed class DatabaseAdminService(IDbContextFactory<ApplicationDbContext>
             db.PermissionGrants.Add(new PermissionGrant { RoleId = grant.RoleId, DatabaseId = entity.Id, PermissionCode = grant.PermissionCode, Effect = PermissionEffect.Allow });
         await db.SaveChangesAsync();
         await tx.CommitAsync();
-        await audit.TryWriteAsync(actor, "DatabaseAdmin", "Register", "Success", $"{name} ({environment})", entity.Id, name);
+        await audit.TryWriteAsync(actor, "DatabaseAdmin", "Register", "Success", $"{name} ({environment}) [{engine}]", entity.Id, name);
         return OpResult.Success();
     }
 
-    public async Task<OpResult> UpdateAsync(Actor actor, Guid id, string name, string environment, string? description, string? newConnectionString, int timeout, int maxRows, bool active)
+    public async Task<OpResult> UpdateAsync(Actor actor, Guid id, string name, string environment, string? description, string? newConnectionString, int timeout, int maxRows, bool active, DatabaseEngine? engine = null, string? includedObjects = null, string? excludedObjects = null)
     {
         await using var db = await factory.CreateDbContextAsync();
         await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
@@ -83,19 +83,109 @@ public sealed class DatabaseAdminService(IDbContextFactory<ApplicationDbContext>
 
         d.Name = trimmedName;
         d.Environment = environment;
+        if (engine.HasValue) d.Engine = engine.Value;
         d.Description = description;
         d.DefaultTimeoutSeconds = timeout;
         d.MaxRows = maxRows;
         d.IsActive = active;
+        var cleanInc = string.IsNullOrWhiteSpace(includedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(includedObjects));
+        var cleanExc = string.IsNullOrWhiteSpace(excludedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(excludedObjects, defaultToAll: false));
+        if (DbAccessManager.Security.ObjectScope.HasConflict(cleanInc, cleanExc, out var conflict))
+            return OpResult.Fail($"Conflict detected: '{conflict}' cannot be simultaneously included and excluded.");
+
+        d.IncludedObjects = cleanInc;
+        d.ExcludedObjects = cleanExc;
+
         if (!string.IsNullOrWhiteSpace(newConnectionString))
         {
-            try { _ = new SqlConnectionStringBuilder(newConnectionString); }
-            catch (Exception) { return OpResult.Fail("The connection string is not valid."); }
+            var provider = providers.GetProvider(d.Engine);
+            var (valid, error) = provider.ValidateConnectionString(newConnectionString);
+            if (!valid) return OpResult.Fail(error ?? "The connection string is not valid.");
             d.EncryptedConnectionString = crypto.Encrypt(newConnectionString);
         }
         await db.SaveChangesAsync();
         await tx.CommitAsync();
-        await audit.TryWriteAsync(actor, "DatabaseAdmin", "Update", "Success", $"{d.Name} ({d.Environment}) active={active}", d.Id, d.Name);
+        await audit.TryWriteAsync(actor, "DatabaseAdmin", "Update", "Success", $"{d.Name} ({d.Environment}) [{d.Engine}] active={active}", d.Id, d.Name);
+        return OpResult.Success();
+    }
+
+    public async Task<List<DatabaseRoleScopeRule>> GetRoleScopeRulesAsync(Guid databaseId)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        return await db.DatabaseRoleScopeRules.AsNoTracking()
+            .Where(r => r.DatabaseId == databaseId)
+            .ToListAsync();
+    }
+
+    public async Task<OpResult> SaveRoleScopeRuleAsync(Actor actor, Guid databaseId, string roleId, string? includedObjects, string? excludedObjects)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+        var database = await db.ManagedDatabases.FindAsync(databaseId);
+        if (database is null) return OpResult.Fail("Database not found.");
+        var role = await db.Roles.FindAsync(roleId);
+        if (role is null) return OpResult.Fail("Role not found.");
+
+        var cleanInc = string.IsNullOrWhiteSpace(includedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(includedObjects));
+        var cleanExc = string.IsNullOrWhiteSpace(excludedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(excludedObjects, defaultToAll: false));
+        if (DbAccessManager.Security.ObjectScope.HasConflict(cleanInc, cleanExc, out var conflict))
+            return OpResult.Fail($"Conflict detected: '{conflict}' cannot be simultaneously included and excluded.");
+
+        var rule = await db.DatabaseRoleScopeRules.FirstOrDefaultAsync(r => r.DatabaseId == databaseId && r.RoleId == roleId);
+        if (rule is null)
+        {
+            rule = new DatabaseRoleScopeRule
+            {
+                DatabaseId = databaseId,
+                RoleId = roleId,
+                IncludedObjects = cleanInc,
+                ExcludedObjects = cleanExc,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            db.DatabaseRoleScopeRules.Add(rule);
+        }
+        else
+        {
+            rule.IncludedObjects = cleanInc;
+            rule.ExcludedObjects = cleanExc;
+            rule.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+        await db.SaveChangesAsync();
+        await tx.CommitAsync();
+        await audit.TryWriteAsync(actor, "DatabaseAdmin", "RoleScopeRuleSaved", "Success", $"db={database.Name}; role={role.Name}; inc={rule.IncludedObjects}; exc={rule.ExcludedObjects}", databaseId, database.Name);
+        return OpResult.Success();
+    }
+
+    public async Task<OpResult> DeleteRoleScopeRuleAsync(Actor actor, Guid databaseId, string roleId)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+        var rule = await db.DatabaseRoleScopeRules.FirstOrDefaultAsync(r => r.DatabaseId == databaseId && r.RoleId == roleId);
+        if (rule is null) return OpResult.Success();
+        db.DatabaseRoleScopeRules.Remove(rule);
+        await db.SaveChangesAsync();
+        await tx.CommitAsync();
+        await audit.TryWriteAsync(actor, "DatabaseAdmin", "RoleScopeRuleDeleted", "Success", $"db={databaseId}; role={roleId}", databaseId);
+        return OpResult.Success();
+    }
+
+    public async Task<OpResult> UpdateDatabaseObjectRulesAsync(Actor actor, Guid databaseId, string? includedObjects, string? excludedObjects)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+        var database = await db.ManagedDatabases.FindAsync(databaseId);
+        if (database is null) return OpResult.Fail("Database not found.");
+
+        var cleanInc = string.IsNullOrWhiteSpace(includedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(includedObjects));
+        var cleanExc = string.IsNullOrWhiteSpace(excludedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(excludedObjects, defaultToAll: false));
+        if (DbAccessManager.Security.ObjectScope.HasConflict(cleanInc, cleanExc, out var conflict))
+            return OpResult.Fail($"Conflict detected: '{conflict}' cannot be simultaneously included and excluded.");
+
+        database.IncludedObjects = cleanInc;
+        database.ExcludedObjects = cleanExc;
+        await db.SaveChangesAsync();
+        await tx.CommitAsync();
+        await audit.TryWriteAsync(actor, "DatabaseAdmin", "DatabaseObjectRulesUpdated", "Success", $"db={database.Name}; inc={database.IncludedObjects}; exc={database.ExcludedObjects}", databaseId, database.Name);
         return OpResult.Success();
     }
 }
@@ -118,7 +208,7 @@ public sealed record DbObjectInfo(string Schema, string Name, string Type, List<
 
 public sealed record MetadataCacheEntry(Guid DatabaseId, int ObjectCount, DateTimeOffset LoadedAt);
 
-public sealed class MetadataService(IDbContextFactory<ApplicationDbContext> factory, CryptoService crypto, IMemoryCache cache, SettingsService settings)
+public sealed class MetadataService(IDbContextFactory<ApplicationDbContext> factory, CryptoService crypto, IMemoryCache cache, SettingsService settings, DatabaseProviderFactory providers)
 {
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, MetadataCacheEntry> entries = new();
     private CancellationTokenSource resetToken = new();
@@ -149,72 +239,11 @@ public sealed class MetadataService(IDbContextFactory<ApplicationDbContext> fact
         await using var db = await factory.CreateDbContextAsync();
         var database = await db.ManagedDatabases.AsNoTracking().FirstOrDefaultAsync(d => d.Id == databaseId && d.IsActive)
             ?? throw new InvalidOperationException("Database not found.");
-        await using var conn = new SqlConnection(crypto.Decrypt(database.EncryptedConnectionString));
-        await conn.OpenAsync();
-        var objects = new Dictionary<(string, string), DbObjectInfo>();
 
-        await using (var cmd = new SqlCommand(@"SELECT s.name, o.name, o.type FROM sys.objects o JOIN sys.schemas s ON s.schema_id = o.schema_id
-            WHERE o.type IN ('U','V','P','FN','IF','TF') AND o.is_ms_shipped = 0 ORDER BY s.name, o.name", conn) { CommandTimeout = 30 })
-        await using (var r = await cmd.ExecuteReaderAsync())
-        {
-            while (await r.ReadAsync())
-            {
-                var sqlType = r.GetString(2).Trim();
-                var type = sqlType switch { "U" => "Table", "V" => "View", "P" => "Procedure", _ => "Function" };
-                objects[(r.GetString(0), r.GetString(1))] = new DbObjectInfo(r.GetString(0), r.GetString(1), type, [])
-                {
-                    IsTableValuedFunction = sqlType is "IF" or "TF"
-                };
-            }
-        }
-        await using (var cmd = new SqlCommand(@"SELECT ps.name, po.name, fk.name, rs.name, ro.name, pc.name, rc.name
-            FROM sys.foreign_keys fk
-            JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
-            JOIN sys.objects po ON po.object_id = fk.parent_object_id
-            JOIN sys.schemas ps ON ps.schema_id = po.schema_id
-            JOIN sys.objects ro ON ro.object_id = fk.referenced_object_id
-            JOIN sys.schemas rs ON rs.schema_id = ro.schema_id
-            JOIN sys.columns pc ON pc.object_id = fkc.parent_object_id AND pc.column_id = fkc.parent_column_id
-            JOIN sys.columns rc ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id
-            ORDER BY ps.name, po.name, fk.name, fkc.constraint_column_id", conn) { CommandTimeout = 30 })
-        await using (var r = await cmd.ExecuteReaderAsync())
-        {
-            while (await r.ReadAsync())
-            {
-            if (!objects.TryGetValue((r.GetString(0), r.GetString(1)), out var source)
-                || !objects.ContainsKey((r.GetString(3), r.GetString(4)))) continue;
-            var foreignKey = source.ForeignKeys.FirstOrDefault(f => f.Name == r.GetString(2));
-            if (foreignKey is null)
-            {
-                foreignKey = new DbForeignKeyInfo(r.GetString(2), r.GetString(3), r.GetString(4), []);
-                source.ForeignKeys.Add(foreignKey);
-            }
-            foreignKey.Columns.Add(new DbForeignKeyColumn(r.GetString(5), r.GetString(6)));
-            }
-        }
-        await using (var cmd = new SqlCommand(@"SELECT s.name, o.name, c.name, t.name, c.is_nullable, c.is_identity, c.is_computed,
-            CASE WHEN c.default_object_id != 0 THEN 1 ELSE 0 END AS has_default
-            FROM sys.columns c JOIN sys.objects o ON o.object_id = c.object_id
-            JOIN sys.schemas s ON s.schema_id = o.schema_id JOIN sys.types t ON t.user_type_id = c.user_type_id
-            WHERE o.type IN ('U','V','IF','TF') AND o.is_ms_shipped = 0 ORDER BY c.column_id", conn) { CommandTimeout = 30 })
-        await using (var r = await cmd.ExecuteReaderAsync())
-        {
-            while (await r.ReadAsync())
-                if (objects.TryGetValue((r.GetString(0), r.GetString(1)), out var o))
-                {
-                    var column = r.GetString(2);
-                    var dataType = r.GetString(3);
-                    var isNullable = r.GetBoolean(4);
-                    var isIdentity = r.GetBoolean(5);
-                    var isComputed = r.GetBoolean(6);
-                    var hasDefault = r.GetInt32(7) == 1;
+        var provider = providers.GetProvider(database.Engine);
+        var connStr = crypto.Decrypt(database.EncryptedConnectionString);
+        var list = await provider.LoadMetadataAsync(connStr);
 
-                    o.Columns.Add(column);
-                    o.ColumnDetails.Add(new DbColumnInfo(column, dataType, isNullable, isIdentity, hasDefault, isComputed));
-                }
-        }
-
-        var list = objects.Values.ToList();
         if (enabled)
         {
             var options = new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(Math.Max(1, await settings.GetIntAsync("MetadataTtlMinutes"))) }
