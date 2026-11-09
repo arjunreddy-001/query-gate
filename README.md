@@ -70,7 +70,9 @@ This repository maintains all development workflows and runbooks centrally in [`
 - **Claude Code**: Referenced via [`CLAUDE.md`](./CLAUDE.md).
 - **Cursor**: Referenced via [`.cursor/rules/skills.mdc`](./.cursor/rules/skills.mdc).
 - **Codex & General Agents**: Referenced via [`AGENTS.md`](./AGENTS.md).
+- **GitHub Copilot**: Referenced via [`.github/copilot-instructions.md`](./.github/copilot-instructions.md).
+- **Windsurf**: Referenced via [`.windsurfrules`](./.windsurfrules).
 
-When adding a new skill, define it once inside `.github/skills/<skill-name>/SKILL.md` and reference it in the platform instruction files (`AGENTS.md`, `CLAUDE.md`, `.cursor/rules/skills.mdc`).
+When adding a new skill, define it once inside `.github/skills/<skill-name>/SKILL.md` and reference it in the platform instruction files (`AGENTS.md`, `CLAUDE.md`, `.cursor/rules/skills.mdc`, `.github/copilot-instructions.md`).
 
 

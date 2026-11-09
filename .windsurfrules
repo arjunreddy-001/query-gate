@@ -1,0 +1,16 @@
+# Windsurf Rules - Query Gate
+
+Query Gate is a .NET 10 Blazor Server application (`DbAccessManager.csproj`) with Entity Framework Core and multi-engine support.
+
+## Skills & Guidelines
+
+Workflows, domain runbooks, and coding standards are centrally located in `.github/skills/`:
+- **Run & Verify**: `.github/skills/run-and-verify/SKILL.md`
+- **EF Core Migrations**: `.github/skills/ef-migrations/SKILL.md`
+- **SQL Gate & Permissions**: `.github/skills/sql-gate-and-permissions/SKILL.md`
+- **Database Providers**: `.github/skills/database-providers/SKILL.md`
+- **Data Masking**: `.github/skills/data-masking/SKILL.md`
+- **Blazor Conventions**: `.github/skills/blazor-page-conventions/SKILL.md`
+- **UI Design System**: `.github/skills/ui-design-system/SKILL.md`
+
+Always follow fail-closed auditing, non-blocking async, and avoid over-engineering.
