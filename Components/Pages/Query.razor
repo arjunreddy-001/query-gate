@@ -56,10 +56,30 @@ else
                     @foreach (var o in FilteredObjects)
                     {
                         var key = o.Schema + "." + o.Name;
-                        <div class="tree-item" @onclick="() => InsertSelect(o)" @ondblclick="() => Toggle(key)" title="Click: insert SELECT · Double-click: columns">
-                            <Icon Name="@(o.Type == "Table" ? "table" : o.Type == "View" ? "eye" : "code")" /><span>@key</span><span class="faint small" style="margin-left:auto">@o.Type</span>
+                        var isExpanded = expanded.Contains(key);
+                        <div class="tree-item"
+                             @onclick="() => InsertSelect(o)"
+                             @ondblclick="() => Toggle(key)"
+                             @ondblclick:stopPropagation
+                             @oncontextmenu="e => OpenObjectContextMenu(e, o)"
+                             @oncontextmenu:preventDefault
+                             title="Click: SELECT TOP 100 · Right-click: Menu · Double-click: Columns">
+                            <span class="tree-chevron" style="display:inline-block;width:12px;font-size:10px;color:var(--text-faint);cursor:pointer" @onclick:stopPropagation @onclick="() => Toggle(key)" title="Toggle columns">
+                                @(isExpanded ? "▾" : "▸")
+                            </span>
+                            <Icon Name="@(o.Type == "Table" ? "table" : o.Type == "View" ? "eye" : "code")" />
+                            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="@key">@key</span>
+                            <span class="faint small" style="margin-left:auto;font-size:11px">@o.Type</span>
                         </div>
-                        @if (expanded.Contains(key)) { @foreach (var c in o.Columns) { <div class="tree-col">@c</div> } }
+                        @if (isExpanded)
+                        {
+                            @foreach (var c in o.Columns)
+                            {
+                                <div class="tree-col" @onclick="() => CopyColumn(c)" title="Click to copy column name" style="cursor:pointer">
+                                    <span style="opacity:0.6;font-size:10px">●</span> @c
+                                </div>
+                            }
+                        }
                     }
                     @if (!FilteredObjects.Any()) { <div class="muted small" style="padding:8px">No objects.</div> }
                 }
@@ -95,25 +115,97 @@ else
             <button class="icon-btn sm" type="button" title="@(sideOpen == true ? "Hide panel" : "Show panel")" aria-label="@(sideOpen == true ? "Hide objects, saved queries and history" : "Show objects, saved queries and history")" aria-controls="workspace-panel" aria-expanded="@(sideOpen == true ? "true" : "false")" @onclick="ToggleSide"><Icon Name="list" /></button>
             @foreach (var t in tabs)
             {
-                <div class="ws-tab @(t.Id == activeId ? "active" : "")" @onclick="() => Activate(t.Id)">
-                    <span>@t.Name</span><button title="Close" @onclick:stopPropagation @onclick="() => CloseTab(t.Id)">×</button>
+                var isEditing = editingTabId == t.Id;
+                <div class="ws-tab @(t.Id == activeId ? "active" : "")"
+                     @onclick="() => Activate(t.Id)"
+                     @ondblclick="() => StartRenameTab(t)"
+                     title="Click to switch · Double-click to rename">
+                    @if (isEditing)
+                    {
+                        <input class="tab-rename-input"
+                               @bind="editingTabName"
+                               @bind:event="oninput"
+                               @onclick:stopPropagation
+                               @ondblclick:stopPropagation
+                               @onkeydown="HandleTabRenameKey"
+                               @onblur="CommitTabRename"
+                               autofocus />
+                    }
+                    else
+                    {
+                        <span>@t.Name</span>
+                    }
+                    <button type="button" title="Close" @onclick:stopPropagation @onclick="() => CloseTab(t.Id)">×</button>
                 </div>
             }
             <button class="btn btn-sm btn-ghost" @onclick="NewTab"><Icon Name="plus" />New</button>
         </div>
 
         <div class="row-inline ws-bar">
-            <select @bind="CurrentDbId" style="width:auto;min-width:200px">
-                @foreach (var d in databases) { <option value="@d.Id">@d.Name · @d.Environment [@DatabaseEngineInfo.GetDisplayName(d.Engine)] @(d.IsActive ? "" : "(Disabled)")</option> }
-            </select>
-            <label class="chip-toggle @(showDisabledDatabases ? "active" : "")" title="Include disabled databases in database list">
-                <input type="checkbox" class="visually-hidden" @bind="showDisabledDatabases" @bind:after="ReloadDatabases" />
-                <span>Show disabled</span>
-            </label>
             @if (Current is not null && databases.FirstOrDefault(d => d.Id == Current.DatabaseId) is { } cd)
             {
-                <span class="badge @EnvClass(cd.Environment)">@cd.Environment</span>
-                <span class="badge @DatabaseEngineInfo.GetBadgeClass(cd.Engine)">@DatabaseEngineInfo.GetDisplayName(cd.Engine)</span>
+                <div class="db-selector-wrap">
+                    <button type="button" class="db-selector-btn" @onclick="ToggleDbDropdown" title="Switch database (@cd.Name)">
+                        <Icon Name="db" />
+                        <span class="db-name" title="@cd.Name">@cd.Name</span>
+                        <span class="badge @EnvClass(cd.Environment)">@cd.Environment</span>
+                        <span class="badge @DatabaseEngineInfo.GetBadgeClass(cd.Engine)">@DatabaseEngineInfo.GetDisplayName(cd.Engine)</span>
+                        @if (!cd.IsActive) { <span class="badge bad">Disabled</span> }
+                        <span style="font-size:10px;margin-left:2px;opacity:0.7">▾</span>
+                    </button>
+                    @if (dbDropdownOpen)
+                    {
+                        <div class="db-selector-backdrop" @onclick="() => dbDropdownOpen = false"></div>
+                        <div class="db-selector-menu">
+                            <input type="search"
+                                   class="db-selector-search"
+                                   placeholder="Search databases by name, environment, engine…"
+                                   @bind="dbSearchText"
+                                   @bind:event="oninput"
+                                   @onclick:stopPropagation
+                                   autofocus />
+                            <div class="db-selector-list">
+                                @{
+                                    var filteredDbs = databases.Where(d => string.IsNullOrWhiteSpace(dbSearchText) ||
+                                        d.Name.Contains(dbSearchText, StringComparison.OrdinalIgnoreCase) ||
+                                        d.Environment.Contains(dbSearchText, StringComparison.OrdinalIgnoreCase) ||
+                                        DatabaseEngineInfo.GetDisplayName(d.Engine).Contains(dbSearchText, StringComparison.OrdinalIgnoreCase)).ToList();
+                                }
+                                @foreach (var d in filteredDbs)
+                                {
+                                    var isSelected = d.Id == Current.DatabaseId;
+                                    <button type="button" class="db-selector-item @(isSelected ? "selected" : "")" @onclick="() => SelectDatabase(d.Id)">
+                                        <div class="db-info">
+                                            <div class="db-title">
+                                                @if (isSelected) { <span style="color:var(--brand);margin-right:4px">✓</span> }
+                                                @d.Name
+                                            </div>
+                                            @if (!string.IsNullOrWhiteSpace(d.Description))
+                                            {
+                                                <div class="db-desc">@d.Description</div>
+                                            }
+                                        </div>
+                                        <div class="db-tags">
+                                            <span class="badge @EnvClass(d.Environment)">@d.Environment</span>
+                                            <span class="badge @DatabaseEngineInfo.GetBadgeClass(d.Engine)">@DatabaseEngineInfo.GetDisplayName(d.Engine)</span>
+                                            @if (!d.IsActive) { <span class="badge bad">Disabled</span> }
+                                        </div>
+                                    </button>
+                                }
+                                @if (filteredDbs.Count == 0)
+                                {
+                                    <div class="muted small" style="padding:12px;text-align:center">No databases match "@dbSearchText".</div>
+                                }
+                            </div>
+                            <div class="db-selector-footer">
+                                <label class="check small">
+                                    <input type="checkbox" @bind="showDisabledDatabases" @bind:after="ReloadDatabases" /> Show disabled databases
+                                </label>
+                                <span class="faint small">@databases.Count available</span>
+                            </div>
+                        </div>
+                    }
+                </div>
             }
             @if (running) { <button class="btn btn-danger" @onclick="CancelRun"><Icon Name="stop" />Cancel</button> }
             else
@@ -550,6 +642,69 @@ else
     </div>
 }
 
+@if (contextMenuVisible && contextMenuObject is not null)
+{
+    var o = contextMenuObject;
+    var key = o.Schema + "." + o.Name;
+    var isExpanded = expanded.Contains(key);
+
+    <div class="context-menu-backdrop" @onclick="CloseContextMenu" @oncontextmenu="CloseContextMenu" @oncontextmenu:preventDefault></div>
+    <div class="context-menu" style="left:@(contextMenuX)px;top:@(contextMenuY)px" @onclick:stopPropagation>
+        <div class="context-menu-header">
+            <Icon Name="@(o.Type == "Table" ? "table" : o.Type == "View" ? "eye" : "code")" />
+            <span style="overflow:hidden;text-overflow:ellipsis">@key</span>
+        </div>
+        <div class="context-menu-divider"></div>
+
+        @if (o.Type is "Table" or "View")
+        {
+            <button type="button" @onclick="() => RunContextAction(() => InsertSelectTop(o, 100))">
+                <Icon Name="play" /> Select Top 100
+            </button>
+            <button type="button" @onclick="() => RunContextAction(() => InsertSelectTop(o, 1000))">
+                <Icon Name="play" /> Select Top 1,000
+            </button>
+            <button type="button" @onclick="() => RunContextAction(() => InsertSelectAll(o))">
+                <Icon Name="terminal" /> Select All (No Limit)
+            </button>
+            <button type="button" @onclick="() => RunContextAction(() => InsertCount(o))">
+                <Icon Name="activity" /> Select COUNT(*)
+            </button>
+            <div class="context-menu-divider"></div>
+            @if (o.Type == "Table")
+            {
+                <button type="button" @onclick="() => RunContextAction(() => InsertTemplateInsert(o))">
+                    <Icon Name="plus" /> Script as INSERT
+                </button>
+                <button type="button" @onclick="() => RunContextAction(() => InsertTemplateUpdate(o))">
+                    <Icon Name="edit" /> Script as UPDATE
+                </button>
+                <button type="button" @onclick="() => RunContextAction(() => InsertTemplateDelete(o))">
+                    <Icon Name="trash" /> Script as DELETE
+                </button>
+                <div class="context-menu-divider"></div>
+            }
+        }
+        else
+        {
+            <button type="button" @onclick="() => RunContextAction(() => InsertSelect(o))">
+                <Icon Name="play" /> Execute / Call
+            </button>
+            <button type="button" @onclick="() => RunContextAction(() => InsertTemplateExec(o))">
+                <Icon Name="code" /> Script EXEC Template
+            </button>
+            <div class="context-menu-divider"></div>
+        }
+
+        <button type="button" @onclick="() => RunContextAction(() => Toggle(key))">
+            <Icon Name="list" /> @(isExpanded ? "Collapse Columns" : "View Columns")
+        </button>
+        <button type="button" @onclick="() => RunContextAction(() => CopyObjectName(key))">
+            <Icon Name="copy" /> Copy Object Name
+        </button>
+    </div>
+}
+
 <ConfirmDialog IsOpen="@(deletingSaved is not null)"
                Title="Delete Saved Query?"
                Message="@($"Are you sure you want to delete the saved query '{deletingSaved?.Name}'?")"
@@ -967,7 +1122,201 @@ else
         await LoadSql(sql, null);
     }
 
+    private async Task InsertCount(DbObjectInfo o)
+    {
+        var currentDb = databases.FirstOrDefault(d => d.Id == Current?.DatabaseId);
+        var engine = currentDb?.Engine ?? DatabaseEngine.SqlServer;
+        string sql = engine switch
+        {
+            DatabaseEngine.PostgreSql => $"SELECT COUNT(*) AS total_rows FROM \"{o.Schema}\".\"{o.Name}\";",
+            DatabaseEngine.MySql or DatabaseEngine.MariaDb => $"SELECT COUNT(*) AS total_rows FROM `{o.Schema}`.`{o.Name}`;",
+            _ => $"SELECT COUNT(*) AS total_rows FROM [{o.Schema}].[{o.Name}];"
+        };
+        await LoadSql(sql, null);
+    }
+
+    private async Task CopyColumn(string colName)
+    {
+        await JS.InvokeVoidAsync("dbam.copy", colName);
+        Say($"Copied column: {colName}");
+    }
+
     private void Toggle(string key) { if (!expanded.Remove(key)) expanded.Add(key); }
+
+    private string? editingTabId;
+    private string editingTabName = "";
+
+    private void StartRenameTab(QueryTab t)
+    {
+        editingTabId = t.Id;
+        editingTabName = t.Name;
+    }
+
+    private async Task CommitTabRename()
+    {
+        if (editingTabId is not null)
+        {
+            var tab = tabs.FirstOrDefault(x => x.Id == editingTabId);
+            if (tab != null && !string.IsNullOrWhiteSpace(editingTabName))
+            {
+                tab.Name = editingTabName.Trim();
+                await PersistAsync();
+            }
+            editingTabId = null;
+        }
+    }
+
+    private void CancelRenameTab()
+    {
+        editingTabId = null;
+    }
+
+    private async Task HandleTabRenameKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await CommitTabRename();
+        }
+        else if (e.Key == "Escape")
+        {
+            CancelRenameTab();
+        }
+    }
+
+    private bool dbDropdownOpen;
+    private string dbSearchText = "";
+
+    private void ToggleDbDropdown()
+    {
+        dbDropdownOpen = !dbDropdownOpen;
+        if (dbDropdownOpen) dbSearchText = "";
+    }
+
+    private void SelectDatabase(Guid id)
+    {
+        dbDropdownOpen = false;
+        CurrentDbId = id;
+    }
+
+    private bool contextMenuVisible;
+    private double contextMenuX;
+    private double contextMenuY;
+    private DbObjectInfo? contextMenuObject;
+
+    private void OpenObjectContextMenu(MouseEventArgs e, DbObjectInfo o)
+    {
+        contextMenuObject = o;
+        contextMenuX = Math.Min(e.ClientX, 400);
+        contextMenuY = Math.Min(e.ClientY, 650);
+        contextMenuVisible = true;
+    }
+
+    private void CloseContextMenu()
+    {
+        contextMenuVisible = false;
+        contextMenuObject = null;
+    }
+
+    private async Task RunContextAction(Func<Task> action)
+    {
+        CloseContextMenu();
+        await action();
+    }
+
+    private void RunContextAction(Action action)
+    {
+        CloseContextMenu();
+        action();
+    }
+
+    private async Task InsertSelectTop(DbObjectInfo o, int top)
+    {
+        var currentDb = databases.FirstOrDefault(d => d.Id == Current?.DatabaseId);
+        var engine = currentDb?.Engine ?? DatabaseEngine.SqlServer;
+        string sql = engine switch
+        {
+            DatabaseEngine.PostgreSql => $"SELECT * FROM \"{o.Schema}\".\"{o.Name}\" LIMIT {top};",
+            DatabaseEngine.MySql or DatabaseEngine.MariaDb => $"SELECT * FROM `{o.Schema}`.`{o.Name}` LIMIT {top};",
+            _ => $"SELECT TOP {top} * FROM [{o.Schema}].[{o.Name}];"
+        };
+        await LoadSql(sql, null);
+    }
+
+    private async Task InsertSelectAll(DbObjectInfo o)
+    {
+        var currentDb = databases.FirstOrDefault(d => d.Id == Current?.DatabaseId);
+        var engine = currentDb?.Engine ?? DatabaseEngine.SqlServer;
+        string sql = engine switch
+        {
+            DatabaseEngine.PostgreSql => $"SELECT * FROM \"{o.Schema}\".\"{o.Name}\";",
+            DatabaseEngine.MySql or DatabaseEngine.MariaDb => $"SELECT * FROM `{o.Schema}`.`{o.Name}`;",
+            _ => $"SELECT * FROM [{o.Schema}].[{o.Name}];"
+        };
+        await LoadSql(sql, null);
+    }
+
+    private async Task InsertTemplateInsert(DbObjectInfo o)
+    {
+        var currentDb = databases.FirstOrDefault(d => d.Id == Current?.DatabaseId);
+        var engine = currentDb?.Engine ?? DatabaseEngine.SqlServer;
+        var cols = o.Columns.Count > 0 ? o.Columns : new List<string> { "Col1", "Col2" };
+        string sql = engine switch
+        {
+            DatabaseEngine.PostgreSql => $"INSERT INTO \"{o.Schema}\".\"{o.Name}\" ({string.Join(", ", cols.Select(c => $"\"{c}\""))})\nVALUES ({string.Join(", ", cols.Select(_ => "?"))});",
+            DatabaseEngine.MySql or DatabaseEngine.MariaDb => $"INSERT INTO `{o.Schema}`.`{o.Name}` ({string.Join(", ", cols.Select(c => $"`{c}`"))})\nVALUES ({string.Join(", ", cols.Select(_ => "?"))});",
+            _ => $"INSERT INTO [{o.Schema}].[{o.Name}] ({string.Join(", ", cols.Select(c => $"[{c}]"))})\nVALUES ({string.Join(", ", cols.Select(_ => "?"))});"
+        };
+        await LoadSql(sql, null);
+    }
+
+    private async Task InsertTemplateUpdate(DbObjectInfo o)
+    {
+        var currentDb = databases.FirstOrDefault(d => d.Id == Current?.DatabaseId);
+        var engine = currentDb?.Engine ?? DatabaseEngine.SqlServer;
+        var cols = o.Columns.Count > 0 ? o.Columns : new List<string> { "Col1", "Col2" };
+        var idCol = cols.FirstOrDefault() ?? "Id";
+        var updateCols = cols.Count > 1 ? cols.Skip(1).Take(4) : cols.Take(1);
+        string sql = engine switch
+        {
+            DatabaseEngine.PostgreSql => $"UPDATE \"{o.Schema}\".\"{o.Name}\"\nSET {string.Join(",\n    ", updateCols.Select(c => $"\"{c}\" = ?"))}\nWHERE \"{idCol}\" = ?;",
+            DatabaseEngine.MySql or DatabaseEngine.MariaDb => $"UPDATE `{o.Schema}`.`{o.Name}`\nSET {string.Join(",\n    ", updateCols.Select(c => $"`{c}` = ?"))}\nWHERE `{idCol}` = ?;",
+            _ => $"UPDATE [{o.Schema}].[{o.Name}]\nSET {string.Join(",\n    ", updateCols.Select(c => $"[{c}] = ?"))}\nWHERE [{idCol}] = ?;"
+        };
+        await LoadSql(sql, null);
+    }
+
+    private async Task InsertTemplateDelete(DbObjectInfo o)
+    {
+        var currentDb = databases.FirstOrDefault(d => d.Id == Current?.DatabaseId);
+        var engine = currentDb?.Engine ?? DatabaseEngine.SqlServer;
+        var idCol = o.Columns.FirstOrDefault() ?? "Id";
+        string sql = engine switch
+        {
+            DatabaseEngine.PostgreSql => $"DELETE FROM \"{o.Schema}\".\"{o.Name}\"\nWHERE \"{idCol}\" = ?;",
+            DatabaseEngine.MySql or DatabaseEngine.MariaDb => $"DELETE FROM `{o.Schema}`.`{o.Name}`\nWHERE `{idCol}` = ?;",
+            _ => $"DELETE FROM [{o.Schema}].[{o.Name}]\nWHERE [{idCol}] = ?;"
+        };
+        await LoadSql(sql, null);
+    }
+
+    private async Task InsertTemplateExec(DbObjectInfo o)
+    {
+        var currentDb = databases.FirstOrDefault(d => d.Id == Current?.DatabaseId);
+        var engine = currentDb?.Engine ?? DatabaseEngine.SqlServer;
+        string sql = engine switch
+        {
+            DatabaseEngine.PostgreSql => $"SELECT * FROM \"{o.Schema}\".\"{o.Name}\"();",
+            DatabaseEngine.MySql or DatabaseEngine.MariaDb => $"CALL `{o.Schema}`.`{o.Name}`();",
+            _ => $"EXEC [{o.Schema}].[{o.Name}];"
+        };
+        await LoadSql(sql, null);
+    }
+
+    private async Task CopyObjectName(string key)
+    {
+        await JS.InvokeVoidAsync("dbam.copy", key);
+        Say($"Copied object name: {key}");
+    }
 
     private async Task Run() => await RunCore(false);
     private async Task ConfirmRun() { confirm = null; await RunCore(true); }

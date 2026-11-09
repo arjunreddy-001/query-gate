@@ -26,6 +26,22 @@ To add a permission:
 4. Add tests in `tests\DbAccessManager.Tests` for allowed, denied and edge cases.
 5. Update `docs\USER-GUIDE.md` and `docs\ADMIN-CHEATSHEET.md`.
 
+## Object-Level Scoping (`Security/ObjectScope.cs`)
+
+Grants can be scoped to specific tables, views, or schemas rather than entire databases:
+- Formats: `*` (entire database), `schema.*` (all objects in schema), `schema.table` (specific object), or `table` (object in default schema).
+- `ObjectScope.Matches(ruleScope, targetObject)` resolves wildcards and case-insensitively checks if a rule permits or denies access to a target.
+- Database and role scope rules (`DatabaseRoleScopeRule`, `AccessConfiguration`) define default inclusions/exclusions per database or role.
+- If a user has a permission grant with an object scope list, only queries referencing matched objects are permitted.
+
+## Dialect Gate (`Security/SqlGate.cs`, `ValidateDialectAsync`)
+
+For non-SQL Server engines (PostgreSQL, MySQL, MariaDB):
+1. ScriptDom is T-SQL specific, so non-SQL Server queries are analyzed using `SqlGate.ValidateDialectAsync`.
+2. Comments (`--`, `/* ... */`) and string literals (`'...'`, `"..."`, `` `...` ``) are stripped first to prevent false positive keyword matching.
+3. Forbidden commands are denied: `CREATE`, `ALTER`, `DROP`, `TRUNCATE`, `GRANT`, `REVOKE`, `EXECUTE`, `CALL`, `COPY`, `INTO OUTFILE`, `PG_READ_FILE`, `LOAD DATA`, and dangerous system procedures.
+4. Validated statement types are classified into SELECT, INSERT, UPDATE, DELETE requirements.
+
 ## Rules
 
 - Be conservative: when the gate cannot parse or classify something, deny it.

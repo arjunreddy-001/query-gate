@@ -165,6 +165,11 @@ public sealed class ObjectLevelPermissionsTests
     [InlineData("sales.*", "sales", "Orders", true)]
     [InlineData("sales.*", "dbo", "Orders", false)]
     [InlineData("dbo.Customers", "dbo", "Customers", true)]
+    [InlineData("dbo.Customers", null, "Customers", true)]
+    [InlineData("public.Customers", null, "Customers", true)]
+    [InlineData("sales.Customers", null, "Customers", false)]
+    [InlineData("dbo.*", null, "Customers", true)]
+    [InlineData("sales.*", null, "Customers", false)]
     [InlineData("dbo.Customers", "dbo", "Orders", false)]
     [InlineData("Customers", "dbo", "Customers", true)]
     [InlineData("Customers", null, "Customers", true)]
@@ -247,6 +252,16 @@ public sealed class ObjectLevelPermissionsTests
         Assert.Contains(analysis.ObjectRequirements, o => o.Permission == Perm.Select && o.ObjectName == "orders");
         Assert.Contains(analysis.ObjectRequirements, o => o.Permission == Perm.Select && o.ObjectName == "customers");
         Assert.Contains(analysis.ObjectRequirements, o => o.Permission == Perm.Update && o.ObjectName == "stock");
+    }
+
+    [Fact]
+    public void SqlGate_ExtractsObjects_PostgreSql_WithCommentsAndStrings()
+    {
+        var sql = "SELECT 'FROM fake_table' AS col FROM /* comment */ public.secret_records WHERE id = 1;";
+        var analysis = _gate.Analyze(sql, DatabaseEngine.PostgreSql);
+
+        Assert.Contains(analysis.ObjectRequirements, o => o.Permission == Perm.Select && o.ObjectName == "secret_records");
+        Assert.DoesNotContain(analysis.ObjectRequirements, o => o.ObjectName == "fake_table");
     }
 
     [Fact]

@@ -24,6 +24,9 @@ Custom CSS only (no new Bootstrap dependency). Files: `wwwroot\app.css`, `wwwroo
 - `.ws` fills the viewport height. `.editor-box` and `.results` are flex children and the `.ws-split` bar resizes the editor.
 - The results card has a Maximize and Restore toggle (`.results.maximized` is `position: fixed; inset: 0`).
 - Monaco is created in `app.js` (`editorInit`) with `fixedOverflowWidgets: true` so suggestions are not clipped. Suggestion rows rely on Monaco's own class names, so avoid global CSS that targets generic names.
+- Database selector (`.db-selector-*`): Custom trigger dropdown displaying database name with engine badge and environment badge. Badges use `flex-shrink: 0` so they are never truncated or hidden when long database names are selected.
+- Object Explorer: Clicking a table or view defaults to `SELECT TOP 100` (or `LIMIT 100`). Contextual operations are accessed via right-click contextual menu (`.oe-context-menu` positioned at click coordinates). Do not place inline action buttons inside tree rows.
+- Query tabs: Double-clicking an active tab switches the label to an inline `<input class="tab-rename-input">` allowing instant renaming. Enter or blur saves; Escape cancels. Tab state and custom names are persisted in `localStorage` under `dbam-tabs`.
 
 ## Wording and branding
 

@@ -145,19 +145,28 @@ public static class ObjectScope
             var objMatches = string.Equals(pObj, objectName, StringComparison.OrdinalIgnoreCase);
             if (!objMatches) return false;
 
-            if (!string.IsNullOrEmpty(pSchema))
-            {
-                return !string.IsNullOrEmpty(schema) && string.Equals(pSchema, schema, StringComparison.OrdinalIgnoreCase);
-            }
-            return true;
+            return SchemaMatches(pSchema, schema);
         }
 
         if (!string.IsNullOrEmpty(pSchema))
         {
-            return !string.IsNullOrEmpty(schema) && string.Equals(pSchema, schema, StringComparison.OrdinalIgnoreCase);
+            return SchemaMatches(pSchema, schema);
         }
 
         return false;
+    }
+
+    private static bool SchemaMatches(string? patternSchema, string? targetSchema)
+    {
+        if (string.IsNullOrEmpty(patternSchema) || patternSchema == "*") return true;
+        if (!string.IsNullOrEmpty(targetSchema))
+        {
+            return string.Equals(patternSchema, targetSchema, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Target schema was omitted in the query; default schemas are "dbo" (SQL Server) and "public" (PostgreSQL)
+        return string.Equals(patternSchema, "dbo", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(patternSchema, "public", StringComparison.OrdinalIgnoreCase);
     }
 
     public static bool MatchesAny(IEnumerable<string>? patterns, string? schema, string objectName)

@@ -13,6 +13,9 @@
         <nav class="docs-nav" aria-label="Documentation sections">
             <a href="/documentation#overview">Overview</a>
             <a href="/documentation#user-guide">User guide</a>
+            <a href="/documentation#object-rules">Object scoping</a>
+            <a href="/documentation#data-masking">Data masking</a>
+            <a href="/documentation#exports-and-plans">Exports &amp; Explain</a>
             <a href="/documentation#iis">IIS</a>
             <a href="/documentation#azure">Azure App Service</a>
             <a href="/documentation#linux">Linux server</a>
@@ -26,7 +29,7 @@
             <section id="overview">
                 <h2>Overview</h2>
                 <p>Query Gate is a .NET 10 Blazor Server application for governed database access across SQL Server, PostgreSQL, MySQL and MariaDB. Users work in a query workspace without seeing database credentials. Permissions, approvals and audit records control and document every execution.</p>
-                <p>Key capabilities: permission-gated SQL, multi-engine support (SQL Server, PostgreSQL, MySQL, MariaDB), time-boxed access grants, audit-first execution, passkey / TOTP authentication, an access-request workflow, and CSV export with per-user export permissions.</p>
+                <p>Key capabilities: permission-gated SQL with ScriptDom AST parsing, multi-engine support, granular object-level scoping and role boundaries, dynamic PII data masking (HIPAA, GDPR, PCI-DSS, SOC 2), visual query execution plans, time-boxed access grants, audit-first execution, passkey / TOTP authentication, an access-request workflow, and multi-format exports (CSV, Excel XLSX/XLSB, JSON, Markdown, and SQL INSERT scripts).</p>
             </section>
             <section id="user-guide">
                 <h2>User guide</h2>
@@ -34,21 +37,62 @@
                 <div class="docs-guide-cards">
                     <div class="docs-card">
                         <h3><Icon Name="terminal" /> Query workspace</h3>
-                        <p>Select your database (SQL Server, PostgreSQL, MySQL, MariaDB), write SQL with Monaco syntax assistance and keyboard shortcuts (<kbd>F5</kbd>, <kbd>Ctrl+Enter</kbd>), and execute queries. Results appear in a responsive data grid.</p>
+                        <p>Select your database, write SQL with Monaco syntax assistance and keyboard shortcuts (<kbd>F5</kbd>, <kbd>Ctrl+Enter</kbd>), and execute queries. Results appear in a responsive, filterable data grid with row counters.</p>
                     </div>
                     <div class="docs-card">
                         <h3><Icon Name="shield" /> SQL Gate validation</h3>
-                        <p>Queries are parsed and verified using Microsoft ScriptDom before execution. Disallowed statements, cross-database queries, or forbidden system procedures are denied upfront.</p>
+                        <p>Queries are parsed and verified using Microsoft ScriptDom (and dialect parsers) before execution. Disallowed statements, cross-database queries, or forbidden system procedures are denied upfront.</p>
                     </div>
                     <div class="docs-card">
                         <h3><Icon Name="key" /> Access requests &amp; approval</h3>
                         <p>Need temporary or elevated access? Request access directly from the Access page. Administrators review, approve with expiration dates, or reject requests with full audit records.</p>
                     </div>
                     <div class="docs-card">
-                        <h3><Icon Name="download" /> Auditing &amp; CSV export</h3>
-                        <p>Every executed statement is recorded with execution duration, outcome, and user identity. Users with <code>EXPORT:CSV</code> permission can download query results directly.</p>
+                        <h3><Icon Name="download" /> Auditing &amp; multi-format export</h3>
+                        <p>Every executed statement is recorded with duration, outcome, and user identity. Users with <code>EXPORT</code> permission can download query results as CSV, Excel (.xlsx, .xlsb), JSON, Markdown, or SQL INSERT statements.</p>
+                    </div>
+                    <div class="docs-card">
+                        <h3><Icon Name="db" /> Object scoping &amp; boundaries</h3>
+                        <p>Configure granular table and schema boundaries at both database and team-role levels. Protect sensitive tables with exclusion rules and wildcards like <code>dbo.*</code> or <code>*.secrets</code>.</p>
+                    </div>
+                    <div class="docs-card">
+                        <h3><Icon Name="lock" /> Dynamic PII masking</h3>
+                        <p>Columns matching PII patterns (credit cards, SSNs, patient names, medical IDs) are redacted automatically. Users with the high-risk <code>UNMASK</code> permission see plain data.</p>
                     </div>
                 </div>
+            </section>
+            <section id="object-rules">
+                <h2>Object-level scoping and boundaries</h2>
+                <p>Query Gate allows administrators to restrict access not just per database, but down to specific schemas and tables:</p>
+                <ul>
+                    <li><b>Database-level rules:</b> Applied to all users querying a database. Excluded tables (e.g. <code>dbo.AuditLogs</code>, <code>*.passwords</code>) cannot be queried by anyone, even administrators.</li>
+                    <li><b>Role-level rules:</b> Applied to members of specific roles (e.g. Developers, Support, QA). Whitelists allow querying only approved tables, while blacklists protect confidential tables.</li>
+                    <li><b>Wildcard syntax:</b> Use <code>*</code> for all objects, <code>schema.*</code> for an entire schema (e.g. <code>sales.*</code>), or <code>*.column</code> / <code>*.table</code> for cross-schema matching.</li>
+                    <li><b>Conflict prevention:</b> Query Gate automatically detects if an object is simultaneously included and excluded, preventing accidental misconfigurations.</li>
+                </ul>
+            </section>
+            <section id="data-masking">
+                <h2>Dynamic data masking and compliance</h2>
+                <p>Query Gate includes built-in compliance presets aligned with major regulatory standards:</p>
+                <ul>
+                    <li><b>PCI-DSS 3.4 &amp; 3.2:</b> Masks credit card PANs (preserving only last 4 digits) and completely redacts CVVs and PINs.</li>
+                    <li><b>HIPAA Safe Harbor:</b> Redacts patient names (<code>J***n S***h</code>), medical record numbers (MRNs), admission dates, and geographic locations smaller than a state.</li>
+                    <li><b>GDPR &amp; CCPA:</b> Redacts email addresses, IP addresses, government IDs, and telephone numbers.</li>
+                    <li><b>SOC 2 Confidentiality:</b> Redacts employee salaries, compensation figures, and authentication secrets.</li>
+                    <li><b>The UNMASK permission:</b> Marked as High Risk in the access matrix; required to view unredacted data. All unmasked queries are recorded in the audit trail.</li>
+                </ul>
+            </section>
+            <section id="exports-and-plans">
+                <h2>Exports and query explain plans</h2>
+                <p>Query results can be exported into multiple formats depending on your workflow:</p>
+                <ul>
+                    <li><b>CSV (.csv):</b> Standard comma-separated format with formula injection neutralization.</li>
+                    <li><b>Excel (.xlsx &amp; .xlsb):</b> Native OpenXML and binary spreadsheet formats with styled header rows.</li>
+                    <li><b>JSON (.json):</b> Formatted array of objects for API and developer integration.</li>
+                    <li><b>Markdown:</b> Clean GitHub-flavored Markdown table copied directly to clipboard.</li>
+                    <li><b>SQL INSERT script:</b> Generates runnable <code>INSERT INTO</code> scripts with optional idempotency (<code>IF NOT EXISTS</code>) checks based on selected primary/unique keys.</li>
+                    <li><b>Explain Plan:</b> Click <b>Explain</b> in the query workspace to generate and visualize estimated subtree costs, operator hierarchies, and execution steps.</li>
+                </ul>
             </section>
             <section id="iis">
                 <h2>Deploy to IIS on Windows</h2>

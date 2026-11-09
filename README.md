@@ -58,7 +58,7 @@ Full usage documentation: [docs/USER-GUIDE.md](./docs/USER-GUIDE.md). Admin quic
 
 ## Limitations
 
-No object-level permission scope; LocalDB is untested.
+LocalDB is untested; use full SQL Server, Azure SQL, PostgreSQL, MySQL or MariaDB instances.
 
 ## AI Agent Skills (Cross-Platform)
 

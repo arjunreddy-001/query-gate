@@ -10,7 +10,9 @@ When performing development or maintenance tasks in this codebase, reference the
 
 - **Build, Run, & Verification**: Refer to `.github/skills/run-and-verify/SKILL.md` for build/test procedures, locked binary troubleshooting, and scratch browser verification.
 - **EF Core Migrations**: Refer to `.github/skills/ef-migrations/SKILL.md` when altering entities, DbContext, creating or resetting migrations, or handling schema mismatches.
-- **SQL Gate & Permissions**: Refer to `.github/skills/sql-gate-and-permissions/SKILL.md` when editing SQL validation, execution pipelines, permission checking, or audit logging.
+- **SQL Gate & Permissions**: Refer to `.github/skills/sql-gate-and-permissions/SKILL.md` when editing SQL validation, dialect analysis, execution pipelines, permission checking, or audit logging.
+- **Database Providers**: Refer to `.github/skills/database-providers/SKILL.md` when modifying multi-engine providers (SQL Server, PostgreSQL, MySQL, MariaDB), connections, plans, or metadata.
+- **Data Masking & Compliance**: Refer to `.github/skills/data-masking/SKILL.md` when modifying dynamic data masking rules, compliance presets (GDPR, HIPAA, PCI-DSS, SOC 2), or UNMASK bypass.
 - **Blazor Pages & Navigation**: Refer to `.github/skills/blazor-page-conventions/SKILL.md` when creating or modifying Razor components, pages, menus, or first-render state.
 - **UI Design System**: Refer to `.github/skills/ui-design-system/SKILL.md` when modifying CSS styles, themes, sidebar layout, results grid, or editor behavior.
 

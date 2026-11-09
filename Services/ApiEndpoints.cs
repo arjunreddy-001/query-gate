@@ -70,7 +70,7 @@ public static class ApiEndpoints
         secured.MapPost("/auth/change-password", async (ChangePasswordRequest body, HttpContext http, UserManager<ApplicationUser> users, AuditService audit) =>
         {
             var user = await users.FindByIdAsync(http.User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            if (user is null) return Results.Unauthorized();
+            if (user is null || !user.CanSignIn(DateTimeOffset.UtcNow) || await users.IsLockedOutAsync(user)) return Results.Unauthorized();
             var result = await users.ChangePasswordAsync(user, body.CurrentPassword, body.NewPassword);
             if (!result.Succeeded) return Results.ValidationProblem(new Dictionary<string, string[]> { ["password"] = result.Errors.Select(e => e.Description).ToArray() });
             user.MustChangePassword = false;

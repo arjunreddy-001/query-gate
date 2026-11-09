@@ -87,11 +87,15 @@ public sealed class SettingsService(IDbContextFactory<ApplicationDbContext> fact
     {
         await using var db = await factory.CreateDbContextAsync();
         var stored = await db.Settings.AsNoTracking().FirstOrDefaultAsync(s => s.Key == key);
-        return stored?.Value ?? Definitions[key].Default;
+        return stored?.Value ?? (Definitions.TryGetValue(key, out var def) ? def.Default : "");
     }
 
-    public async Task<int> GetIntAsync(string key) =>
-        int.TryParse(await GetAsync(key), out var value) ? value : int.Parse(Definitions[key].Default);
+    public async Task<int> GetIntAsync(string key)
+    {
+        var raw = await GetAsync(key);
+        if (int.TryParse(raw, out var value)) return value;
+        return Definitions.TryGetValue(key, out var def) && int.TryParse(def.Default, out var fallback) ? fallback : 0;
+    }
 
     public async Task<bool> GetBoolAsync(string key) => bool.TryParse(await GetAsync(key), out var v) && v;
 

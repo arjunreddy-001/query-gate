@@ -252,7 +252,8 @@ public sealed partial class SqlGate
                 break;
         }
 
-        ExtractStandardSqlObjects(sql, first, analysis);
+        var cleanSqlForObjects = StripCommentsAndLiteralsKeepIdentifiers(sql);
+        ExtractStandardSqlObjects(cleanSqlForObjects, first, analysis);
     }
 
     private static void ExtractStandardSqlObjects(string sql, string first, GateAnalysis analysis)
@@ -347,6 +348,134 @@ public sealed partial class SqlGate
             tokens.Add(m.Value);
         }
         return tokens;
+    }
+
+    private static string StripCommentsAndLiteralsKeepIdentifiers(string sql)
+    {
+        var sb = new StringBuilder(sql.Length);
+        var inString = false;
+        var inBlockComment = false;
+        var inLineComment = false;
+        var inDollarString = false;
+        var inBacktick = false;
+        var inDoubleQuote = false;
+        var inBracket = false;
+
+        for (var i = 0; i < sql.Length; i++)
+        {
+            var c = sql[i];
+            var next = i + 1 < sql.Length ? sql[i + 1] : '\0';
+
+            if (inLineComment)
+            {
+                if (c == '\n') { inLineComment = false; sb.Append('\n'); }
+                continue;
+            }
+
+            if (inBlockComment)
+            {
+                if (c == '*' && next == '/') { inBlockComment = false; i++; sb.Append(' '); }
+                continue;
+            }
+
+            if (inDollarString)
+            {
+                if (c == '$' && next == '$') { inDollarString = false; i++; sb.Append(' '); }
+                continue;
+            }
+
+            if (inString)
+            {
+                if (c == '\'')
+                {
+                    if (next == '\'') { i++; }
+                    else { inString = false; sb.Append(' '); }
+                }
+                continue;
+            }
+
+            if (inBacktick)
+            {
+                sb.Append(c);
+                if (c == '`') inBacktick = false;
+                continue;
+            }
+
+            if (inDoubleQuote)
+            {
+                sb.Append(c);
+                if (c == '"') inDoubleQuote = false;
+                continue;
+            }
+
+            if (inBracket)
+            {
+                sb.Append(c);
+                if (c == ']') inBracket = false;
+                continue;
+            }
+
+            // Start of comment
+            if (c == '-' && next == '-')
+            {
+                inLineComment = true;
+                i++;
+                sb.Append(' ');
+                continue;
+            }
+            if (c == '#')
+            {
+                inLineComment = true;
+                sb.Append(' ');
+                continue;
+            }
+            if (c == '/' && next == '*')
+            {
+                inBlockComment = true;
+                i++;
+                sb.Append(' ');
+                continue;
+            }
+
+            // Start of string literal
+            if (c == '\'')
+            {
+                inString = true;
+                sb.Append(' ');
+                continue;
+            }
+            if (c == '$' && next == '$')
+            {
+                inDollarString = true;
+                i++;
+                sb.Append(' ');
+                continue;
+            }
+
+            // Start of quoted identifier
+            if (c == '`')
+            {
+                inBacktick = true;
+                sb.Append(c);
+                continue;
+            }
+            if (c == '"')
+            {
+                inDoubleQuote = true;
+                sb.Append(c);
+                continue;
+            }
+            if (c == '[')
+            {
+                inBracket = true;
+                sb.Append(c);
+                continue;
+            }
+
+            sb.Append(c);
+        }
+
+        return sb.ToString();
     }
 
     private static string StripCommentsAndStrings(string sql, out bool hasStrings)

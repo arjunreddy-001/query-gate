@@ -38,12 +38,16 @@
     <section class="landing-features" aria-labelledby="features-title">
         <div class="landing-section-head"><span class="landing-kicker">CONTROL WITHOUT THE FRICTION</span><h2 id="features-title">A better path from request to query.</h2><p>Give people a practical workspace and administrators the visibility they need.</p></div>
         <div class="landing-feature-grid">
-            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="shield" /></span><h3>Permission-gated SQL</h3><p>Statements are analysed and checked against effective permissions before they reach a database.</p></article>
+            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="shield" /></span><h3>Permission-gated SQL</h3><p>Statements are analysed with ScriptDom and checked against effective permissions before reaching a database.</p></article>
+            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="db" /></span><h3>Granular object scoping</h3><p>Control access at database, schema and table levels with role-specific whitelists and blacklists.</p></article>
+            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="lock" /></span><h3>Dynamic data masking</h3><p>Automatically redact sensitive PII including card numbers, SSNs, and medical records for HIPAA, GDPR and PCI-DSS.</p></article>
+            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="activity" /></span><h3>Visual explain plans</h3><p>Inspect estimated query execution plans, operator tree hierarchies, and node costs before running queries.</p></article>
+            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="download" /></span><h3>Multi-format export</h3><p>Export results directly to CSV, Excel (.xlsx, .xlsb), JSON, Markdown, or runnable SQL INSERT scripts.</p></article>
             <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="clock" /></span><h3>Access on your terms</h3><p>Manage role and user grants, approve requests and set time windows for temporary access.</p></article>
-            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="list" /></span><h3>Accountability built in</h3><p>Queries require an audit record before execution, giving your team a trail of activity.</p></article>
-            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="terminal" /></span><h3>A workspace for SQL</h3><p>Explore database objects, write and save queries, and review results in one place.</p></article>
-            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="check" /></span><h3>Requests and approvals</h3><p>Request database access or submit scripts for administrators to review.</p></article>
-            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="lock" /></span><h3>Passkeys and 2FA</h3><p>Sign in with a passkey or TOTP authenticator app for phishing-resistant authentication.</p></article>
+            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="list" /></span><h3>Accountability built in</h3><p>Queries require an audit record before execution, giving your team a complete trail of activity.</p></article>
+            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="terminal" /></span><h3>Monaco SQL workspace</h3><p>Explore database objects, write and save queries with autocomplete, and review results in one place.</p></article>
+            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="check" /></span><h3>Requests and approvals</h3><p>Request database access or submit scripts for administrators to review and approve.</p></article>
+            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="lock" /></span><h3>Passkeys and 2FA</h3><p>Sign in with a WebAuthn passkey or TOTP authenticator app for phishing-resistant authentication.</p></article>
         </div>
     </section>
     <section class="landing-section" aria-labelledby="workspace-title">
@@ -89,11 +93,13 @@
             <span class="landing-kicker">SECURITY AND SCOPE</span><h2>Use guardrails with least privilege.</h2>
             <p>Application permissions complement database server permissions. Use dedicated least-privilege database accounts, HTTPS, protected secrets and secure backups.</p>
             <div class="landing-scope-box">
-                <strong>Scope &amp; constraints:</strong>
+                <strong>Capabilities &amp; guardrails:</strong>
                 <ul>
                     <li>Supports SQL Server, PostgreSQL, MySQL and MariaDB targets.</li>
-                    <li>Database-level permissions (object-level scoping not included).</li>
-                    <li>CSV is the primary export format.</li>
+                    <li>Granular object-level scoping and role inclusion/exclusion boundaries.</li>
+                    <li>Automatic PII data masking (HIPAA, GDPR, PCI-DSS, SOC 2).</li>
+                    <li>Multi-format exports: CSV, Excel (.xlsx, .xlsb), JSON, Markdown, and SQL INSERT.</li>
+                    <li>Fail-closed audit-first query pipeline and Monaco editor workspace.</li>
                 </ul>
             </div>
             <a href="/documentation#configuration">Read deployment and security guidance</a>

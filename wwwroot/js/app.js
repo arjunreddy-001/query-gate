@@ -508,15 +508,27 @@ window.dbam = (function () {
       var input = document.getElementById(inputId);
       if (!input) return;
 
-      function show() { input.type = 'text'; }
-      function hide() { input.type = 'password'; }
+      function setVisibility(show) {
+        input.type = show ? 'text' : 'password';
+        if (show) {
+          btn.classList.add('is-visible');
+          btn.setAttribute('aria-label', 'Hide password');
+          btn.setAttribute('title', 'Hide password');
+          btn.setAttribute('aria-pressed', 'true');
+        } else {
+          btn.classList.remove('is-visible');
+          btn.setAttribute('aria-label', 'Show password');
+          btn.setAttribute('title', 'Show password');
+          btn.setAttribute('aria-pressed', 'false');
+        }
+      }
 
-      btn.addEventListener('mouseenter', show);
-      btn.addEventListener('mouseleave', hide);
-      btn.addEventListener('pointerdown', show);
-      btn.addEventListener('pointerup', hide);
-      btn.addEventListener('pointercancel', hide);
-      btn.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); });
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var isShowing = input.type === 'text';
+        setVisibility(!isShowing);
+      });
     });
   }
 

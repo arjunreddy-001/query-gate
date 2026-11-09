@@ -11,11 +11,27 @@ Specialized procedures and runbooks are located in `.github/skills/`. Whenever y
 - **Entity Framework Migrations** (`.github/skills/ef-migrations/SKILL.md`):
   Creating, applying, resetting, and troubleshooting EF Core migrations for SQL Server.
 - **SQL Gate & Permissions** (`.github/skills/sql-gate-and-permissions/SKILL.md`):
-  ScriptDom SQL gate rules, permission models, statement validation, execution pipelines, and audit trails.
+  ScriptDom SQL gate rules, dialect analysis, permission models, statement validation, execution pipelines, and audit trails.
+- **Database Providers** (`.github/skills/database-providers/SKILL.md`):
+  Multi-engine providers (SQL Server, PostgreSQL, MySQL, MariaDB), connections, execution plans, and metadata discovery.
+- **Data Masking** (`.github/skills/data-masking/SKILL.md`):
+  In-flight dynamic data masking (GDPR, HIPAA, PCI-DSS, SOC 2), strategies, UNMASK bypass, and test validation.
 - **Blazor Page Conventions** (`.github/skills/blazor-page-conventions/SKILL.md`):
   Adding/updating Blazor pages, admin navigation, service patterns, and first-render lifecycle conventions.
 - **UI Design System** (`.github/skills/ui-design-system/SKILL.md`):
   Styling (`app.css`), compact sidebar, themes (light/dark), density, layout, Monaco editor integration, and branding.
+
+## Quick Architecture Map (Token Saver)
+
+Avoid broad directory searches or recursive greps:
+- **Execution & Auditing**: `Services/ExecutionServices.cs` (`ExecutionService`), `Security/AuditAuthorization.cs`
+- **SQL Gate & Scopes**: `Security/SqlGate.cs` (ScriptDom + Dialect), `Security/PermissionResolver.cs`, `Security/ObjectScope.cs`
+- **Engine Providers**: `Services/Providers/` (`DatabaseProviderFactory`, `IDatabaseProvider`, engine implementations)
+- **Data Masking**: `Services/DataMaskingService.cs` (`MaskingRule`, `DataMaskingService`)
+- **Query Workspace UI**: `Components/Pages/Query.razor`, `wwwroot/js/app.js` (Monaco & tabs), `wwwroot/app.css`
+- **Admin Pages**: `Components/Pages/Admin/` (`Settings.razor`, `Permissions.razor`, `Matrix.razor`, `Databases.razor`, `Users.razor`, `Approvals.razor`, `Audit.razor`)
+- **Entities & DB Context**: `Data/ApplicationDbContext.cs`, `Data/ManagedDatabase.cs`, `Data/Entities.cs`, `Data/DatabaseEngine.cs`
+- **Public & Auth Pages**: `Components/Pages/Landing.razor`, `Documentation.razor`, `Components/Account/Pages/Login.razor`
 
 ## Quick Commands
 

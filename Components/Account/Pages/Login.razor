@@ -39,7 +39,7 @@
     <DataAnnotationsValidator />
     <div class="field">
         <label for="email">Email</label>
-        <InputText type="email" @bind-Value="Input.Email" id="email" autocomplete="email username" aria-required="true" placeholder="you@company.com" />
+        <InputText type="email" @bind-Value="Input.Email" id="email" autocomplete="email username" aria-required="true" placeholder="you@company.com" autofocus />
         <ValidationMessage For="() => Input.Email" />
     </div>
     <div class="field">
@@ -48,9 +48,9 @@
             <InputText type="password" @bind-Value="Input.Password" id="password" autocomplete="current-password" aria-required="true" placeholder="••••••••••••" />
             <button type="button" class="btn-toggle-password"
                     data-password-input="password"
-                    aria-label="Hover to view password"
-                    title="Hover or hold to view password"
-                    tabindex="-1">
+                    aria-label="Show password"
+                    title="Show or hide password"
+                    tabindex="0">
                 <svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"></path>
                     <circle cx="12" cy="12" r="3"></circle>
@@ -112,16 +112,20 @@
         }
 
         var result = await SignInManager.PasskeySignInAsync(PasskeyInput.CredentialJson);
+        var actor = ActorFor(Input.Email ?? "passkey");
         if (result.Succeeded)
         {
+            await Audit.TryWriteAsync(actor, "Auth", "PasskeyLogin", "Success");
             RedirectManager.RedirectTo(string.IsNullOrEmpty(ReturnUrl) ? "dashboard" : ReturnUrl);
         }
         else if (result.IsLockedOut)
         {
+            await Audit.TryWriteAsync(actor, "Auth", "PasskeyLogin", "LockedOut");
             RedirectManager.RedirectTo("Account/Lockout");
         }
         else
         {
+            await Audit.TryWriteAsync(actor, "Auth", "PasskeyLogin", "Failed");
             errorMessage = "Passkey sign-in failed. Please try again or use your password.";
         }
     }
