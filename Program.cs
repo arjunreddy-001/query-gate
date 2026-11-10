@@ -33,7 +33,7 @@ if (!string.IsNullOrWhiteSpace(dataProtectionPath))
         .SetApplicationName("QueryGate");
 }
 
-var jwtKey = TokenService.BuildKey(builder.Configuration);
+var jwtKey = TokenService.BuildKey(builder.Configuration, builder.Environment);
 builder.Services.AddAuthentication(options =>
     {
         options.DefaultScheme = IdentityConstants.ApplicationScheme;
@@ -63,7 +63,7 @@ builder.Services.AddAuthentication()
     });
 
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
-builder.Services.AddDbContextFactory<ApplicationDbContext>(options => options.UseSqlServer(connectionString));
+builder.Services.AddDbContextFactory<ApplicationDbContext>(options => options.UseSqlServer(connectionString, sql => sql.EnableRetryOnFailure()));
 builder.Services.AddScoped(sp => sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
 builder.Services.AddDatabaseDeveloperPageExceptionFilter();
 
@@ -92,7 +92,7 @@ builder.Services.AddHealthChecks();
 builder.Services.ConfigureApplicationCookie(options =>
 {
     options.Cookie.HttpOnly = true;
-    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
     options.Cookie.SameSite = SameSiteMode.Lax;
     options.ExpireTimeSpan = TimeSpan.FromHours(8);
     options.SlidingExpiration = true;
@@ -246,4 +246,7 @@ static async Task SeedAsync(IServiceProvider services, IConfiguration configurat
         var roleResult = await userManager.AddToRoleAsync(user, Roles.Admin);
         if (!roleResult.Succeeded) throw new InvalidOperationException("The bootstrap administrator role could not be assigned.");
     }
+
+    var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("QueryGate.Bootstrap");
+    logger.LogInformation("Bootstrap administrator account ready: {Email}", email);
 }

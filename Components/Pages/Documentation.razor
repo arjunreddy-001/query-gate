@@ -20,6 +20,7 @@
             <a href="/documentation#azure">Azure App Service</a>
             <a href="/documentation#linux">Linux server</a>
             <a href="/documentation#docker">Docker</a>
+            <a href="/documentation#reverse-proxies">Reverse proxies &amp; Coolify</a>
             <a href="/documentation#configuration">Configuration</a>
             <a href="/documentation#first-steps">First steps</a>
             <a href="/documentation#troubleshooting">Troubleshooting</a>
@@ -112,70 +113,84 @@
             </section>
             <section id="docker">
                 <h2>Deploy with Docker</h2>
-                <p>Run Query Gate with Docker Compose and an existing, reachable SQL Server. You need Docker with Compose, a SQL Server application database, and a password-protected HTTPS PFX certificate trusted by your browser and matching the host name.</p>
+                <p>Run Query Gate with Docker Compose. The setup includes a bundled SQL Server 2022 container, automatic database migrations, auto-generated persistent encryption keys, and a web setup wizard for creating the initial root administrator.</p>
                 <ol>
-                    <li>Clone the <a href="https://github.com/arjunreddy-001/query-gate">GitHub repository</a> and copy <code>.env.example</code> to <code>.env</code>.</li>
-                    <li>Set the SQL connection string, bootstrap administrator credentials, encryption and JWT keys, and certificate path and password in <code>.env</code>. Generate keys with <code>openssl rand -base64 32</code> (encryption) and <code>openssl rand -base64 64</code> (JWT).</li>
-                    <li>Set <code>APPLY_MIGRATIONS=true</code> for the first start. The SQL account needs schema migration permissions. Start a single instance:</li>
+                    <li>Clone the <a href="https://github.com/arjunreddy-001/query-gate">GitHub repository</a>.</li>
+                    <li>(Optional) Copy <code>.env.example</code> to <code>.env</code> to customize optional settings like database password or port. All variables are optional.</li>
+                    <li>Start the stack:</li>
                 </ol>
-                <pre><code>docker compose up -d --build
+                <pre><code>docker compose up -d
 docker compose logs -f query-gate</code></pre>
                 <ol start="4">
-                    <li>Open <code>https://localhost:8443</code> (or the host name on your certificate) and confirm migrations succeed.</li>
-                    <li>Set <code>APPLY_MIGRATIONS=false</code> and restart: <code>docker compose up -d</code>.</li>
-                    <li>Remove the bootstrap credentials from <code>.env</code> after the administrator account has been created.</li>
+                    <li>Open <code>http://localhost:5176</code> in your browser.</li>
+                    <li>On first visit, Query Gate launches the setup wizard to create your root administrator account directly in the browser.</li>
+                    <li>Sign in and explore your new governed workspace.</li>
                 </ol>
-                <p>A connection string inside a container must use a SQL Server address reachable from the container. <code>localhost</code> refers to the container itself. On Docker Desktop, <code>host.docker.internal</code> can reach a SQL Server on the host.</p>
-                <p>For detailed setup, upgrades, backups and security notes, see the <a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/DOCKER.md">Docker deployment guide</a>.</p>
+                <p><strong>External SQL Server:</strong> To connect to an existing database instead of the bundled container, set <code>DB_CONNECTION_STRING</code> in <code>.env</code>. Inside containers, <code>localhost</code> resolves to the container itself; on Docker Desktop use <code>host.docker.internal</code>.</p>
+                <p>For detailed setup, upgrades, backups, and security notes, see the <a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/DOCKER.md">Docker deployment guide</a>.</p>
+            </section>
+            <section id="reverse-proxies">
+                <h2>Reverse proxies and Coolify</h2>
+                <p>When deploying in production, it is common to place Query Gate behind a reverse proxy such as Caddy, Nginx, Traefik, Cloudflare Tunnel, or a self-hosting platform like Coolify.</p>
+                <p>Query Gate listens on plain HTTP port 5176 inside the container. The reverse proxy handles public HTTPS traffic, manages Let's Encrypt certificates, and forwards requests internally to port 5176.</p>
+                <h3>Deploying on Coolify</h3>
+                <ol>
+                    <li>In Coolify, create a new Project and choose <strong>Docker Compose</strong>.</li>
+                    <li>Connect your Git repository or paste the repository Compose configuration.</li>
+                    <li>Set your domain name (for example, <code>querygate.yourdomain.com</code>). Coolify will automatically provision SSL certificates and route traffic to port 5176.</li>
+                    <li>Deploy the stack and visit your domain to complete the initial setup wizard.</li>
+                </ol>
+                <h3>Forwarded headers</h3>
+                <p>Configure your reverse proxy to forward client headers (<code>X-Forwarded-For</code> and <code>X-Forwarded-Proto</code>) so that client IP addresses and protocol schemes are preserved accurately in the audit log.</p>
             </section>
             <section id="configuration">
                 <h2>Configuration and operations</h2>
-                <p>All secrets and certificates must be kept private and backed up securely. Losing the encryption key makes stored database connections unreadable.</p>
+                <p>All secrets must be kept private and backed up securely. Data protection and encryption keys are stored on the persistent <code>data-protection-keys</code> volume.</p>
                 <table class="docs-table">
-                    <thead><tr><th>Variable</th><th>Description</th><th>Example</th></tr></thead>
+                    <thead><tr><th>Variable</th><th>Description</th><th>Default / Example</th></tr></thead>
                     <tbody>
-                        <tr><td><code>ConnectionStrings__Default</code></td><td>SQL Server connection string for the Query Gate application database.</td><td><code>Server=.;Database=QueryGate;...</code></td></tr>
-                        <tr><td><code>Encryption__Key</code></td><td>Base-64 key used to encrypt stored database connection strings. <strong>Back this up.</strong></td><td><code>openssl rand -base64 32</code></td></tr>
-                        <tr><td><code>Jwt__Key</code></td><td>Base-64 key used to sign session tokens. Keep consistent across restarts.</td><td><code>openssl rand -base64 64</code></td></tr>
-                        <tr><td><code>Bootstrap__AdminEmail</code></td><td>Email for the initial administrator account. Remove after first sign-in.</td><td><code>admin@example.com</code></td></tr>
-                        <tr><td><code>Bootstrap__AdminPassword</code></td><td>Password for the initial administrator account. Remove after first sign-in.</td><td>Min 12 chars, mixed case + digit</td></tr>
-                        <tr><td><code>APPLY_MIGRATIONS</code></td><td>Set <code>true</code> to run EF migrations on startup (Docker only). Set <code>false</code> after first run.</td><td><code>true</code> / <code>false</code></td></tr>
-                        <tr><td><code>ASPNETCORE_Kestrel__Certificates__Default__Path</code></td><td>Path to the HTTPS PFX certificate file.</td><td><code>/certs/cert.pfx</code></td></tr>
-                        <tr><td><code>ASPNETCORE_Kestrel__Certificates__Default__Password</code></td><td>Password for the PFX certificate.</td><td>—</td></tr>
+                        <tr><td><code>PORT</code></td><td>Host port mapped to Query Gate. (Optional)</td><td><code>5176</code></td></tr>
+                        <tr><td><code>DB_PASSWORD</code></td><td>SA password for the bundled SQL Server 2022 container. (Optional)</td><td><code>QueryGateDefault!2026</code></td></tr>
+                        <tr><td><code>DB_CONNECTION_STRING</code></td><td>SQL Server connection string overriding the bundled container. (Optional)</td><td><code>Server=mssql;Database=QueryGate;...</code></td></tr>
+                        <tr><td><code>Encryption__Key</code></td><td>Base-64 key used to encrypt stored database connection strings. Auto-generated and persisted in volume if unset. (Optional)</td><td><code>openssl rand -base64 32</code></td></tr>
+                        <tr><td><code>Jwt__Key</code></td><td>Base-64 key used to sign session tokens. Auto-generated and persisted in volume if unset. (Optional)</td><td><code>openssl rand -base64 64</code></td></tr>
+                        <tr><td><code>BootstrapAdmin__Email</code></td><td>Optional email for headless administrator creation. If omitted, the web setup wizard is used.</td><td><code>admin@company.com</code></td></tr>
+                        <tr><td><code>BootstrapAdmin__Password</code></td><td>Optional password for headless administrator creation.</td><td>Min 12 chars, mixed case + digit</td></tr>
+                        <tr><td><code>Database__ApplyMigrationsOnStartup</code></td><td>Automatically apply EF Core migrations on startup. (Optional)</td><td><code>true</code></td></tr>
+                        <tr><td><code>DataProtection__KeyPath</code></td><td>Persistent volume path for key files.</td><td><code>/var/query-gate/keys</code></td></tr>
                     </tbody>
                 </table>
-                <p>Keep the same JWT key across restarts. Apply migrations with one instance at a time after a database backup. Data protection keys must be stored on a persistent volume and protected at rest.</p>
+                <p>Keys stored in the persistent volume remain consistent across container restarts. Apply migrations on one instance at a time after a database backup.</p>
             </section>
             <section id="first-steps">
                 <h2>First steps</h2>
-                <p>Once deployed, the bootstrap administrator account is created from the <code>Bootstrap__AdminEmail</code> and <code>Bootstrap__AdminPassword</code> environment variables on first start.</p>
+                <p>Once deployed, create your administrator account on the setup screen or via optional environment variables on first start.</p>
                 <ol>
-                    <li><a href="/Account/Login">Sign in</a> as the bootstrap administrator.</li>
+                    <li>Complete the initial setup wizard to create your root administrator account.</li>
                     <li>Register a target database (SQL Server, PostgreSQL, MySQL, or MariaDB) using a dedicated, least-privilege account.</li>
                     <li>Create users and grant permissions or review their access requests.</li>
                     <li>Open the query workspace to run permitted SQL and review activity in the audit log.</li>
-                    <li>Remove the bootstrap credentials from your environment after setup is complete.</li>
                 </ol>
             </section>
             <section id="troubleshooting">
                 <h2>Troubleshooting</h2>
                 <dl class="docs-dl">
                     <dt>Migrations fail on first start</dt>
-                    <dd>The SQL account must have <code>db_owner</code> or schema-create permissions on the application database during migration. Use a separate migration account and downgrade it afterwards.</dd>
+                    <dd>The SQL account must have <code>db_owner</code> or schema-create permissions on the application database during migration. The bundled SQL Server uses the <code>sa</code> account with full permissions automatically.</dd>
 
-                    <dt>Certificate errors in the browser</dt>
-                    <dd>The PFX certificate must be trusted by the browser and the subject / SAN must match the host name exactly. Self-signed certificates must be added to the OS trust store. On Docker Desktop, use <code>host.docker.internal</code> in both the cert SAN and the browser URL.</dd>
+                    <dt>Certificate errors behind a reverse proxy</dt>
+                    <dd>When running behind a reverse proxy (such as Caddy, Traefik, or Nginx), terminate TLS at the reverse proxy and route plain HTTP to port 5176. Ensure your reverse proxy forwards headers correctly (X-Forwarded-For, X-Forwarded-Proto).</dd>
 
                     <dt>"localhost" cannot reach SQL Server in Docker</dt>
-                    <dd>Inside a container, <code>localhost</code> resolves to the container itself. Use <code>host.docker.internal</code> (Docker Desktop) or the host's LAN IP to reach a SQL Server running on the host machine.</dd>
+                    <dd>Inside a container, <code>localhost</code> resolves to the container itself. Use the container service name <code>mssql</code> on the Docker network, or <code>host.docker.internal</code> (Docker Desktop) to reach a SQL Server running on the host machine.</dd>
 
                     <dt>Data protection key errors after restart</dt>
-                    <dd>The data protection key directory must be on a persistent volume. If the keys are lost, existing authentication cookies and encrypted values become invalid. Mount the key directory as a named volume in your Compose file.</dd>
+                    <dd>The key directory must be on a persistent volume. If the volume is deleted, authentication cookies and encrypted values become invalid. Mount the key directory as a named volume in your Compose file.</dd>
 
                     <dt>Users see "Account inactive or expired"</dt>
                     <dd>An administrator must activate the account and optionally set an expiry date. Check the Users admin page and ensure the account is active.</dd>
 
-                    <dt>Five failed login attempts — account locked</dt>
+                    <dt>Five failed login attempts: account locked</dt>
                     <dd>Accounts lock for 15 minutes after five consecutive failed password attempts. An administrator can unlock the account early from the Users admin page.</dd>
                 </dl>
             </section>

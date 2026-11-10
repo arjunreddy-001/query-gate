@@ -262,11 +262,43 @@ public sealed class TokenService(SymmetricSecurityKey key, IDbContextFactory<App
     public static readonly TimeSpan RefreshLifetime = TimeSpan.FromHours(8);
     private readonly SymmetricSecurityKey _key = key;
 
-    public static SymmetricSecurityKey BuildKey(IConfiguration config)
+    public static SymmetricSecurityKey BuildKey(IConfiguration config, IHostEnvironment? environment = null)
     {
         var configured = config["Jwt:Key"];
-        var bytes = string.IsNullOrWhiteSpace(configured) ? RandomNumberGenerator.GetBytes(64) : SHA512.HashData(Encoding.UTF8.GetBytes(configured));
-        return new SymmetricSecurityKey(bytes);
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            return new SymmetricSecurityKey(SHA512.HashData(Encoding.UTF8.GetBytes(configured)));
+        }
+
+        var keyDirectory = config["DataProtection:KeyPath"];
+        var directory = !string.IsNullOrWhiteSpace(keyDirectory)
+            ? keyDirectory
+            : (environment is not null ? Path.Combine(environment.ContentRootPath, "App_Data") : null);
+
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            try
+            {
+                Directory.CreateDirectory(directory);
+                var keyFileName = (environment?.IsDevelopment() ?? false) ? "dev-jwt.key" : "jwt.key";
+                var path = Path.Combine(directory, keyFileName);
+                if (!File.Exists(path))
+                {
+                    File.WriteAllText(path, Convert.ToBase64String(RandomNumberGenerator.GetBytes(64)));
+                }
+                var bytes = Convert.FromBase64String(File.ReadAllText(path).Trim());
+                if (bytes.Length >= 32)
+                {
+                    return new SymmetricSecurityKey(bytes);
+                }
+            }
+            catch
+            {
+                // Fall back to ephemeral bytes if storage is not accessible
+            }
+        }
+
+        return new SymmetricSecurityKey(RandomNumberGenerator.GetBytes(64));
     }
 
     public SymmetricSecurityKey Key => _key;

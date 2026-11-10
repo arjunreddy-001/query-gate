@@ -24,6 +24,7 @@ Specialized procedures and runbooks are located in `.github/skills/`. Whenever y
 ## Quick Architecture Map (Token Saver)
 
 Avoid broad directory searches or recursive greps:
+
 - **Execution & Auditing**: `Services/ExecutionServices.cs` (`ExecutionService`), `Security/AuditAuthorization.cs`
 - **SQL Gate & Scopes**: `Security/SqlGate.cs` (ScriptDom + Dialect), `Security/PermissionResolver.cs`, `Security/ObjectScope.cs`
 - **Engine Providers**: `Services/Providers/` (`DatabaseProviderFactory`, `IDatabaseProvider`, engine implementations)
@@ -42,11 +43,10 @@ Avoid broad directory searches or recursive greps:
 ## Skill Management Convention
 
 Whenever a new skill or workflow is created in this project:
+
 1. **Canonical Location**: Always place the skill inside `.github/skills/<skill-name>/SKILL.md` with valid YAML frontmatter (`name` and `description`). Do not store skills directly in `.agents/skills/`, `.claude/skills/`, or `.cursor/skills/`.
 2. **Synchronize All References**: Update the skills catalog in:
    - `CLAUDE.md` (Claude Code)
    - `AGENTS.md` (Codex / Antigravity / general agents)
    - `.cursor/rules/skills.mdc` (Cursor)
-   *(Antigravity automatically discovers new folders in `.github/skills/` via `.agents/skills.json`)*
-
-
+     _(Antigravity automatically discovers new folders in `.github/skills/` via `.agents/skills.json`)_

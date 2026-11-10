@@ -27,16 +27,20 @@ public sealed class CryptoService
             return;
         }
 
-        if (!environment.IsDevelopment())
-        {
-            throw new InvalidOperationException("Encryption:Key is required outside Development. Provide a base64 32-byte key via environment variable or secret store.");
-        }
+        var keyDirectory = configuration["DataProtection:KeyPath"];
+        var directory = !string.IsNullOrWhiteSpace(keyDirectory)
+            ? keyDirectory
+            : Path.Combine(environment.ContentRootPath, "App_Data");
 
-        var directory = Path.Combine(environment.ContentRootPath, "App_Data");
         Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, "dev-encryption.key");
-        if (!File.Exists(path)) File.WriteAllText(path, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+        var keyFileName = environment.IsDevelopment() ? "dev-encryption.key" : "encryption.key";
+        var path = Path.Combine(directory, keyFileName);
+        if (!File.Exists(path))
+        {
+            File.WriteAllText(path, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+        }
         _key = Convert.FromBase64String(File.ReadAllText(path).Trim());
+        if (_key.Length != 32) throw new InvalidOperationException($"Encryption key in '{path}' must be a base64-encoded 32-byte (AES-256) key.");
     }
 
     public string Encrypt(string plaintext)

@@ -74,6 +74,66 @@ public class WebhookAndSmtpTests
     }
 
     [Fact]
+    public void CryptoService_AutoGenerates_And_Persists_Key_In_DataProtection_Directory()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "qg-test-keys-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var config = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["DataProtection:KeyPath"] = tempDir
+                })
+                .Build();
+
+            var env = new DummyHostEnv { EnvironmentName = "Production" };
+            var crypto1 = new CryptoService(config, env);
+
+            var keyFile = Path.Combine(tempDir, "encryption.key");
+            Assert.True(File.Exists(keyFile));
+
+            var encrypted = crypto1.Encrypt("secret-value");
+
+            // Second instance in new process/restart should read the same persisted key
+            var crypto2 = new CryptoService(config, env);
+            var decrypted = crypto2.Decrypt(encrypted);
+            Assert.Equal("secret-value", decrypted);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void TokenService_AutoGenerates_And_Persists_Key_In_DataProtection_Directory()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "qg-test-jwt-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var config = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["DataProtection:KeyPath"] = tempDir
+                })
+                .Build();
+
+            var env = new DummyHostEnv { EnvironmentName = "Production" };
+            var key1 = TokenService.BuildKey(config, env);
+
+            var jwtFile = Path.Combine(tempDir, "jwt.key");
+            Assert.True(File.Exists(jwtFile));
+
+            var key2 = TokenService.BuildKey(config, env);
+            Assert.Equal(key1.Key, key2.Key);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
     public void SmtpConfig_Record_Handles_Configured_State_Correctly()
     {
         var configured = new SmtpConfig("smtp.example.com", 587, true, "user@example.com", "secret", "noreply@example.com", true, true);

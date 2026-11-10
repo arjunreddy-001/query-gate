@@ -1,6 +1,6 @@
 ---
 name: run-and-verify
-description: 'Build, test, run and browser-verify the Query Gate app. Use when asked to run the project, build, run tests, start the site, check a UI change in a browser, or when dotnet build fails with a locked DbAccessManager.exe or the site will not load.'
+description: "Build, test, run and browser-verify the Query Gate app. Use when asked to run the project, build, run tests, start the site, check a UI change in a browser, or when dotnet build fails with a locked DbAccessManager.exe or the site will not load."
 ---
 
 # Run and verify Query Gate
@@ -9,12 +9,12 @@ description: 'Build, test, run and browser-verify the Query Gate app. Use when a
 
 ## Commands (PowerShell, no `&&`)
 
-| Goal | Command |
-|---|---|
-| Build | `dotnet build DbAccessManager.csproj` |
-| Tests | `dotnet test tests\DbAccessManager.Tests` |
-| Run (http, port 5175) | `dotnet run` |
-| Run (https, port 7245) | `dotnet run --launch-profile https` |
+| Goal                   | Command                                   |
+| ---------------------- | ----------------------------------------- |
+| Build                  | `dotnet build DbAccessManager.csproj`     |
+| Tests                  | `dotnet test tests\DbAccessManager.Tests` |
+| Run (http, port 5175)  | `dotnet run`                              |
+| Run (https, port 7245) | `dotnet run --launch-profile https`       |
 
 ## Procedure
 

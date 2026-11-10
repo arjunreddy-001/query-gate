@@ -1,5 +1,7 @@
 @page "/"
 @layout PublicLayout
+@using Microsoft.AspNetCore.Identity
+@inject UserManager<ApplicationUser> UserManager
 
 <PageTitle>Query Gate · Governed SQL access</PageTitle>
 
@@ -8,11 +10,20 @@
         <div class="landing-copy">
             <span class="landing-eyebrow"><Icon Name="shield" /> A safer way to work with SQL Server, PostgreSQL, MySQL &amp; MariaDB</span>
             <h1 id="hero-title">Give your team access.<br /><span>Keep the guardrails.</span></h1>
-            <p>Analyse, approve and audit every SQL statement — without sharing database credentials with every user.</p>
+            <p>Analyse, approve and audit every SQL statement, without sharing database credentials with every user.</p>
             <div class="landing-actions">
                 <AuthorizeView>
                     <Authorized><a class="btn btn-primary landing-button" href="/query">Open query workspace <Icon Name="chevron" /></a></Authorized>
-                    <NotAuthorized><a class="btn btn-primary landing-button" href="/Account/Login">Sign in to Query Gate <Icon Name="chevron" /></a></NotAuthorized>
+                    <NotAuthorized>
+                        @if (!hasUsers)
+                        {
+                            <a class="btn btn-primary landing-button" href="/Account/Setup">Set up Query Gate <Icon Name="chevron" /></a>
+                        }
+                        else
+                        {
+                            <a class="btn btn-primary landing-button" href="/Account/Login">Sign in to Query Gate <Icon Name="chevron" /></a>
+                        }
+                    </NotAuthorized>
                 </AuthorizeView>
                 <a class="btn landing-button" href="/documentation"><Icon Name="list" />Explore documentation</a>
             </div>
@@ -106,3 +117,12 @@
         </article>
     </section>
 </div>
+
+@code {
+    private bool hasUsers = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        hasUsers = await UserManager.Users.AnyAsync();
+    }
+}

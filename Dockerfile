@@ -11,5 +11,5 @@ USER root
 RUN mkdir -p /var/query-gate/keys && chown -R $APP_UID:$APP_UID /var/query-gate
 COPY --from=build /app/publish ./
 USER $APP_UID
-EXPOSE 8443
+EXPOSE 5176
 ENTRYPOINT ["dotnet", "DbAccessManager.dll"]

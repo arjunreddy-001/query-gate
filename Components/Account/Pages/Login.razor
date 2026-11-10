@@ -35,6 +35,8 @@
 
 <div class="auth-divider"><span>or sign in with password</span></div>
 
+@if (editContext is not null)
+{
 <EditForm EditContext="editContext" method="post" OnSubmit="LoginUser" FormName="login">
     <DataAnnotationsValidator />
     <div class="field">
@@ -68,6 +70,7 @@
     </div>
     <button type="submit" class="btn btn-primary btn-lg">Sign in</button>
 </EditForm>
+}
 
 <p class="small faint login-hint">
     Accounts are created by an administrator. After five failed attempts the account is locked for 15&nbsp;minutes.
@@ -83,11 +86,22 @@
     [SupplyParameterFromForm(FormName = "passkey-login")] private PasskeyInputModel PasskeyInput { get; set; } = default!;
     [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
         Input ??= new();
         PasskeyInput ??= new();
         editContext = new EditContext(Input);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var hasUsers = await UserManager.Users.AnyAsync();
+        if (!hasUsers)
+        {
+            RedirectManager.RedirectTo("/Account/Setup");
+            return;
+        }
+
         if (HttpMethods.IsGet(HttpContext.Request.Method))
         {
             await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);

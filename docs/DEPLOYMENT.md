@@ -16,7 +16,7 @@ For these instructions, use a single app instance. Scaling interactive server se
 
 ## Docker
 
-Use the [Docker Compose guide](./DOCKER.md) to build the image and run it with HTTPS, a persistent data protection volume and an existing SQL Server.
+Use the [Docker Compose guide](./DOCKER.md) for quickstart instructions with bundled SQL Server 2022 and auto-generated persistent keys.
 
 ## IIS on Windows
 
