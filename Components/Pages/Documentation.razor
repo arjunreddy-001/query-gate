@@ -122,10 +122,11 @@
                 <pre><code>docker compose up -d
 docker compose logs -f query-gate</code></pre>
                 <ol start="4">
-                    <li>Open <code>http://localhost:5176</code> in your browser.</li>
+                    <li>Open <code>http://localhost:5176</code> in your browser. (For remote hosts or production, see the HTTPS requirement below).</li>
                     <li>On first visit, Query Gate launches the setup wizard to create your root administrator account directly in the browser.</li>
                     <li>Sign in and explore your new governed workspace.</li>
                 </ol>
+                <p><strong>HTTPS requirement on remote hosts:</strong> Browsers treat <code>localhost</code> as a secure context, so plain HTTP works locally. When deploying to a remote server or domain, HTTPS is mandatory. Modern browsers block Blazor Server interactive circuits and antiforgery tokens on unencrypted HTTP, which prevents database registration and query execution from functioning.</p>
                 <p><strong>External SQL Server:</strong> To connect to an existing database instead of the bundled container, set <code>DB_CONNECTION_STRING</code> in <code>.env</code>. Inside containers, <code>localhost</code> resolves to the container itself; on Docker Desktop use <code>host.docker.internal</code>.</p>
                 <p>For detailed setup, upgrades, backups, and security notes, see the <a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/DOCKER.md">Docker deployment guide</a>.</p>
             </section>
@@ -180,6 +181,9 @@ docker compose logs -f query-gate</code></pre>
 
                     <dt>Certificate errors behind a reverse proxy</dt>
                     <dd>When running behind a reverse proxy (such as Caddy, Traefik, or Nginx), terminate TLS at the reverse proxy and route plain HTTP to port 5176. Ensure your reverse proxy forwards headers correctly (X-Forwarded-For, X-Forwarded-Proto).</dd>
+
+                    <dt>Cannot register database or run queries in workspace (HTTP on remote host)</dt>
+                    <dd>Query Gate uses Blazor Server interactive circuits, antiforgery tokens, and secure cookies that require a secure context (HTTPS) on remote hosts. When accessed over plain HTTP on a remote domain or IP, browser security policies block circuit execution. Deploy behind an HTTPS reverse proxy (such as Cloudflare Tunnel, Coolify, Traefik, or Nginx).</dd>
 
                     <dt>"localhost" cannot reach SQL Server in Docker</dt>
                     <dd>Inside a container, <code>localhost</code> resolves to the container itself. Use the container service name <code>mssql</code> on the Docker network, or <code>host.docker.internal</code> (Docker Desktop) to reach a SQL Server running on the host machine.</dd>

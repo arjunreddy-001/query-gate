@@ -3,6 +3,8 @@
 .idea
 .vs
 .vscode
+bin
+obj
 **/bin
 **/obj
 tests

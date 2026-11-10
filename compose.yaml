@@ -30,6 +30,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:5176
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
       ConnectionStrings__DefaultConnection: "${DB_CONNECTION_STRING:-Server=mssql;Database=QueryGate;User Id=sa;Password=${DB_PASSWORD:-QueryGateDefault!2026};TrustServerCertificate=True;Encrypt=False}"
       Encryption__Key: "${ENCRYPTION_KEY:-}"
       Jwt__Key: "${JWT_KEY:-}"

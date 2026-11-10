@@ -5,12 +5,14 @@
 [Rr]elease/
 publish/
 artifacts/
+Library/
 *.nupkg
 
 # Visual Studio / VS Code / Rider
 .vs/
 .vscode/
 .idea/
+.local/
 *.user
 *.suo
 *.userosscache

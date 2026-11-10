@@ -30,11 +30,20 @@ The stack automatically starts:
 - Automatic Entity Framework Core migrations on startup.
 - Auto-generated 32-byte encryption key and 64-byte JWT key persisted in the `data-protection-keys` volume.
 
+## HTTPS Requirement
+
+Query Gate uses Blazor Server interactive circuits (WebSockets), antiforgery tokens, and secure cookies. In production or remote deployments, browsers require a secure context (HTTPS). Accessing the application over unencrypted plain HTTP on remote hosts will cause interactive actions (such as database registration or query execution in the workspace) to fail.
+
+To ensure full functionality, Query Gate must be accessed over HTTPS. Two setups are supported:
+
+1. **Reverse proxy or Coolify (Recommended)**: Your external reverse proxy terminates TLS and routes traffic to port `5176`.
+2. **Direct Kestrel development certificate**: Mount a generated `.pfx` certificate for local container testing.
+
 ## Reverse Proxies and Coolify
 
 When deploying Query Gate in production, it is standard practice to run the container behind a reverse proxy (such as Caddy, Nginx, or Traefik) or a deployment manager like Coolify.
 
-Query Gate listens on plain HTTP port 5176 inside the container. The reverse proxy handles external HTTPS traffic, manages SSL/TLS certificates, and proxies requests internally to port 5176.
+Query Gate listens on plain HTTP port 5176 inside the container. The reverse proxy handles external HTTPS traffic, manages SSL/TLS certificates, and proxies requests internally to port 5176. `ASPNETCORE_FORWARDEDHEADERS_ENABLED` is enabled by default so forwarded HTTPS headers (`X-Forwarded-Proto`, `X-Forwarded-For`) are recognized automatically.
 
 ### Deploying on Coolify
 
@@ -46,9 +55,21 @@ Query Gate can be deployed directly as a Docker Compose resource in Coolify:
 4. Deploy the application.
 5. Visit your domain and complete the web setup wizard to create your root administrator account.
 
+### Direct Kestrel HTTPS (Optional Dev Cert)
+
+If you want the ASP.NET Core Kestrel server to serve HTTPS directly:
+
+1. Generate a development certificate on your host machine:
+
+   ```bash
+   dotnet dev-certs https -ep ./cert.pfx -p "DevPassword123"
+   ```
+
+2. Mount `./cert.pfx:/https/cert.pfx:ro` and configure `ASPNETCORE_URLS`, `ASPNETCORE_Kestrel__Certificates__Default__Path`, and `ASPNETCORE_Kestrel__Certificates__Default__Password` in `compose.yaml` or `.env`.
+
 ### Forwarded Headers
 
-Ensure your reverse proxy forwards `X-Forwarded-For` and `X-Forwarded-Proto` headers so client IP addresses and protocols are recorded accurately in Query Gate audit logs.
+Ensure any external reverse proxy forwards `X-Forwarded-For` and `X-Forwarded-Proto` headers so client IP addresses and HTTPS schemes are recorded accurately in Query Gate audit logs and circuit handlers.
 
 ## Customizing via .env
 

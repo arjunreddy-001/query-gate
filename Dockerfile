@@ -3,7 +3,7 @@ WORKDIR /src
 COPY DbAccessManager.csproj ./
 RUN dotnet restore DbAccessManager.csproj
 COPY . ./
-RUN dotnet publish DbAccessManager.csproj -c Release -o /app/publish --no-restore
+RUN dotnet publish DbAccessManager.csproj -c Release -o /app/publish
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
