@@ -8,7 +8,7 @@ services:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: "${DB_PASSWORD:-QueryGateDefault!2026}"
     volumes:
-      - mssql-data:/var/opt/mssql/data
+      - mssql-data:/var/opt/mssql
     healthcheck:
       test:
         [
@@ -21,12 +21,11 @@ services:
       start_period: 15s
 
   query-gate:
-    container_name: query-gate
-    image: query-gate:latest
     build: .
     restart: unless-stopped
     depends_on:
-      - mssql
+      mssql:
+        condition: service_healthy
     ports:
       - "${PORT:-5176}:5176"
     environment:
