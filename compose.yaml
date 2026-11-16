@@ -33,7 +33,12 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:5176
       ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
-      ConnectionStrings__DefaultConnection: "${DB_CONNECTION_STRING:-Server=mssql;Database=QueryGate;User Id=sa;Password=${DB_PASSWORD:-QueryGateDefault!2026};TrustServerCertificate=True;Encrypt=False}"
+      # Single-level only. The image entrypoint turns DB_PASSWORD into the SQL
+      # connection string. A nested ${DB_PASSWORD} inside this default is left
+      # unexpanded by Dokploy, so the app logged in with a different password
+      # than MSSQL_SA_PASSWORD and SQL Server returned error 18456.
+      DB_PASSWORD: "${DB_PASSWORD:-QueryGateDefault!2026}"
+      DB_CONNECTION_STRING: "${DB_CONNECTION_STRING:-}"
       Encryption__Key: "${ENCRYPTION_KEY:-}"
       Jwt__Key: "${JWT_KEY:-}"
       BootstrapAdmin__Email: "${BOOTSTRAP_ADMIN_EMAIL:-}"
