@@ -1,6 +1,5 @@
 services:
   mssql:
-    container_name: query-gate-mssql
     image: mcr.microsoft.com/mssql/server:2025-latest
     user: root
     restart: unless-stopped
