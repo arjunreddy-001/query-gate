@@ -7,7 +7,7 @@ services:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: "${DB_PASSWORD:-QueryGateDefault!2026}"
     volumes:
-      - mssql-data:/var/opt/mssql
+      - mssql-data:/var/opt/mssql/data
     healthcheck:
       test:
         [
