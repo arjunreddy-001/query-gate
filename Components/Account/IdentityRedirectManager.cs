@@ -4,7 +4,7 @@ using DbAccessManager.Data;
 
 namespace DbAccessManager.Components.Account;
 
-public sealed class IdentityRedirectManager(NavigationManager navigationManager)
+public sealed class IdentityRedirectManager(NavigationManager navigationManager, IHttpContextAccessor httpContextAccessor)
 {
     public const string StatusCookieName = "Identity.StatusMessage";
 
@@ -20,19 +20,33 @@ public sealed class IdentityRedirectManager(NavigationManager navigationManager)
     {
         if (string.IsNullOrWhiteSpace(uri))
         {
-            navigationManager.NavigateTo("dashboard");
+            Go("dashboard");
             return;
         }
 
         // Prevent open redirects and invalid URIs.
         if (IsLocalUrl(uri, navigationManager.BaseUri))
         {
-            navigationManager.NavigateTo(uri);
+            Go(uri);
             return;
         }
 
         // Safe fallback for external or malformed URLs
-        navigationManager.NavigateTo("dashboard");
+        Go("dashboard");
+    }
+
+    // During static SSR, send a root-relative Location so the redirect never depends on the
+    // scheme the app believes it is served on (proxies and tunnels can make it http).
+    private void Go(string uri)
+    {
+        var response = httpContextAccessor.HttpContext?.Response;
+        if (response is { HasStarted: false })
+        {
+            response.Redirect(new Uri(navigationManager.ToAbsoluteUri(uri).ToString()).PathAndQuery);
+            return;
+        }
+
+        navigationManager.NavigateTo(uri);
     }
 
     public static bool IsLocalUrl(string? url, string baseUri)
