@@ -146,6 +146,19 @@ builder.Services.AddHostedService<MaintenanceWorker>();
 
 var app = builder.Build();
 
+// Behind Cloudflare Tunnel + a proxy (Dokploy/Traefik) the inner hop is plain http and can overwrite
+// X-Forwarded-Proto, so the app would build http:// redirect URLs that the browser blocks.
+// Cloudflare's CF-Visitor header still carries the original scheme.
+app.Use((context, next) =>
+{
+    var visitor = context.Request.Headers["CF-Visitor"].ToString();
+    if (visitor.Contains("\"scheme\":\"https\"", StringComparison.OrdinalIgnoreCase))
+    {
+        context.Request.Scheme = "https";
+    }
+    return next();
+});
+
 app.Use(async (context, next) =>
 {
     context.TraceIdentifier = Guid.NewGuid().ToString("N")[..12];
