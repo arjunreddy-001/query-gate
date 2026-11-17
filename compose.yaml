@@ -13,7 +13,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          '/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$${MSSQL_SA_PASSWORD}" -C -Q "SELECT 1" || /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "$${MSSQL_SA_PASSWORD}" -Q "SELECT 1" || exit 1',
+          '/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$${MSSQL_SA_PASSWORD}" -C -Q "IF DB_ID(''QueryGate'') IS NULL CREATE DATABASE [QueryGate];" || /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "$${MSSQL_SA_PASSWORD}" -Q "IF DB_ID(''QueryGate'') IS NULL CREATE DATABASE [QueryGate];" || exit 1',
         ]
       interval: 10s
       timeout: 5s
@@ -32,13 +32,9 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:5176
       ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
-      # Single-level only. The image entrypoint turns DB_PASSWORD into the SQL
-      # connection string. A nested ${DB_PASSWORD} inside this default is left
-      # unexpanded by Dokploy, so the app logged in with a different password
-      # than _SA_PASSWORD and SQL Server returned error 18456.
       DB_PASSWORD: "${DB_PASSWORD:-QueryGateDefault!2026}"
-      DB_CONNECTION_STRING: "Server=querygate-,1433;Database=QueryGate;User Id=sa;Password=${DB_PASSWORD:-QueryGateDefault!2026};TrustServerCertificate=True;Encrypt=False"
-      ConnectionStrings__DefaultConnection: "Server=querygate-,1433;Database=QueryGate;User Id=sa;Password=${DB_PASSWORD:-QueryGateDefault!2026};TrustServerCertificate=True;Encrypt=False"
+      DB_CONNECTION_STRING: "Server=querygate-mssql,1433;Database=QueryGate;User Id=sa;Password=${DB_PASSWORD:-QueryGateDefault!2026};TrustServerCertificate=True;Encrypt=False"
+      ConnectionStrings__DefaultConnection: "Server=querygate-mssql,1433;Database=QueryGate;User Id=sa;Password=${DB_PASSWORD:-QueryGateDefault!2026};TrustServerCertificate=True;Encrypt=False"
       Encryption__Key: "${ENCRYPTION_KEY:-}"
       Jwt__Key: "${JWT_KEY:-}"
       BootstrapAdmin__Email: "${BOOTSTRAP_ADMIN_EMAIL:-}"
@@ -49,6 +45,6 @@ services:
       - data-protection-keys:/var/query-gate/keys
 
 volumes:
-  -system:
+  mssql-system:
   mssql-data:
   data-protection-keys:
