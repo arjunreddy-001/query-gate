@@ -1,5 +1,5 @@
 services:
-  mssql:
+  querygate-mssql:
     image: mcr.microsoft.com/mssql/server:2025-latest
     user: root
     restart: unless-stopped
@@ -37,7 +37,8 @@ services:
       # unexpanded by Dokploy, so the app logged in with a different password
       # than MSSQL_SA_PASSWORD and SQL Server returned error 18456.
       DB_PASSWORD: "${DB_PASSWORD:-QueryGateDefault!2026}"
-      DB_CONNECTION_STRING: "${DB_CONNECTION_STRING:-}"
+      DB_CONNECTION_STRING: "Server=querygate-mssql,1433;Database=QueryGate;User Id=sa;Password=${DB_PASSWORD:-QueryGateDefault!2026};TrustServerCertificate=True;Encrypt=False"
+      ConnectionStrings__DefaultConnection: "Server=querygate-mssql,1433;Database=QueryGate;User Id=sa;Password=${DB_PASSWORD:-QueryGateDefault!2026};TrustServerCertificate=True;Encrypt=False"
       Encryption__Key: "${ENCRYPTION_KEY:-}"
       Jwt__Key: "${JWT_KEY:-}"
       BootstrapAdmin__Email: "${BOOTSTRAP_ADMIN_EMAIL:-}"
