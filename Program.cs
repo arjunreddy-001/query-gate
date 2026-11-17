@@ -146,6 +146,11 @@ builder.Services.AddHostedService<MaintenanceWorker>();
 
 var app = builder.Build();
 
+var cspHeader = builder.Configuration["Security:ContentSecurityPolicy"] ??
+    "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://static.cloudflareinsights.com; " +
+    "style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; " +
+    "connect-src 'self' ws: wss: https://cloudflareinsights.com; worker-src 'self' blob: data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+
 app.Use(async (context, next) =>
 {
     context.TraceIdentifier = Guid.NewGuid().ToString("N")[..12];
@@ -153,9 +158,7 @@ app.Use(async (context, next) =>
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["X-Frame-Options"] = "DENY";
     context.Response.Headers["Referrer-Policy"] = "same-origin";
-    context.Response.Headers["Content-Security-Policy"] =
-        "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; " +
-        "connect-src 'self' ws: wss:; worker-src 'self' blob: data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+    context.Response.Headers["Content-Security-Policy"] = cspHeader;
     try
     {
         await next();

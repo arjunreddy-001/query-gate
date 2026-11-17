@@ -402,17 +402,17 @@
                                         <span style="font-size: 10px; opacity: 0.7;">▾</span>
                                     </button>
 
-                                    <button type="button" class="preview-ws-btn primary" @onclick="ExecuteWorkspaceQuery" disabled="@wsRunning">
+                                    <button type="button" class="btn btn-primary" title="Run (F5 or Ctrl+Enter)" @onclick="ExecuteWorkspaceQuery" disabled="@wsRunning">
                                         <Icon Name="play" /> @(wsRunning ? "Executing..." : "Run (F5)")
                                     </button>
-                                    <button type="button" class="preview-ws-btn" @onclick='() => SetWsResultsTab("explain")'>
-                                        <Icon Name="activity" /> Explain
+                                    <button type="button" class="btn btn-hover-expand" title="Explain query plan" @onclick='() => SetWsResultsTab("explain")'>
+                                        <Icon Name="activity" /><span class="btn-lbl">Explain</span>
                                     </button>
-                                    <button type="button" class="preview-ws-btn" title="Format query">
-                                        <Icon Name="format" /> Format
+                                    <button type="button" class="btn btn-hover-expand" title="Format (Shift+Alt+F)">
+                                        <Icon Name="format" /><span class="btn-lbl">Format</span>
                                     </button>
-                                    <button type="button" class="preview-ws-btn" title="Save query">
-                                        <Icon Name="save" /> Save
+                                    <button type="button" class="btn btn-hover-expand" title="Save (Ctrl+S)">
+                                        <Icon Name="save" /><span class="btn-lbl">Save</span>
                                     </button>
 
                                     <label class="chip-toggle chip-warn" style="font-size: 0.72rem; padding: 3px 8px; cursor: pointer;">
@@ -455,29 +455,27 @@
 
                             <!-- Results Card -->
                             <div class="preview-results-card">
-                                <div class="preview-results-header">
-                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span class="badge ok" style="font-size: 0.7rem; font-weight: 700;">Success</span>
-                                        @if (wsActiveTab == "customers")
-                                        {
-                                            <span class="badge warn" style="font-size: 0.7rem; font-weight: 700;"><Icon Name="lock" /> Masked (2 PII redacted)</span>
-                                        }
-                                        <span class="muted small" style="font-size: 0.74rem;">@wsElapsedMs ms · @GetResultRowCount() row(s) returned</span>
-                                    </div>
-                                    <div class="preview-results-tabs">
-                                        <button type="button" class="preview-res-btn @(wsResultsTab == "data" ? "active" : "")" @onclick='() => SetWsResultsTab("data")'>
+                                <div class="preview-results-header card-head" style="padding: 5px 12px;">
+                                    <span class="badge ok">Success</span>
+                                    @if (wsActiveTab == "customers")
+                                    {
+                                        <span class="badge warn" title="Sensitive PII columns redacted (no UNMASK permission)"><Icon Name="lock" /> Masked (2 PII redacted)</span>
+                                    }
+                                    <span class="muted small">@wsElapsedMs ms · @GetResultRowCount() row(s) returned</span>
+                                    <div class="actions">
+                                        <button type="button" class="btn btn-sm @(wsResultsTab == "data" ? "btn-primary" : "")" @onclick='() => SetWsResultsTab("data")'>
                                             Result 1
                                         </button>
-                                        <button type="button" class="preview-res-btn @(wsResultsTab == "messages" ? "active" : "")" @onclick='() => SetWsResultsTab("messages")'>
+                                        <button type="button" class="btn btn-sm @(wsResultsTab == "messages" ? "btn-primary" : "")" @onclick='() => SetWsResultsTab("messages")'>
                                             Messages
                                         </button>
-                                        <button type="button" class="preview-res-btn @(wsResultsTab == "explain" ? "active" : "")" @onclick='() => SetWsResultsTab("explain")'>
+                                        <button type="button" class="btn btn-sm @(wsResultsTab == "explain" ? "btn-primary" : "")" @onclick='() => SetWsResultsTab("explain")'>
                                             <Icon Name="activity" /> Execution Plan
                                         </button>
-                                        <button type="button" class="preview-res-btn" @onclick="TriggerMockExport" title="Export results to CSV, Excel, or JSON">
+                                        <button type="button" class="btn btn-sm" @onclick="TriggerMockExport" title="Export results to CSV, Excel, or JSON">
                                             <Icon Name="download" /> Export @(exportedNotice ? "(Exported!)" : "▾")
                                         </button>
-                                        <button type="button" class="preview-res-btn @(wsResultsTab == "audit" ? "active" : "")" @onclick='() => SetWsResultsTab("audit")'>
+                                        <button type="button" class="btn btn-sm @(wsResultsTab == "audit" ? "btn-primary" : "")" @onclick='() => SetWsResultsTab("audit")'>
                                             <Icon Name="shield" /> Audit Record
                                         </button>
                                     </div>
