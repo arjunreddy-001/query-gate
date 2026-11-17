@@ -1,10 +1,10 @@
 # Deployment options
 
-Query Gate is a .NET 10 interactive server application backed by SQL Server. Deploy it at the root of a host name, not under a URL subpath. Interactive sessions use SignalR, so allow WebSocket connections and long-lived requests through the hosting platform and any network intermediaries.
+Query Gate is a .NET 10 interactive server application backed by PostgreSQL. Deploy it at the root of a host name, not under a URL subpath. Interactive sessions use SignalR, so allow WebSocket connections and long-lived requests through the hosting platform and any network intermediaries.
 
 ## Before deploying
 
-1. Provision an application database on a reachable SQL Server. Use a dedicated SQL account, TLS and a trusted SQL Server certificate. The account needs schema permissions while applying migrations and read/write access during normal operation.
+1. Provision an application database on a reachable PostgreSQL instance. Use a dedicated PostgreSQL user and TLS. The account needs schema and table creation permissions while applying migrations and read/write access during normal operation.
 2. Generate an `Encryption:Key` with `openssl rand -base64 32` and an independent `Jwt:Key` with `openssl rand -base64 64`. Back up both securely. Changing or losing the encryption key makes stored managed database connection strings unreadable.
 3. Configure `BootstrapAdmin:Email` and `BootstrapAdmin:Password` for initial provisioning. The password needs at least 12 characters, upper and lower case letters, a digit and a non-alphanumeric character. Remove both settings after the administrator has been created. They can otherwise promote the configured user to admin on every startup.
 4. Configure `DataProtection:KeyPath` as a persistent writable directory outside the publish directory. Back it up securely. The key files contain sensitive material and are not encrypted by this configuration; protect the directory and backups at rest. Retaining them preserves browser sessions and protected tokens across restarts.
@@ -16,7 +16,7 @@ For these instructions, use a single app instance. Scaling interactive server se
 
 ## Docker
 
-Use the [Docker Compose guide](./DOCKER.md) for quickstart instructions with bundled SQL Server 2022 and auto-generated persistent keys.
+Use the [Docker Compose guide](./DOCKER.md) for quickstart instructions with bundled PostgreSQL 17 and auto-generated persistent keys.
 
 ## IIS on Windows
 
@@ -33,20 +33,20 @@ Use the [Docker Compose guide](./DOCKER.md) for quickstart instructions with bun
    | Environment variable | Value |
    | --- | --- |
    | `ASPNETCORE_ENVIRONMENT` | `Production` |
-   | `ConnectionStrings__DefaultConnection` | SQL Server application database connection string |
+   | `ConnectionStrings__DefaultConnection` | PostgreSQL application database connection string |
    | `Encryption__Key` | Base64 32-byte encryption key |
    | `Jwt__Key` | Independent, persistent JWT signing secret |
    | `BootstrapAdmin__Email`, `BootstrapAdmin__Password` | Initial administrator credentials |
    | `DataProtection__KeyPath` | Persistent writable directory, for example `C:\QueryGate\keys` |
    | `Database__ApplyMigrationsOnStartup` | `true` only while applying migrations |
 
-5. Start the site and check application and IIS logs. Sign in over HTTPS, then remove bootstrap credentials, disable startup migrations and recycle the pool. Check `/health` and test the query workspace. If sign-in or interactivity fails, check SQL connectivity, certificate trust, WebSockets and the app pool identity's permissions.
+5. Start the site and check application and IIS logs. Sign in over HTTPS, then remove bootstrap credentials, disable startup migrations and recycle the pool. Check `/health` and test the query workspace. If sign-in or interactivity fails, check PostgreSQL connectivity, certificate trust, WebSockets and the app pool identity's permissions.
 
 See [Microsoft's IIS hosting guide](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/iis/?view=aspnetcore-10.0) for server setup and environment-variable configuration.
 
-## Azure App Service (Windows)
+## Azure App Service
 
-1. Create a **Windows** App Service with a .NET 10 runtime and one instance. Provide network access to the application SQL Server, including firewall and private networking rules as needed. Enable **HTTPS Only** and **Web sockets** in the App Service settings.
+1. Create an App Service with a .NET 10 runtime and one instance. Provide network access to the application PostgreSQL database, including firewall and private networking rules as needed. Enable **HTTPS Only** and **Web sockets** in the App Service settings.
 2. In App Service environment variables, configure the same keys listed in the IIS table. Set `DataProtection__KeyPath` to `D:\home\query-gate-keys`, a persistent directory outside the deployed application files. Restrict access to the App Service and backups because the key files are not encrypted by the app. Use Key Vault references or another approved secret management method for credentials.
 3. Publish and deploy the *contents* of the publish directory, including `web.config`, using your App Service deployment method:
 
@@ -78,7 +78,7 @@ This example runs Kestrel HTTPS directly on port 8443. Use a trusted password-pr
    ASPNETCORE_HTTPS_PORTS=8443
    ASPNETCORE_Kestrel__Certificates__Default__Path=/etc/query-gate/query-gate.pfx
    ASPNETCORE_Kestrel__Certificates__Default__Password=<pfx-password>
-   ConnectionStrings__DefaultConnection="Server=<sql-host>;Database=QueryGate;User Id=<user>;Password=<password>;Encrypt=True;TrustServerCertificate=False"
+   ConnectionStrings__DefaultConnection="Host=<postgres-host>;Port=5432;Database=QueryGate;Username=<user>;Password=<password>"
    Encryption__Key=<base64-32-byte-key>
    Jwt__Key=<independent-jwt-secret>
    BootstrapAdmin__Email=<admin-email>

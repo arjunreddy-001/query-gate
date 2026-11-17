@@ -4,7 +4,7 @@ Issues, documentation improvements and code contributions are welcome. Before st
 
 ## Set up locally
 
-1. Install the .NET 10 SDK and make a SQL Server instance available for the application database. Use an isolated development database, not production data.
+1. Install the .NET 10 SDK and make a PostgreSQL instance available for the application database. Use an isolated development database, not production data.
 2. Clone the repository and configure the application database connection and bootstrap administrator as described in the [README](./README.md). Keep connection strings, credentials and keys out of commits.
 3. Apply migrations and run the application using the instructions in the README. See the [deployment guide](./docs/DEPLOYMENT.md) for additional configuration and hosting details.
 

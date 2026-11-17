@@ -544,66 +544,176 @@ window.dbam = (function () {
     }
   }
 
-  /* ── Documentation sidebar scroll highlighting ── */
+  /* ── Documentation navigation scroll highlighting ── */
   function attachDocsNavHighlight() {
-    var nav = document.querySelector('.docs-nav');
-    if (!nav) return;
-    var links = nav.querySelectorAll('a[href*="#"]');
+    // If a previous scroll handler was attached, clean it up first
+    if (window._docsScrollHandler) {
+      window.removeEventListener('scroll', window._docsScrollHandler);
+      window._docsScrollHandler = null;
+    }
+
+    var docsContent = document.querySelector('.docs-content');
+    if (!docsContent) return;
+
+    var allLinks = document.querySelectorAll('.docs-nav a[href*="#"], #docsMobileDropdown a[href*="#"]');
+    if (!allLinks.length) return;
+
+    // Collect all target section elements in actual DOM order
+    var candidateElements = docsContent.querySelectorAll('section[id], .docs-subsection[id]');
     var sections = [];
-    links.forEach(function (link) {
-      var href = link.getAttribute('href');
-      var hash = href.split('#')[1];
-      if (!hash) return;
-      var sec = document.getElementById(hash);
-      if (sec) sections.push({ link: link, sec: sec });
+
+    candidateElements.forEach(function (el) {
+      var id = el.id;
+      if (!id) return;
+      var matchingLinks = Array.from(document.querySelectorAll(
+        '.docs-nav a[href$="#' + id + '"], #docsMobileDropdown a[href$="#' + id + '"]'
+      ));
+      if (matchingLinks.length) {
+        var heading = el.querySelector('h2, h3');
+        var title = matchingLinks[0].innerText.replace(/[\n\r]+/g, ' ').replace(/✓/g, '').trim();
+        title = title.replace(/\b(Fast|Recommended)\b/gi, '').trim();
+        if (!title && heading) {
+          title = heading.innerText.trim();
+        }
+        sections.push({
+          id: id,
+          el: el,
+          title: title,
+          links: matchingLinks
+        });
+      }
     });
+
     if (!sections.length) return;
 
-    function onScroll() {
-      var scrollPos = window.scrollY + 120;
-      var activeIndex = 0;
-      for (var i = 0; i < sections.length; i++) {
-        if (sections[i].sec.offsetTop <= scrollPos) {
-          activeIndex = i;
-        }
-      }
-      sections.forEach(function (item, idx) {
-        if (idx === activeIndex) {
-          item.link.classList.add('active');
-        } else {
-          item.link.classList.remove('active');
-        }
-      });
-    }
-    window.addEventListener('scroll', onScroll, { passive: true });
-    onScroll();
-  }
+    var currentTitleEl = document.querySelector('.docs-mobile-current-title');
+    var backToTopBtn = document.getElementById('docsBackToTop');
 
-  /* ── Code block copy buttons ── */
-  function attachCodeCopyButtons() {
-    document.querySelectorAll('.docs-content pre').forEach(function (pre) {
-      if (pre._copyAttached) return;
-      pre._copyAttached = true;
-      var btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'btn-code-copy';
-      btn.setAttribute('aria-label', 'Copy code to clipboard');
-      btn.innerText = 'Copy';
-      btn.addEventListener('click', function () {
-        var code = pre.querySelector('code');
-        var text = (code ? code.innerText : pre.innerText).trim();
-        navigator.clipboard.writeText(text).then(function () {
-          btn.classList.add('copied');
-          btn.innerText = 'Copied!';
-          setTimeout(function () {
-            btn.classList.remove('copied');
-            btn.innerText = 'Copy';
-          }, 2000);
-        }).catch(function (e) {
-          console.error('Copy failed', e);
+    function updateActiveSection(activeSection) {
+      if (!activeSection) return;
+      sections.forEach(function (item) {
+        var isActive = (item.id === activeSection.id);
+        item.links.forEach(function (link) {
+          if (isActive) {
+            link.classList.add('active');
+          } else {
+            link.classList.remove('active');
+          }
         });
       });
-      pre.appendChild(btn);
+      if (currentTitleEl) {
+        currentTitleEl.textContent = activeSection.title;
+      }
+    }
+
+    function onScroll() {
+      var isBottom = (window.innerHeight + window.scrollY) >= (document.documentElement.scrollHeight - 60);
+      var activeSection = sections[0];
+
+      if (isBottom) {
+        activeSection = sections[sections.length - 1];
+      } else {
+        var threshold = 160;
+        for (var i = 0; i < sections.length; i++) {
+          var rect = sections[i].el.getBoundingClientRect();
+          if (rect.top <= threshold) {
+            activeSection = sections[i];
+          }
+        }
+      }
+
+      updateActiveSection(activeSection);
+
+      if (backToTopBtn) {
+        if (window.scrollY > 350) {
+          backToTopBtn.classList.add('visible');
+        } else {
+          backToTopBtn.classList.remove('visible');
+        }
+      }
+    }
+
+    window._docsScrollHandler = onScroll;
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+
+    window._updateActiveDocsSectionById = function (id) {
+      var found = sections.find(function (s) { return s.id === id; });
+      if (found) {
+        updateActiveSection(found);
+      }
+    };
+  }
+
+  /* ── Mobile TOC Dropdown Toggle and Auto-Close ── */
+  let mobileTocHandlerAttached = false;
+  function setupMobileToc() {
+    if (mobileTocHandlerAttached) return;
+    mobileTocHandlerAttached = true;
+
+    document.addEventListener('click', function (e) {
+      var mobileToc = document.getElementById('docsMobileToc');
+      if (!mobileToc) return;
+      var trigger = document.getElementById('docsMobileTocTrigger');
+
+      // Tapping the dropdown trigger button
+      if (trigger && (trigger === e.target || trigger.contains(e.target))) {
+        var isOpen = mobileToc.classList.toggle('is-open');
+        trigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        return;
+      }
+
+      // Tapping any option inside the dropdown immediately closes it and updates active selection
+      var link = e.target.closest('#docsMobileDropdown a');
+      if (link) {
+        var href = link.getAttribute('href') || '';
+        var hash = href.split('#')[1];
+        if (hash && window._updateActiveDocsSectionById) {
+          window._updateActiveDocsSectionById(hash);
+        }
+        if (mobileToc.classList.contains('is-open')) {
+          mobileToc.classList.remove('is-open');
+          if (trigger) trigger.setAttribute('aria-expanded', 'false');
+        }
+        return;
+      }
+
+      // Tapping outside closes the dropdown
+      if (mobileToc.classList.contains('is-open') && !mobileToc.contains(e.target)) {
+        mobileToc.classList.remove('is-open');
+        if (trigger) trigger.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
+
+  /* ── Command and Code Copy Handlers ── */
+  let copyHandlerAttached = false;
+  function attachCodeCopyButtons() {
+    if (copyHandlerAttached) return;
+    copyHandlerAttached = true;
+
+    document.addEventListener('click', function (e) {
+      var btn = e.target.closest('.btn-code-copy, .btn-inline-copy');
+      if (!btn) return;
+      var textToCopy = btn.getAttribute('data-copy');
+      if (!textToCopy) {
+        var pre = btn.closest('.docs-code-block') ? btn.closest('.docs-code-block').querySelector('pre code') : null;
+        textToCopy = pre ? pre.innerText.trim() : '';
+      }
+      if (!textToCopy) return;
+
+      navigator.clipboard.writeText(textToCopy).then(function () {
+        btn.classList.add('copied');
+        var span = btn.querySelector('span');
+        var originalText = span ? span.innerText : '';
+        if (span) span.innerText = 'Copied!';
+        setTimeout(function () {
+          btn.classList.remove('copied');
+          if (span) span.innerText = originalText || 'Copy';
+        }, 2000);
+      }).catch(function (err) {
+        console.error('Copy failed', err);
+      });
     });
   }
 
@@ -624,6 +734,7 @@ window.dbam = (function () {
     attachPasswordToggles();
     revealPasskeyButtons();
     attachDocsNavHighlight();
+    setupMobileToc();
     attachCodeCopyButtons();
     attachComboboxKeydownHandler();
   }

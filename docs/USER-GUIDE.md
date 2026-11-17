@@ -1,6 +1,6 @@
 # Query Gate User Guide
 
-Query Gate lets people run SQL against registered SQL Server databases **without ever seeing the database credentials**. Every query passes a SQL gate, is permission-checked, and is written to an audit log _before_ it runs.
+Query Gate lets people run SQL against registered databases (SQL Server, PostgreSQL, MySQL, and MariaDB) **without ever seeing the database credentials**. Every query passes a SQL gate, is permission-checked, and is written to an audit log _before_ it runs.
 
 The public homepage links to sign-in, `/documentation`, deployment options and community resources, and introduces the workspace and access workflow. Signed-in users can open the query workspace directly from the homepage. After signing in, the dashboard is at `/dashboard`. On narrow screens, use the navigation button to open the menu. For hosting options, see the [deployment guide](./DEPLOYMENT.md).
 
@@ -32,8 +32,10 @@ Use **Defaults** beside an environment to configure allow grants for each role, 
 2. **Register a database**: _Admin → Databases → Register database_
    - **Name**: a friendly name (e.g. `Orders`).
    - **Environment**: select a configured environment. Development, QA and Production are provided initially; administrators can manage them under Permissions.
-   - **Connection string**: a SQL Server connection string for a **dedicated service account** with only the rights the tool should be able to use, e.g.
-     `Server=host;Database=Orders;User Id=svc_dbam;Password=...;TrustServerCertificate=True`
+   - **Connection string**: a database connection string for a **dedicated service account** with only the rights the tool should be able to use, e.g.
+     - PostgreSQL: `Host=host;Port=5432;Database=Orders;Username=svc_dbam;Password=...`
+     - SQL Server: `Server=host;Database=Orders;User Id=svc_dbam;Password=...;TrustServerCertificate=True`
+     - MySQL or MariaDB: `Server=host;Port=3306;Database=Orders;Uid=svc_dbam;Pwd=...`
    - **Default timeout** and **Max rows**: per-database limits.
    - Click **Test connection**, then **Save**. The connection string is encrypted at rest and never shown again (edit it by entering a new one; leave blank to keep the current).
    - Name uniqueness is checked by **Name + Environment**. The same name can be used across environments.
@@ -101,7 +103,7 @@ On narrow screens the Objects, Saved and History panel starts closed. Use the pa
    - Database dropdown shows enabled databases by default. Turn on **Show disabled** to include disabled entries.
 3. **Run** with `F5` or `Ctrl+Enter`. Select text first to run only the selection.
 4. Other actions:
-   - **Explain**: compiles the query and generates an estimated execution plan using SQL Server's `SET SHOWPLAN_XML ON`. It compiles without executing data modifications or reading data. The resulting **Execution Plan** tab displays:
+   - **Explain**: compiles the query and generates an estimated execution plan using the target engine's explain capability (SQL Server `SET SHOWPLAN_XML ON`, PostgreSQL `EXPLAIN (FORMAT JSON)`, MySQL/MariaDB `EXPLAIN FORMAT=JSON`). It compiles without executing data modifications or reading data. The resulting **Execution Plan** tab displays:
      - Estimated Subtree Cost, Optimization Level, Estimated Rows, and compile time metrics.
      - **Missing Index Recommendations**: identifies missing index groups from the query optimizer with estimated cost impact percentage, one-click **Copy Index Script**, and an **Add to Editor** shortcut that appends the DDL to the SQL editor.
      - **Operator Breakdown**: sorts operators by cost descending with percentage bars, estimated rows, target objects, and warnings for full index or table scans.

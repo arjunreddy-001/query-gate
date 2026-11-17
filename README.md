@@ -9,7 +9,7 @@ For IIS, Azure App Service, Linux and Docker, see the [deployment guide](./docs/
 ### PowerShell (Windows)
 
 ```powershell
-dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=...;Database=DbAccessManager;User Id=...;Password=...;TrustServerCertificate=True"
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=localhost;Port=5432;Database=QueryGate;Username=postgres;Password=<password>"
 $env:BootstrapAdmin__Email = "admin@example.com"
 $env:BootstrapAdmin__Password = "<unique password, 12+ chars>"
 dotnet ef database update
@@ -19,7 +19,7 @@ dotnet run
 ### macOS / Linux (bash, zsh)
 
 ```bash
-dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=...;Database=DbAccessManager;User Id=...;Password=...;TrustServerCertificate=True"
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=localhost;Port=5432;Database=QueryGate;Username=postgres;Password=<password>"
 export BootstrapAdmin__Email="admin@example.com"
 export BootstrapAdmin__Password="<unique password, 12+ chars>"
 dotnet ef database update
@@ -34,7 +34,7 @@ Full usage documentation: [docs/USER-GUIDE.md](./docs/USER-GUIDE.md). Admin quic
 
 | Key                                    | Purpose                                                                                                                       |
 | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `ConnectionStrings:DefaultConnection`  | Application database                                                                                                          |
+| `ConnectionStrings:DefaultConnection`  | PostgreSQL application database                                                                                               |
 | `Encryption:Key`                       | Base64 32-byte key for managed connection strings (dev falls back to `App_Data/dev-encryption.key`; always set in production) |
 | `Jwt:Key`                              | JWT signing key (random per process if unset, which invalidates tokens on restart)                                            |
 | `BootstrapAdmin__Email` / `__Password` | One-time first admin                                                                                                          |
@@ -58,13 +58,13 @@ Full usage documentation: [docs/USER-GUIDE.md](./docs/USER-GUIDE.md). Admin quic
 
 ## Limitations
 
-LocalDB is untested; use full SQL Server, Azure SQL, PostgreSQL, MySQL or MariaDB instances.
+The Query Gate application database requires PostgreSQL 14+ (or bundled PostgreSQL 17 in Docker). Managed database targets can be SQL Server, PostgreSQL, MySQL, or MariaDB.
 
 ## AI Agent Skills (Cross-Platform)
 
 This repository maintains all development workflows and runbooks centrally in [`.github/skills/`](./.github/skills/) following the Agent Skills specification.
 
-**There is no need to add skills specific to a platform or IDE** (such as `.claude/skills/`, `.cursor/skills/`, or `.agents/skills/`). The repository is pre-configured with cross-platform configuration files—avoiding symlinks for seamless compatibility across Windows, macOS, and Linux—so all AI coding assistants share `.github/skills/` as the single source of truth:
+**There is no need to add skills specific to a platform or IDE** (such as `.claude/skills/`, `.cursor/skills/`, or `.agents/skills/`). The repository is pre-configured with cross-platform configuration files (avoiding symlinks for seamless compatibility across Windows, macOS, and Linux) so all AI coding assistants share `.github/skills/` as the single source of truth:
 
 - **Google Antigravity**: Discovers and indexes skills via [`.agents/skills.json`](./.agents/skills.json).
 - **Claude Code**: Referenced via [`CLAUDE.md`](./CLAUDE.md).

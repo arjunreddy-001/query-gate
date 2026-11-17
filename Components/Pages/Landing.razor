@@ -1,16 +1,20 @@
 @page "/"
 @layout PublicLayout
+@rendermode InteractiveServer
 @using Microsoft.AspNetCore.Identity
 @inject UserManager<ApplicationUser> UserManager
 
 <PageTitle>Query Gate · Governed SQL access</PageTitle>
 
 <div class="landing-wrap">
+    <!-- Hero Section with Interactive Gate Simulator -->
     <section class="landing-hero" aria-labelledby="hero-title">
         <div class="landing-copy">
-            <span class="landing-eyebrow"><Icon Name="shield" /> A safer way to work with SQL Server, PostgreSQL, MySQL &amp; MariaDB</span>
+            <span class="landing-eyebrow">
+                <Icon Name="shield" /> Enterprise SQL governance for PostgreSQL, SQL Server, MySQL &amp; MariaDB
+            </span>
             <h1 id="hero-title">Give your team access.<br /><span>Keep the guardrails.</span></h1>
-            <p>Analyse, approve and audit every SQL statement, without sharing database credentials with every user.</p>
+            <p>Centralise database access, enforce strict AST query gates, mask sensitive PII on the fly, and guarantee a tamper-evident audit trail without sharing raw database credentials.</p>
             <div class="landing-actions">
                 <AuthorizeView>
                     <Authorized><a class="btn btn-primary landing-button" href="/query">Open query workspace <Icon Name="chevron" /></a></Authorized>
@@ -25,90 +29,1203 @@
                         }
                     </NotAuthorized>
                 </AuthorizeView>
-                <a class="btn landing-button" href="/documentation"><Icon Name="list" />Explore documentation</a>
+                <a class="btn landing-button" href="#interactive-workspace"><Icon Name="terminal" /> Try live workspace</a>
+                <a class="btn landing-button" href="/documentation"><Icon Name="list" /> Documentation</a>
             </div>
             <div class="landing-badges">
                 <span class="badge-chip"><Icon Name="github" /> Open source</span>
+                <span class="badge-chip"><Icon Name="terminal" /> .NET 10 &amp; PostgreSQL</span>
                 <span class="badge-chip"><Icon Name="db" /> SQL Server</span>
                 <span class="badge-chip"><Icon Name="db" /> PostgreSQL</span>
                 <span class="badge-chip"><Icon Name="db" /> MySQL</span>
                 <span class="badge-chip"><Icon Name="db" /> MariaDB</span>
-                <span class="badge-chip"><Icon Name="terminal" /> .NET 10</span>
                 <span class="badge-chip"><Icon Name="lock" /> Passkeys &amp; MFA</span>
             </div>
         </div>
-        <div class="landing-preview" aria-label="Query Gate workflow">
-            <div class="preview-top"><span class="preview-dot"></span><span class="preview-dot"></span><span class="preview-dot"></span><span class="preview-title">QUERY WORKSPACE</span></div>
-            <div class="preview-body">
-                <div class="preview-heading"><span class="preview-icon"><Icon Name="terminal" /></span><div><strong>SQL workspace</strong><small>One governed doorway to your data</small></div></div>
-                <div class="preview-code"><span>01</span> SELECT OrderId, Status, Total<br /><span>02</span> FROM dbo.Orders<br /><span>03</span> WHERE Status = 'Open';</div>
-                <div class="preview-check"><Icon Name="check" /><div><strong>Checked before execution</strong><small>Permissions verified. Activity recorded.</small></div></div>
+
+        <!-- Interactive Gate Simulator Card -->
+        <div class="sim-window" aria-label="Interactive Query Gate Simulator">
+            <div class="sim-header">
+                <div class="sim-dots">
+                    <span class="sim-dot"></span>
+                    <span class="sim-dot"></span>
+                    <span class="sim-dot"></span>
+                </div>
+                <span class="sim-header-title">LIVE QUERY GATE SIMULATOR</span>
+                <div class="sim-engine-badges">
+                    <button type="button" class="sim-engine-btn @(heroEngine == "postgres" ? "active" : "")" @onclick='() => SetHeroEngine("postgres")'>PostgreSQL</button>
+                    <button type="button" class="sim-engine-btn @(heroEngine == "sqlserver" ? "active" : "")" @onclick='() => SetHeroEngine("sqlserver")'>SQL Server</button>
+                    <button type="button" class="sim-engine-btn @(heroEngine == "mysql" ? "active" : "")" @onclick='() => SetHeroEngine("mysql")'>MySQL</button>
+                </div>
+            </div>
+
+            <!-- Scenario Selection Pills -->
+            <div class="sim-scenarios">
+                <button type="button" class="sim-scenario-btn @(heroScenario == "select" ? "active" : "")" @onclick='() => SelectHeroScenario("select")'>
+                    <Icon Name="check" /> Permitted SELECT
+                </button>
+                <button type="button" class="sim-scenario-btn @(heroScenario == "masking" ? "active" : "")" @onclick='() => SelectHeroScenario("masking")'>
+                    <Icon Name="lock" /> Dynamic Masking
+                </button>
+                <button type="button" class="sim-scenario-btn @(heroScenario == "blocked" ? "active" : "")" @onclick='() => SelectHeroScenario("blocked")'>
+                    <Icon Name="alert" /> Blocked Dangerous DDL
+                </button>
+            </div>
+
+            <!-- Code Editor Preview -->
+            <div class="sim-code-area">
+                <div class="sim-code-line">
+                    <span class="sim-line-num">01</span>
+                    <span>@((MarkupString)GetFormattedHeroQuery())</span>
+                </div>
+            </div>
+
+            <!-- Simulator Toolbar -->
+            <div class="sim-toolbar">
+                <div class="sim-toolbar-left">
+                    <button type="button" class="sim-run-btn" @onclick="RunHeroSimulation" disabled="@heroRunning">
+                        <Icon Name="play" /> @(heroRunning ? "Evaluating gate..." : "Run through gate")
+                    </button>
+                    @if (heroScenario == "masking")
+                    {
+                        <button type="button" class="sim-unmask-toggle @(heroUnmask ? "active" : "")" @onclick="ToggleHeroUnmask" title="Simulates UNMASK privilege">
+                            <Icon Name="@(heroUnmask ? "eye" : "eye-off")" />
+                            @(heroUnmask ? "UNMASK permission active" : "Masked view (default)")
+                        </button>
+                    }
+                </div>
+                <div style="color: var(--text-dim); font-size: 0.74rem;">
+                    Target: <strong>@GetHeroEngineDisplayName()</strong>
+                </div>
+            </div>
+
+            <!-- Live Gate Status Bar -->
+            <div class="sim-status-bar">
+                <div class="sim-badge-row">
+                    @if (heroScenario == "blocked")
+                    {
+                        <span class="sim-status-badge sim-badge-block"><Icon Name="alert" /> GATE REJECTED</span>
+                        <span class="sim-status-badge sim-badge-audit"><Icon Name="shield" /> Fail-closed</span>
+                    }
+                    else
+                    {
+                        <span class="sim-status-badge sim-badge-pass"><Icon Name="check" /> GATE PASSED</span>
+                        @if (heroScenario == "masking" && !heroUnmask)
+                        {
+                            <span class="sim-status-badge sim-badge-mask"><Icon Name="lock" /> Masked in-flight</span>
+                        }
+                        <span class="sim-status-badge sim-badge-audit"><Icon Name="shield" /> Audit logged</span>
+                    }
+                </div>
+                <span style="color: var(--text-faint); font-family: var(--mono); font-size: 0.72rem;">@heroElapsedMs ms</span>
+            </div>
+
+            <!-- Output Inspection -->
+            <div class="sim-output">
+                @if (heroScenario == "blocked")
+                {
+                    <div class="sim-alert-block">
+                        <Icon Name="alert" />
+                        <div>
+                            <strong>Execution blocked by AST security gate:</strong>
+                            <span>Statement type DROP TABLE is prohibited for role 'Developer'. The query was intercepted and rejected before touching the database.</span>
+                        </div>
+                    </div>
+                }
+                else if (heroScenario == "masking")
+                {
+                    <table class="sim-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Customer Name</th>
+                                <th>Email</th>
+                                <th>Credit Card</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (!heroUnmask)
+                            {
+                                <tr>
+                                    <td>401</td>
+                                    <td>Jane Doe</td>
+                                    <td><span class="mask-tag">j***@@acme.com</span></td>
+                                    <td><span class="mask-tag">•••• •••• •••• 4242</span></td>
+                                </tr>
+                                <tr>
+                                    <td>402</td>
+                                    <td>Alex Rivera</td>
+                                    <td><span class="mask-tag">a***@@global.org</span></td>
+                                    <td><span class="mask-tag">•••• •••• •••• 8812</span></td>
+                                </tr>
+                                <tr>
+                                    <td>403</td>
+                                    <td>Carlos Vance</td>
+                                    <td><span class="mask-tag">c***@@summit.io</span></td>
+                                    <td><span class="mask-tag">•••• •••• •••• 1904</span></td>
+                                </tr>
+                            }
+                            else
+                            {
+                                <tr>
+                                    <td>401</td>
+                                    <td>Jane Doe</td>
+                                    <td>jane.doe@@acme.com</td>
+                                    <td>4532 8901 2341 4242</td>
+                                </tr>
+                                <tr>
+                                    <td>402</td>
+                                    <td>Alex Rivera</td>
+                                    <td>alex.rivera@@global.org</td>
+                                    <td>5412 7500 3981 8812</td>
+                                </tr>
+                                <tr>
+                                    <td>403</td>
+                                    <td>Carlos Vance</td>
+                                    <td>carlos.vance@@summit.io</td>
+                                    <td>3782 8224 6310 1904</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+                else
+                {
+                    <table class="sim-table">
+                        <thead>
+                            <tr>
+                                <th>Order ID</th>
+                                <th>Customer</th>
+                                <th>Total</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>101</td>
+                                <td>Acme Logistics</td>
+                                <td>$1,420.00</td>
+                                <td><span style="color: var(--ok); font-weight: 700;">Shipped</span></td>
+                            </tr>
+                            <tr>
+                                <td>102</td>
+                                <td>Global Tech Corp</td>
+                                <td>$850.50</td>
+                                <td><span style="color: var(--ok); font-weight: 700;">Shipped</span></td>
+                            </tr>
+                            <tr>
+                                <td>103</td>
+                                <td>Summit Retail</td>
+                                <td>$3,110.00</td>
+                                <td><span style="color: var(--ok); font-weight: 700;">Shipped</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                }
+            </div>
+            <div style="padding: 6px 14px 10px; font-size: 0.72rem; color: var(--text-faint); display: flex; align-items: center; gap: 6px; border-top: 1px solid var(--line); background: var(--bg-sunken);">
+                <Icon Name="shield" />
+                <span>Simulated demonstration. Actual application interface and rule enforcement may differ based on tenant database configuration.</span>
             </div>
         </div>
     </section>
-    <section class="landing-features" aria-labelledby="features-title">
-        <div class="landing-section-head"><span class="landing-kicker">CONTROL WITHOUT THE FRICTION</span><h2 id="features-title">A better path from request to query.</h2><p>Give people a practical workspace and administrators the visibility they need.</p></div>
-        <div class="landing-feature-grid">
-            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="shield" /></span><h3>Permission-gated SQL</h3><p>Statements are analysed with ScriptDom and checked against effective permissions before reaching a database.</p></article>
-            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="db" /></span><h3>Granular object scoping</h3><p>Control access at database, schema and table levels with role-specific whitelists and blacklists.</p></article>
-            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="lock" /></span><h3>Dynamic data masking</h3><p>Automatically redact sensitive PII including card numbers, SSNs, and medical records for HIPAA, GDPR and PCI-DSS.</p></article>
-            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="activity" /></span><h3>Visual explain plans</h3><p>Inspect estimated query execution plans, operator tree hierarchies, and node costs before running queries.</p></article>
-            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="download" /></span><h3>Multi-format export</h3><p>Export results directly to CSV, Excel (.xlsx, .xlsb), JSON, Markdown, or runnable SQL INSERT scripts.</p></article>
-            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="clock" /></span><h3>Access on your terms</h3><p>Manage role and user grants, approve requests and set time windows for temporary access.</p></article>
-            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="list" /></span><h3>Accountability built in</h3><p>Queries require an audit record before execution, giving your team a complete trail of activity.</p></article>
-            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="terminal" /></span><h3>Monaco SQL workspace</h3><p>Explore database objects, write and save queries with autocomplete, and review results in one place.</p></article>
-            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="check" /></span><h3>Requests and approvals</h3><p>Request database access or submit scripts for administrators to review and approve.</p></article>
-            <article class="landing-feature"><span class="landing-feature-icon"><Icon Name="lock" /></span><h3>Passkeys and 2FA</h3><p>Sign in with a WebAuthn passkey or TOTP authenticator app for phishing-resistant authentication.</p></article>
+
+    <!-- Interactive Workspace Sandbox (Authentic Post-Login Experience) -->
+    <section class="landing-section" id="interactive-workspace" aria-labelledby="workspace-title">
+        <div class="landing-section-head">
+            <span class="landing-kicker">AUTHENTIC POST-LOGIN EXPERIENCE</span>
+            <h2 id="workspace-title">The governed query workspace, in action.</h2>
+            <p>See what users experience after logging in: compact navigation, schema object exploration, ScriptDom AST gate checks, in-flight masking, and visual explain plans.</p>
+        </div>
+
+        <div class="preview-window" aria-label="Authentic Query Gate Post-Login Workspace Preview">
+            <!-- Window Top Chrome -->
+            <div class="preview-window-top">
+                <div class="sim-dots">
+                    <span class="sim-dot"></span>
+                    <span class="sim-dot"></span>
+                    <span class="sim-dot"></span>
+                </div>
+                <div class="preview-window-title">
+                    <Icon Name="terminal" /> Query Gate · Governed SQL Workspace (Post-Login View)
+                </div>
+                <div class="preview-disclaimer-pill">
+                    <Icon Name="shield" /> Representational Preview · Actual UI May Differ After Login
+                </div>
+            </div>
+
+            <!-- The Full App Shell Simulation -->
+            <div class="preview-shell">
+                <!-- Authentic Left Sidebar -->
+                <aside class="preview-sidebar" aria-label="Simulated Application Sidebar">
+                    <div class="preview-sidebar-brand">
+                        <span class="brand-mark"><Icon Name="db" /></span>
+                        <span>Query Gate</span>
+                    </div>
+
+                    <div class="preview-nav-section">Workspace</div>
+                    <div class="preview-nav-item"><Icon Name="home" /> <span>Dashboard</span></div>
+                    <div class="preview-nav-item active"><Icon Name="terminal" /> <span>Query workspace</span></div>
+                    <div class="preview-nav-item"><Icon Name="key" /> <span>My access</span></div>
+                    <div class="preview-nav-item"><Icon Name="file" /> <span>Script requests</span></div>
+                    <div class="preview-nav-item">
+                        <Icon Name="bell" />
+                        <span>Notifications</span>
+                        <span class="preview-nav-badge">2</span>
+                    </div>
+
+                    <div class="preview-nav-section">Governance</div>
+                    <div class="preview-nav-item"><Icon Name="check" /> <span>Approvals</span></div>
+                    <div class="preview-nav-item"><Icon Name="db" /> <span>Databases</span></div>
+                    <div class="preview-nav-item"><Icon Name="grid" /> <span>Access matrix</span></div>
+                    <div class="preview-nav-item"><Icon Name="list" /> <span>Audit logs</span></div>
+                    <div class="preview-nav-item"><Icon Name="cog" /> <span>Settings</span></div>
+
+                    <button class="preview-pin-btn" type="button" title="Pin sidebar"><Icon Name="panel" /> <span>Pin sidebar</span></button>
+                </aside>
+
+                <!-- Authentic Main Content Area -->
+                <div class="preview-main-content">
+                    <!-- Authentic Topbar -->
+                    <header class="preview-topbar">
+                        <div class="preview-topbar-left">
+                            <span class="preview-topbar-title">Query workspace</span>
+                            <span class="badge ok" style="font-size: 0.68rem; padding: 2px 7px;"><Icon Name="check" /> Connected</span>
+                        </div>
+                        <div class="preview-topbar-right">
+                            <span class="theme-sun" style="font-size: 0.85rem; color: var(--text-dim); display: flex;"><Icon Name="sun" /></span>
+                            <span style="position: relative; display: inline-flex; color: var(--text-dim); font-size: 0.85rem;">
+                                <Icon Name="bell" />
+                                <span class="preview-nav-badge" style="position: absolute; top: -5px; right: -5px; font-size: 8px; padding: 1px 4px;">2</span>
+                            </span>
+                            <div class="preview-user-chip">
+                                <span class="preview-avatar">AR</span>
+                                <div>
+                                    <strong style="display: block; font-size: 0.72rem;">Arjun Reddy</strong>
+                                    <span style="font-size: 0.64rem; color: var(--text-dim);">Developer (Least-Privilege)</span>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+
+                    <!-- The Query Workspace Inside the App Frame -->
+                    <div class="preview-ws">
+                        <!-- Left Panel: Objects, Saved, History -->
+                        <aside class="preview-ws-side" aria-label="Object Explorer">
+                            <div class="preview-ws-side-tabs">
+                                <button type="button" class="preview-ws-side-tab active">Objects</button>
+                                <button type="button" class="preview-ws-side-tab">Saved</button>
+                                <button type="button" class="preview-ws-side-tab">History</button>
+                            </div>
+                            <div class="preview-filter-row">
+                                <input type="search" class="preview-filter-input" placeholder="Filter objects..." value="" readonly />
+                                <span style="font-size: 0.68rem; color: var(--text-faint);"><Icon Name="refresh" /></span>
+                            </div>
+                            <div class="preview-obj-icons">
+                                <span class="preview-obj-btn active"><Icon Name="list" /> All</span>
+                                <span class="preview-obj-btn"><Icon Name="table" /> Tables</span>
+                                <span class="preview-obj-btn"><Icon Name="eye" /> Views</span>
+                            </div>
+
+                            <!-- Real Object Explorer Tree Items -->
+                            <div style="display: flex; flex-direction: column; gap: 3px; margin-top: 4px;">
+                                <!-- Table: orders -->
+                                <div class="tree-item @(wsActiveTab == "orders" ? "active" : "")" style="padding: 4px 6px; font-size: 0.76rem;" @onclick='() => SelectWsTable("orders")'>
+                                    <span style="color: var(--text-faint); font-size: 10px;">▾</span>
+                                    <Icon Name="table" />
+                                    <span style="font-weight: 600;">public.orders</span>
+                                    <span class="faint small" style="margin-left: auto; font-size: 10px;">Table</span>
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 2px;">
+                                    <div class="tree-col" style="font-size: 0.7rem; padding-left: 24px;"><span style="opacity:0.6;font-size:9px">●</span> id (int8)</div>
+                                    <div class="tree-col" style="font-size: 0.7rem; padding-left: 24px;"><span style="opacity:0.6;font-size:9px">●</span> customer_name (text)</div>
+                                    <div class="tree-col" style="font-size: 0.7rem; padding-left: 24px;"><span style="opacity:0.6;font-size:9px">●</span> order_date (date)</div>
+                                    <div class="tree-col" style="font-size: 0.7rem; padding-left: 24px;"><span style="opacity:0.6;font-size:9px">●</span> status (text)</div>
+                                    <div class="tree-col" style="font-size: 0.7rem; padding-left: 24px;"><span style="opacity:0.6;font-size:9px">●</span> total (numeric)</div>
+                                </div>
+
+                                <!-- Table: customers -->
+                                <div class="tree-item @(wsActiveTab == "customers" ? "active" : "")" style="padding: 4px 6px; font-size: 0.76rem; margin-top: 4px;" @onclick='() => SelectWsTable("customers")'>
+                                    <span style="color: var(--text-faint); font-size: 10px;">▾</span>
+                                    <Icon Name="table" />
+                                    <span style="font-weight: 600;">public.customers</span>
+                                    <span class="faint small" style="margin-left: auto; font-size: 10px;">Table</span>
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 2px;">
+                                    <div class="tree-col" style="font-size: 0.7rem; padding-left: 24px;"><span style="opacity:0.6;font-size:9px">●</span> id (int8)</div>
+                                    <div class="tree-col" style="font-size: 0.7rem; padding-left: 24px;"><span style="opacity:0.6;font-size:9px">●</span> full_name (text)</div>
+                                    <div class="tree-col" style="font-size: 0.7rem; padding-left: 24px; color: var(--warn);"><span style="opacity:0.6;font-size:9px">●</span> email (MASKED)</div>
+                                    <div class="tree-col" style="font-size: 0.7rem; padding-left: 24px; color: var(--warn);"><span style="opacity:0.6;font-size:9px">●</span> card_number (MASKED)</div>
+                                </div>
+
+                                <!-- View: order_analytics -->
+                                <div class="tree-item @(wsActiveTab == "explain" ? "active" : "")" style="padding: 4px 6px; font-size: 0.76rem; margin-top: 4px;" @onclick='() => SelectWsTable("explain")'>
+                                    <span style="color: var(--text-faint); font-size: 10px;">▸</span>
+                                    <Icon Name="eye" />
+                                    <span style="font-weight: 600;">public.order_analytics</span>
+                                    <span class="faint small" style="margin-left: auto; font-size: 10px;">View</span>
+                                </div>
+                            </div>
+                        </aside>
+
+                        <!-- Right Area: Tab Bar, Toolbar, Code Editor, Results Card -->
+                        <div class="preview-ws-main">
+                            <!-- Tab Bar -->
+                            <div class="preview-ws-tabs">
+                                <button type="button" class="icon-btn sm" style="padding: 2px 5px; margin-bottom: 2px;" title="Toggle panel"><Icon Name="list" /></button>
+                                <div class="preview-ws-tab @(wsActiveTab == "orders" ? "active" : "")" @onclick='() => SwitchWsTab("orders")'>
+                                    <Icon Name="code" />
+                                    <span>orders_report.sql</span>
+                                    <span class="preview-ws-tab-close">×</span>
+                                </div>
+                                <div class="preview-ws-tab @(wsActiveTab == "customers" ? "active" : "")" @onclick='() => SwitchWsTab("customers")'>
+                                    <Icon Name="code" />
+                                    <span>customer_masking.sql</span>
+                                    <span class="preview-ws-tab-close">×</span>
+                                </div>
+                                <div class="preview-ws-tab @(wsActiveTab == "explain" ? "active" : "")" @onclick='() => SwitchWsTab("explain")'>
+                                    <Icon Name="code" />
+                                    <span>explain_joins.sql</span>
+                                    <span class="preview-ws-tab-close">×</span>
+                                </div>
+                                <span style="font-size: 0.75rem; color: var(--text-faint); padding: 0 6px; cursor: pointer;">+ New</span>
+                            </div>
+
+                            <!-- Action Toolbar -->
+                            <div class="preview-ws-bar">
+                                <div class="preview-ws-bar-left">
+                                    <button type="button" class="preview-db-btn" title="Current Database">
+                                        <Icon Name="db" />
+                                        <span>prod-postgres</span>
+                                        <span class="badge env-prod" style="font-size: 0.65rem; padding: 1px 5px;">Production</span>
+                                        <span class="badge engine-postgres" style="font-size: 0.65rem; padding: 1px 5px;">PostgreSQL</span>
+                                        <span style="font-size: 10px; opacity: 0.7;">▾</span>
+                                    </button>
+
+                                    <button type="button" class="preview-ws-btn primary" @onclick="ExecuteWorkspaceQuery" disabled="@wsRunning">
+                                        <Icon Name="play" /> @(wsRunning ? "Executing..." : "Run (F5)")
+                                    </button>
+                                    <button type="button" class="preview-ws-btn" @onclick='() => SetWsResultsTab("explain")'>
+                                        <Icon Name="activity" /> Explain
+                                    </button>
+                                    <button type="button" class="preview-ws-btn" title="Format query">
+                                        <Icon Name="format" /> Format
+                                    </button>
+                                    <button type="button" class="preview-ws-btn" title="Save query">
+                                        <Icon Name="save" /> Save
+                                    </button>
+
+                                    <label class="chip-toggle chip-warn" style="font-size: 0.72rem; padding: 3px 8px; cursor: pointer;">
+                                        <span>Dry run</span>
+                                    </label>
+                                    <div class="chip-input" style="font-size: 0.72rem; padding: 2px 6px;">
+                                        <Icon Name="clock" />
+                                        <span>30s</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Editor Area -->
+                            <div class="preview-code-editor">
+                                @if (wsActiveTab == "orders")
+                                {
+                                    <div class="preview-code-row"><span class="preview-code-num">1</span><span class="sql-comment">-- Role: Developer (Whitelisted: SELECT on public.orders)</span></div>
+                                    <div class="preview-code-row"><span class="preview-code-num">2</span><span><span class="sql-kw">SELECT</span> id, customer_name, order_date, status, total</span></div>
+                                    <div class="preview-code-row"><span class="preview-code-num">3</span><span><span class="sql-kw">FROM</span> public.orders</span></div>
+                                    <div class="preview-code-row"><span class="preview-code-num">4</span><span><span class="sql-kw">WHERE</span> status <span class="sql-kw">IN</span> (<span class="sql-str">'Delivered'</span>, <span class="sql-str">'Processing'</span>)</span></div>
+                                    <div class="preview-code-row"><span class="preview-code-num">5</span><span><span class="sql-kw">ORDER BY</span> id <span class="sql-kw">DESC LIMIT</span> 4;</span></div>
+                                }
+                                else if (wsActiveTab == "customers")
+                                {
+                                    <div class="preview-code-row"><span class="preview-code-num">1</span><span class="sql-comment">-- In-flight Dynamic Data Masking enabled for PCI-DSS &amp; GDPR</span></div>
+                                    <div class="preview-code-row"><span class="preview-code-num">2</span><span><span class="sql-kw">SELECT</span> id, full_name, email, card_number, country</span></div>
+                                    <div class="preview-code-row"><span class="preview-code-num">3</span><span><span class="sql-kw">FROM</span> public.customers</span></div>
+                                    <div class="preview-code-row"><span class="preview-code-num">4</span><span><span class="sql-kw">ORDER BY</span> id <span class="sql-kw">ASC LIMIT</span> 4;</span></div>
+                                }
+                                else
+                                {
+                                    <div class="preview-code-row"><span class="preview-code-num">1</span><span class="sql-comment">-- Estimated visual explain execution plan with cost bounds</span></div>
+                                    <div class="preview-code-row"><span class="preview-code-num">2</span><span><span class="sql-kw">EXPLAIN ANALYZE SELECT</span> o.id, c.full_name, o.total</span></div>
+                                    <div class="preview-code-row"><span class="preview-code-num">3</span><span><span class="sql-kw">FROM</span> public.orders o</span></div>
+                                    <div class="preview-code-row"><span class="preview-code-num">4</span><span><span class="sql-kw">JOIN</span> public.customers c <span class="sql-kw">ON</span> o.customer_id = c.id;</span></div>
+                                }
+                            </div>
+
+                            <div class="ws-split" title="Resize splitter"></div>
+
+                            <!-- Results Card -->
+                            <div class="preview-results-card">
+                                <div class="preview-results-header">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="badge ok" style="font-size: 0.7rem; font-weight: 700;">Success</span>
+                                        @if (wsActiveTab == "customers")
+                                        {
+                                            <span class="badge warn" style="font-size: 0.7rem; font-weight: 700;"><Icon Name="lock" /> Masked (2 PII redacted)</span>
+                                        }
+                                        <span class="muted small" style="font-size: 0.74rem;">@wsElapsedMs ms · @GetResultRowCount() row(s) returned</span>
+                                    </div>
+                                    <div class="preview-results-tabs">
+                                        <button type="button" class="preview-res-btn @(wsResultsTab == "data" ? "active" : "")" @onclick='() => SetWsResultsTab("data")'>
+                                            Result 1
+                                        </button>
+                                        <button type="button" class="preview-res-btn @(wsResultsTab == "messages" ? "active" : "")" @onclick='() => SetWsResultsTab("messages")'>
+                                            Messages
+                                        </button>
+                                        <button type="button" class="preview-res-btn @(wsResultsTab == "explain" ? "active" : "")" @onclick='() => SetWsResultsTab("explain")'>
+                                            <Icon Name="activity" /> Execution Plan
+                                        </button>
+                                        <button type="button" class="preview-res-btn" @onclick="TriggerMockExport" title="Export results to CSV, Excel, or JSON">
+                                            <Icon Name="download" /> Export @(exportedNotice ? "(Exported!)" : "▾")
+                                        </button>
+                                        <button type="button" class="preview-res-btn @(wsResultsTab == "audit" ? "active" : "")" @onclick='() => SetWsResultsTab("audit")'>
+                                            <Icon Name="shield" /> Audit Record
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="preview-results-body">
+                                    @if (wsResultsTab == "data")
+                                    {
+                                        @if (wsActiveTab == "orders")
+                                        {
+                                            <table class="sim-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>#</th>
+                                                        <th>id</th>
+                                                        <th>customer_name</th>
+                                                        <th>order_date</th>
+                                                        <th>status</th>
+                                                        <th>total</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr>
+                                                        <td style="color: var(--text-faint);">1</td>
+                                                        <td>ORD-9821</td>
+                                                        <td>Apex Logistics</td>
+                                                        <td>2026-11-17</td>
+                                                        <td><span style="color: var(--ok); font-weight: 700;">Delivered</span></td>
+                                                        <td>$4,820.00</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td style="color: var(--text-faint);">2</td>
+                                                        <td>ORD-9820</td>
+                                                        <td>Vanguard Systems</td>
+                                                        <td>2026-11-17</td>
+                                                        <td><span style="color: #0284c7; font-weight: 700;">Processing</span></td>
+                                                        <td>$1,290.00</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td style="color: var(--text-faint);">3</td>
+                                                        <td>ORD-9819</td>
+                                                        <td>Cascade Media</td>
+                                                        <td>2026-11-16</td>
+                                                        <td><span style="color: var(--ok); font-weight: 700;">Delivered</span></td>
+                                                        <td>$875.00</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td style="color: var(--text-faint);">4</td>
+                                                        <td>ORD-9818</td>
+                                                        <td>Northwind Labs</td>
+                                                        <td>2026-11-16</td>
+                                                        <td><span style="color: var(--ok); font-weight: 700;">Delivered</span></td>
+                                                        <td>$2,450.00</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        }
+                                        else if (wsActiveTab == "customers")
+                                        {
+                                            <table class="sim-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>#</th>
+                                                        <th>id</th>
+                                                        <th>full_name</th>
+                                                        <th>email</th>
+                                                        <th>card_number</th>
+                                                        <th>country</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr>
+                                                        <td style="color: var(--text-faint);">1</td>
+                                                        <td>CUST-104</td>
+                                                        <td>Sarah Connor</td>
+                                                        <td><span class="mask-tag">s***@@cyber.io</span></td>
+                                                        <td><span class="mask-tag">•••• •••• •••• 9012</span></td>
+                                                        <td>United States</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td style="color: var(--text-faint);">2</td>
+                                                        <td>CUST-105</td>
+                                                        <td>Bruce Wayne</td>
+                                                        <td><span class="mask-tag">b***@@wayne.com</span></td>
+                                                        <td><span class="mask-tag">•••• •••• •••• 4410</span></td>
+                                                        <td>United States</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td style="color: var(--text-faint);">3</td>
+                                                        <td>CUST-106</td>
+                                                        <td>Diana Prince</td>
+                                                        <td><span class="mask-tag">d***@@themyscira.gov</span></td>
+                                                        <td><span class="mask-tag">•••• •••• •••• 3180</span></td>
+                                                        <td>Greece</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td style="color: var(--text-faint);">4</td>
+                                                        <td>CUST-107</td>
+                                                        <td>Clark Kent</td>
+                                                        <td><span class="mask-tag">c***@@dailyplanet.net</span></td>
+                                                        <td><span class="mask-tag">•••• •••• •••• 7721</span></td>
+                                                        <td>United States</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        }
+                                        else
+                                        {
+                                            <div style="font-size: 0.82rem; color: var(--text-dim); line-height: 1.6;">
+                                                Execution Plan ready. Click the <strong>Execution Plan</strong> button above to inspect hierarchical operator nodes and filter scans.
+                                            </div>
+                                        }
+                                    }
+                                    else if (wsResultsTab == "explain")
+                                    {
+                                        <div class="explain-tree">
+                                            <div class="explain-node">
+                                                <div class="explain-node-left">
+                                                    <Icon Name="activity" />
+                                                    <span>Hash Join (Inner Join on customer_id = id)</span>
+                                                    <span class="explain-badge">Cost: 12.40..28.50</span>
+                                                </div>
+                                                <span class="explain-cost">Rows: 150 · Width: 68 bytes</span>
+                                            </div>
+                                            <div class="explain-node explain-node-indent-1">
+                                                <div class="explain-node-left">
+                                                    <Icon Name="table" />
+                                                    <span>Seq Scan on customers c</span>
+                                                    <span class="explain-badge">Cost: 0.00..14.20</span>
+                                                </div>
+                                                <span class="explain-cost">Rows: 250 · Filter: active = true</span>
+                                            </div>
+                                            <div class="explain-node explain-node-indent-1">
+                                                <div class="explain-node-left">
+                                                    <Icon Name="grid" />
+                                                    <span>Hash</span>
+                                                    <span class="explain-badge">Cost: 10.15</span>
+                                                </div>
+                                                <span class="explain-cost">Buckets: 1024 · Memory: 9kB</span>
+                                            </div>
+                                            <div class="explain-node explain-node-indent-2">
+                                                <div class="explain-node-left">
+                                                    <Icon Name="check" />
+                                                    <span>Index Scan on orders_pkey on orders o</span>
+                                                    <span class="explain-badge">Cost: 0.15..8.25</span>
+                                                </div>
+                                                <span class="explain-cost">Rows: 150 (Index Cond: id &gt; 9800)</span>
+                                            </div>
+                                        </div>
+                                    }
+                                    else if (wsResultsTab == "messages")
+                                    {
+                                        <div style="font-family: var(--mono); font-size: 0.78rem; color: var(--text-dim); line-height: 1.6;">
+                                            <div>Query executed successfully on target: prod-postgres</div>
+                                            <div>ScriptDom AST Check: Approved (SELECT Statement)</div>
+                                            <div>Audit Log: Record committed to PostgreSQL storage before engine execution</div>
+                                            <div style="color: var(--ok); margin-top: 4px;">Rows returned: @GetResultRowCount() in @wsElapsedMs ms</div>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <div style="font-family: var(--mono); font-size: 0.76rem; display: flex; flex-direction: column; gap: 6px;">
+                                            <div style="display: flex; justify-content: space-between; padding: 5px 8px; background: var(--bg-sunken); border-radius: 4px; border: 1px solid var(--line);">
+                                                <span style="color: var(--text-dim);">Audit Log Identifier:</span>
+                                                <strong>#AUD-202611-94812</strong>
+                                            </div>
+                                            <div style="display: flex; justify-content: space-between; padding: 5px 8px; background: var(--bg-sunken); border-radius: 4px; border: 1px solid var(--line);">
+                                                <span style="color: var(--text-dim);">Actor &amp; Role:</span>
+                                                <strong>arjun@@company.internal (Role: Developer)</strong>
+                                            </div>
+                                            <div style="display: flex; justify-content: space-between; padding: 5px 8px; background: var(--bg-sunken); border-radius: 4px; border: 1px solid var(--line);">
+                                                <span style="color: var(--text-dim);">Target Engine &amp; DB:</span>
+                                                <strong>prod-postgres (PostgreSQL 16)</strong>
+                                            </div>
+                                            <div style="display: flex; justify-content: space-between; padding: 5px 8px; background: var(--bg-sunken); border-radius: 4px; border: 1px solid var(--line);">
+                                                <span style="color: var(--text-dim);">Pre-Execution Guarantee:</span>
+                                                <span style="color: var(--ok); font-weight: 700;">Fail-closed audit write confirmed before execution</span>
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Disclaimer Box -->
+        <div class="preview-disclaimer-note">
+            <Icon Name="shield" />
+            <div>
+                <strong>Representational Interface Disclaimer:</strong>
+                <span>This interactive preview provides a simulated demonstration of Query Gate workflows and layouts. The actual post-login application interface can differ based on your assigned user roles, permissions, theme settings, database engines, and browser configuration. In the production app, users work with a full Monaco SQL editor with live IntelliSense schema autocomplete, resizable split panels, multi-tab state persistence, and direct file downloads for CSV, Excel (.xlsx, .xlsb), and JSON.</span>
+            </div>
         </div>
     </section>
-    <section class="landing-section" aria-labelledby="workspace-title">
-        <div class="landing-section-head"><span class="landing-kicker">THE WORKSPACE</span><h2 id="workspace-title">From SQL to results in one place.</h2><p>Browse objects, run permitted queries and inspect results without sharing database credentials with every user.</p></div>
-        <figure class="landing-screenshot">
-            <picture>
-                <img src="/images/query-workspace.jpeg" alt="Query Gate workspace showing a SQL query and two sample order results" loading="lazy" />
-            </picture>
-            <figcaption>Query workspace shown with fictional sample data.</figcaption>
-        </figure>
-    </section>
+
+    <!-- Interactive 4-Step Governance Lifecycle (Replaces static numbered list) -->
     <section class="landing-section" aria-labelledby="workflow-title">
-        <div class="landing-section-head"><span class="landing-kicker">HOW IT WORKS</span><h2 id="workflow-title">Four steps to governed access.</h2></div>
-        <ol class="landing-steps">
-            <li><span>01</span><h3>Register a database</h3><p>An administrator connects a SQL Server, PostgreSQL, MySQL or MariaDB database using a dedicated account.</p></li>
-            <li><span>02</span><h3>Grant access</h3><p>Configure role or user permissions, including optional time windows, or review access requests.</p></li>
-            <li><span>03</span><h3>Run checked SQL</h3><p>Users work in the query workspace. The SQL gate checks statements and permissions before execution.</p></li>
-            <li><span>04</span><h3>Review activity</h3><p>Queries require an audit record before execution. Review activity in the audit log.</p></li>
-        </ol>
+        <div class="landing-section-head">
+            <span class="landing-kicker">GOVERNANCE LIFECYCLE</span>
+            <h2 id="workflow-title">Four steps to governed database access.</h2>
+            <p>From initial engine registration to immutable audit logs, Query Gate inserts security guardrails without interrupting developer workflows.</p>
+        </div>
+
+        <!-- 4 Step Interactive Stepper Navigation -->
+        <div class="lifecycle-stepper" role="tablist" aria-label="Governance steps">
+            <div class="lifecycle-card @(activeStep == 1 ? "active" : "")" role="tab" tabindex="0" @onclick="() => SetStep(1)">
+                <span class="step-num">STEP 01</span>
+                <h3>Register database</h3>
+                <p>Connect SQL Server, PostgreSQL, MySQL or MariaDB with dedicated least-privilege credentials.</p>
+            </div>
+            <div class="lifecycle-card @(activeStep == 2 ? "active" : "")" role="tab" tabindex="0" @onclick="() => SetStep(2)">
+                <span class="step-num">STEP 02</span>
+                <h3>Grant access</h3>
+                <p>Assign granular role permissions, schema whitelists, and temporary time-window countdowns.</p>
+            </div>
+            <div class="lifecycle-card @(activeStep == 3 ? "active" : "")" role="tab" tabindex="0" @onclick="() => SetStep(3)">
+                <span class="step-num">STEP 03</span>
+                <h3>Run checked SQL</h3>
+                <p>ScriptDom AST parses queries in memory. Prohibited statements are rejected fail-closed.</p>
+            </div>
+            <div class="lifecycle-card @(activeStep == 4 ? "active" : "")" role="tab" tabindex="0" @onclick="() => SetStep(4)">
+                <span class="step-num">STEP 04</span>
+                <h3>Immutable audit trail</h3>
+                <p>Pre-execution audit writes guarantee every query is logged with actor, hash, and duration.</p>
+            </div>
+        </div>
+
+        <!-- Interactive Lifecycle Demonstration Panel -->
+        <div class="lifecycle-panel">
+            @if (activeStep == 1)
+            {
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: center;">
+                    <div>
+                        <span class="landing-kicker">STEP 01 IN ACTION</span>
+                        <h3 style="margin: 8px 0 12px; font-size: 1.3rem;">Zero Shared Root Passwords</h3>
+                        <p style="color: var(--text-dim); line-height: 1.6; margin-bottom: 16px;">
+                            Query Gate maintains single-tenant connection pools with encrypted credentials. Users never see or touch the database connection strings, passwords, or network endpoints.
+                        </p>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <span class="badge-chip"><Icon Name="shield" /> TLS / SSL Enforced</span>
+                            <span class="badge-chip"><Icon Name="lock" /> Secret Encryption</span>
+                            <span class="badge-chip"><Icon Name="activity" /> Connection Health Check</span>
+                        </div>
+                    </div>
+                    <div style="padding: 18px; border-radius: 10px; background: var(--bg-sunken); border: 1px solid var(--line); font-family: var(--mono); font-size: 0.78rem;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 10px; color: var(--text-dim);">
+                            <span>Target Engine:</span>
+                            <strong style="color: var(--text);">PostgreSQL 16</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 10px; color: var(--text-dim);">
+                            <span>Host &amp; Port:</span>
+                            <span>pg-cluster.internal:5432</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 10px; color: var(--text-dim);">
+                            <span>Service Account:</span>
+                            <span>svc_querygate_ro</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding-top: 10px; border-top: 1px solid var(--line); color: var(--ok); font-weight: 700;">
+                            <span>Health status:</span>
+                            <span>Healthy (Round-trip 8ms)</span>
+                        </div>
+                    </div>
+                </div>
+            }
+            else if (activeStep == 2)
+            {
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: center;">
+                    <div>
+                        <span class="landing-kicker">STEP 02 IN ACTION</span>
+                        <h3 style="margin: 8px 0 12px; font-size: 1.3rem;">Granular Scopes &amp; Time Windows</h3>
+                        <p style="color: var(--text-dim); line-height: 1.6; margin-bottom: 16px;">
+                            Configure access by role or user. Restrict visibility to specific schemas and tables. Grant temporary elevated access that expires automatically after a set window.
+                        </p>
+                        <div style="display: flex; align-items: center; gap: 10px; font-size: 0.85rem; font-weight: 600;">
+                            <Icon Name="clock" />
+                            <span>Temporary Window: <strong>2 hours (auto-revoked)</strong></span>
+                        </div>
+                    </div>
+                    <div style="padding: 16px; border-radius: 10px; background: var(--bg-sunken); border: 1px solid var(--line); font-size: 0.78rem;">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr style="border-bottom: 1px solid var(--line); color: var(--text-dim); text-align: left;">
+                                    <th style="padding: 6px;">Role</th>
+                                    <th style="padding: 6px;">SELECT</th>
+                                    <th style="padding: 6px;">UPDATE</th>
+                                    <th style="padding: 6px;">Masking</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr style="border-bottom: 1px solid var(--line-subtle, var(--line));">
+                                    <td style="padding: 6px; font-weight: 600;">Developer</td>
+                                    <td style="padding: 6px; color: var(--ok);"><Icon Name="check" /> Allowed</td>
+                                    <td style="padding: 6px; color: var(--warn);"><Icon Name="clock" /> Approval req</td>
+                                    <td style="padding: 6px;"><span class="mask-tag">Enforced</span></td>
+                                </tr>
+                                <tr style="border-bottom: 1px solid var(--line-subtle, var(--line));">
+                                    <td style="padding: 6px; font-weight: 600;">Data Analyst</td>
+                                    <td style="padding: 6px; color: var(--ok);"><Icon Name="check" /> Allowed</td>
+                                    <td style="padding: 6px; color: var(--bad);"><Icon Name="x" /> Denied</td>
+                                    <td style="padding: 6px;"><span class="mask-tag">Enforced</span></td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 6px; font-weight: 600;">DBA / Lead</td>
+                                    <td style="padding: 6px; color: var(--ok);"><Icon Name="check" /> Allowed</td>
+                                    <td style="padding: 6px; color: var(--ok);"><Icon Name="check" /> Allowed</td>
+                                    <td style="padding: 6px; color: var(--ok);"><Icon Name="eye" /> UNMASK</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            }
+            else if (activeStep == 3)
+            {
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: center;">
+                    <div>
+                        <span class="landing-kicker">STEP 03 IN ACTION</span>
+                        <h3 style="margin: 8px 0 12px; font-size: 1.3rem;">Fail-Closed AST Parser</h3>
+                        <p style="color: var(--text-dim); line-height: 1.6; margin-bottom: 16px;">
+                            Before any query is sent across the wire, Query Gate breaks it down using Microsoft ScriptDom and dialect normalizers to verify statement types, object references, and syntax correctness.
+                        </p>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <span class="badge-chip"><Icon Name="shield" /> Injection Defense</span>
+                            <span class="badge-chip"><Icon Name="check" /> Whitelist Validation</span>
+                            <span class="badge-chip"><Icon Name="alert" /> Destructive Block</span>
+                        </div>
+                    </div>
+                    <div style="padding: 16px; border-radius: 10px; background: var(--bg-sunken); border: 1px solid var(--line); font-family: var(--mono); font-size: 0.76rem; display: flex; flex-direction: column; gap: 8px;">
+                        <div style="padding: 8px; background: var(--bg-elev); border-radius: 6px; border: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between;">
+                            <span>1. Lexical Tokenisation</span>
+                            <strong style="color: var(--ok);">PASS</strong>
+                        </div>
+                        <div style="padding: 8px; background: var(--bg-elev); border-radius: 6px; border: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between;">
+                            <span>2. ScriptDom Abstract Syntax Tree</span>
+                            <strong style="color: var(--ok);">SELECT Statement</strong>
+                        </div>
+                        <div style="padding: 8px; background: var(--bg-elev); border-radius: 6px; border: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between;">
+                            <span>3. Object Scope Resolution</span>
+                            <strong style="color: var(--ok);">public.orders (Whitelisted)</strong>
+                        </div>
+                        <div style="padding: 8px; background: var(--bg-elev); border-radius: 6px; border: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between;">
+                            <span>4. Pre-execution Audit Write</span>
+                            <strong style="color: var(--ok);">Committed (ID #8492)</strong>
+                        </div>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: center;">
+                    <div>
+                        <span class="landing-kicker">STEP 04 IN ACTION</span>
+                        <h3 style="margin: 8px 0 12px; font-size: 1.3rem;">Tamper-Evident Audit Records</h3>
+                        <p style="color: var(--text-dim); line-height: 1.6; margin-bottom: 16px;">
+                            Never wonder who ran what query. Every execution records the user identity, client IP, statement hash, execution duration, and outcome status with non-repudiation guarantees.
+                        </p>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <span class="badge-chip"><Icon Name="shield" /> Actor Identity</span>
+                            <span class="badge-chip"><Icon Name="terminal" /> Query Fingerprint</span>
+                            <span class="badge-chip"><Icon Name="clock" /> Execution Milliseconds</span>
+                        </div>
+                    </div>
+                    <div style="padding: 16px; border-radius: 10px; background: var(--bg-sunken); border: 1px solid var(--line); font-size: 0.76rem; font-family: var(--mono); display: flex; flex-direction: column; gap: 6px;">
+                        <div style="padding: 6px 8px; background: var(--bg-elev); border-radius: 4px; border: 1px solid var(--line); display: flex; justify-content: space-between;">
+                            <span>2026-11-17 18:24:01</span>
+                            <span style="color: var(--ok); font-weight: 700;">ALLOWED</span>
+                        </div>
+                        <div style="color: var(--text-dim); padding-left: 6px;">User: dev_alex · DB: production-pg · 32ms</div>
+                        <div style="color: var(--text-faint); padding-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">SQL: SELECT id, total FROM orders WHERE ...</div>
+                        
+                        <div style="padding: 6px 8px; background: var(--bg-elev); border-radius: 4px; border: 1px solid var(--line); margin-top: 6px; display: flex; justify-content: space-between;">
+                            <span>2026-11-17 18:21:40</span>
+                            <span style="color: var(--bad); font-weight: 700;">BLOCKED</span>
+                        </div>
+                        <div style="color: var(--text-dim); padding-left: 6px;">User: dev_sarah · DB: production-pg · 0ms</div>
+                        <div style="color: var(--text-faint); padding-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">SQL: DROP TABLE temp_audit_logs</div>
+                    </div>
+                </div>
+            }
+        </div>
     </section>
+
+    <!-- Dynamic Data Masking & Compliance Playground -->
+    <section class="landing-section" aria-labelledby="masking-title">
+        <div class="landing-section-head">
+            <span class="landing-kicker">IN-FLIGHT DATA MASKING</span>
+            <h2 id="masking-title">Compliance without modifying the database.</h2>
+            <p>Automatically redact sensitive PII including credit card numbers, email addresses, and national IDs for PCI-DSS, GDPR, and HIPAA compliance without altering underlying table data.</p>
+        </div>
+
+        <div class="masking-lab" aria-label="Interactive Dynamic Data Masking Lab">
+            <div class="masking-lab-header">
+                <div class="masking-presets">
+                    <button type="button" class="mask-preset-btn @(maskPreset == "pci" ? "active" : "")" @onclick='() => SetMaskPreset("pci")'>
+                        PCI-DSS (Credit Cards)
+                    </button>
+                    <button type="button" class="mask-preset-btn @(maskPreset == "gdpr" ? "active" : "")" @onclick='() => SetMaskPreset("gdpr")'>
+                        GDPR (Emails &amp; Names)
+                    </button>
+                    <button type="button" class="mask-preset-btn @(maskPreset == "hipaa" ? "active" : "")" @onclick='() => SetMaskPreset("hipaa")'>
+                        HIPAA (Medical &amp; SSN)
+                    </button>
+                </div>
+
+                <div class="unmask-switch-container">
+                    <span>Simulated Role:</span>
+                    <button type="button" class="unmask-switch-btn @(maskUnmaskActive ? "active" : "")" @onclick="ToggleMaskPlaygroundUnmask">
+                        <Icon Name="@(maskUnmaskActive ? "eye" : "eye-off")" />
+                        @(maskUnmaskActive ? "Role with UNMASK Privilege" : "Role with Default Redaction")
+                    </button>
+                </div>
+            </div>
+
+            <!-- Comparison Table -->
+            <table class="sim-table" style="font-size: 0.8rem;">
+                <thead>
+                    <tr>
+                        <th>Data Field</th>
+                        <th>Compliance Standard</th>
+                        <th>Storage in Database</th>
+                        <th>Query Gate In-Flight Output</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (maskPreset == "pci")
+                    {
+                        <tr>
+                            <td><strong>Primary Account Number</strong></td>
+                            <td>PCI-DSS Requirement 3.4</td>
+                            <td style="font-family: var(--mono); color: var(--text-dim);">4532 8901 2341 4242</td>
+                            <td>
+                                @if (maskUnmaskActive)
+                                {
+                                    <span style="font-family: var(--mono); color: var(--text);">4532 8901 2341 4242</span>
+                                }
+                                else
+                                {
+                                    <span class="mask-tag">•••• •••• •••• 4242</span>
+                                }
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Cardholder CVV / CVC</strong></td>
+                            <td>PCI-DSS Requirement 3.2</td>
+                            <td style="font-family: var(--mono); color: var(--text-dim);">849</td>
+                            <td>
+                                @if (maskUnmaskActive)
+                                {
+                                    <span style="font-family: var(--mono); color: var(--text);">849</span>
+                                }
+                                else
+                                {
+                                    <span class="mask-tag">••• (Redacted)</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                    else if (maskPreset == "gdpr")
+                    {
+                        <tr>
+                            <td><strong>Personal Email Address</strong></td>
+                            <td>GDPR Article 32 (Pseudonymisation)</td>
+                            <td style="font-family: var(--mono); color: var(--text-dim);">sarah.connor@@cyber.io</td>
+                            <td>
+                                @if (maskUnmaskActive)
+                                {
+                                    <span style="font-family: var(--mono); color: var(--text);">sarah.connor@@cyber.io</span>
+                                }
+                                else
+                                {
+                                    <span class="mask-tag">s•••••@@cyber.io</span>
+                                }
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Direct Telephone Number</strong></td>
+                            <td>GDPR Right to Privacy</td>
+                            <td style="font-family: var(--mono); color: var(--text-dim);">+1 (415) 555-0199</td>
+                            <td>
+                                @if (maskUnmaskActive)
+                                {
+                                    <span style="font-family: var(--mono); color: var(--text);">+1 (415) 555-0199</span>
+                                }
+                                else
+                                {
+                                    <span class="mask-tag">+1 (•••) •••-0199</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                    else
+                    {
+                        <tr>
+                            <td><strong>Social Security Number</strong></td>
+                            <td>HIPAA Privacy Rule 45 CFR 164.514</td>
+                            <td style="font-family: var(--mono); color: var(--text-dim);">987-65-4321</td>
+                            <td>
+                                @if (maskUnmaskActive)
+                                {
+                                    <span style="font-family: var(--mono); color: var(--text);">987-65-4321</span>
+                                }
+                                else
+                                {
+                                    <span class="mask-tag">•••-••-4321</span>
+                                }
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Medical Record Number</strong></td>
+                            <td>HIPAA Safe Harbor De-identification</td>
+                            <td style="font-family: var(--mono); color: var(--text-dim);">MRN-849204-X</td>
+                            <td>
+                                @if (maskUnmaskActive)
+                                {
+                                    <span style="font-family: var(--mono); color: var(--text);">MRN-849204-X</span>
+                                }
+                                else
+                                {
+                                    <span class="mask-tag">MRN-••••••-X</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- Interactive Audiences & Responsibilities -->
     <section class="landing-section" aria-labelledby="audiences-title">
-        <div class="landing-section-head"><span class="landing-kicker">BUILT FOR TEAMS</span><h2 id="audiences-title">A shared workflow, different responsibilities.</h2></div>
-        <div class="landing-audience-grid">
-            <article><span class="landing-audience-icon"><Icon Name="terminal" /></span><h3>Developers</h3><p>Explore and query databases with the access needed for the task.</p></article>
-            <article><span class="landing-audience-icon"><Icon Name="check" /></span><h3>QA and testers</h3><p>Inspect test data and request the permissions needed for verification.</p></article>
-            <article><span class="landing-audience-icon"><Icon Name="cog" /></span><h3>Administrators</h3><p>Register databases, manage access and review requests.</p></article>
-            <article><span class="landing-audience-icon"><Icon Name="list" /></span><h3>Auditors</h3><p>Review audit logs and the access matrix for visibility into activity and permissions.</p></article>
+        <div class="landing-section-head">
+            <span class="landing-kicker">BUILT FOR TEAMS</span>
+            <h2 id="audiences-title">A shared workflow, different responsibilities.</h2>
+            <p>Engineers get an agile SQL workspace while security teams and administrators retain total oversight.</p>
+        </div>
+
+        <div class="persona-tabs" role="tablist" aria-label="Team personas">
+            <div class="persona-tab-btn @(activePersona == "developers" ? "active" : "")" role="tab" tabindex="0" @onclick='() => SetPersona("developers")'>
+                <Icon Name="terminal" />
+                <div>
+                    <strong>Developers</strong>
+                    <div style="font-size: 0.75rem; color: var(--text-dim);">Fast, permitted querying</div>
+                </div>
+            </div>
+            <div class="persona-tab-btn @(activePersona == "qa" ? "active" : "")" role="tab" tabindex="0" @onclick='() => SetPersona("qa")'>
+                <Icon Name="check" />
+                <div>
+                    <strong>QA &amp; Testers</strong>
+                    <div style="font-size: 0.75rem; color: var(--text-dim);">Test data verification</div>
+                </div>
+            </div>
+            <div class="persona-tab-btn @(activePersona == "admins" ? "active" : "")" role="tab" tabindex="0" @onclick='() => SetPersona("admins")'>
+                <Icon Name="cog" />
+                <div>
+                    <strong>Administrators</strong>
+                    <div style="font-size: 0.75rem; color: var(--text-dim);">Least-privilege control</div>
+                </div>
+            </div>
+            <div class="persona-tab-btn @(activePersona == "auditors" ? "active" : "")" role="tab" tabindex="0" @onclick='() => SetPersona("auditors")'>
+                <Icon Name="list" />
+                <div>
+                    <strong>Auditors</strong>
+                    <div style="font-size: 0.75rem; color: var(--text-dim);">Immutable trails</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="persona-panel">
+            @if (activePersona == "developers")
+            {
+                <div style="display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 24px; align-items: center;">
+                    <div>
+                        <h3 style="font-size: 1.25rem; margin-bottom: 10px;">Frictionless SQL with Autocomplete and Visual Plans</h3>
+                        <p style="color: var(--text-dim); line-height: 1.6; margin-bottom: 14px;">
+                            Developers do not want to fill out ticket queues just to inspect an order record or run a SELECT statement. Query Gate provides an integrated Monaco SQL workspace with autocomplete, tab management, and instant explain plan analysis.
+                        </p>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <span class="badge-chip"><Icon Name="terminal" /> Monaco Editor</span>
+                            <span class="badge-chip"><Icon Name="activity" /> Visual Explain</span>
+                            <span class="badge-chip"><Icon Name="download" /> Export to CSV &amp; Excel</span>
+                        </div>
+                    </div>
+                    <div style="padding: 16px; border-radius: 8px; background: var(--bg-sunken); border: 1px solid var(--line); font-size: 0.8rem; line-height: 1.5;">
+                        <strong style="color: var(--brand-ink); display: block; margin-bottom: 6px;">Key Developer Advantage:</strong>
+                        <span>No database credentials stored in local environments or shared in Slack channels. Simply open the browser, select a database, and execute allowed queries.</span>
+                    </div>
+                </div>
+            }
+            else if (activePersona == "qa")
+            {
+                <div style="display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 24px; align-items: center;">
+                    <div>
+                        <h3 style="font-size: 1.25rem; margin-bottom: 10px;">Inspect Test Records with Self-Service Access Requests</h3>
+                        <p style="color: var(--text-dim); line-height: 1.6; margin-bottom: 14px;">
+                            QA teams can quickly verify application state, examine staging databases, and submit access requests for temporary elevated privileges during release testing cycles.
+                        </p>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <span class="badge-chip"><Icon Name="check" /> Safe Read Access</span>
+                            <span class="badge-chip"><Icon Name="clock" /> Time-Window Access</span>
+                            <span class="badge-chip"><Icon Name="key" /> One-Click Access Request</span>
+                        </div>
+                    </div>
+                    <div style="padding: 16px; border-radius: 8px; background: var(--bg-sunken); border: 1px solid var(--line); font-size: 0.8rem; line-height: 1.5;">
+                        <strong style="color: var(--brand-ink); display: block; margin-bottom: 6px;">Key QA Advantage:</strong>
+                        <span>Eliminates the risk of accidental destructive statements wiping test environments during automated and manual verification cycles.</span>
+                    </div>
+                </div>
+            }
+            else if (activePersona == "admins")
+            {
+                <div style="display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 24px; align-items: center;">
+                    <div>
+                        <h3 style="font-size: 1.25rem; margin-bottom: 10px;">Centralized Connection Management &amp; Approvals</h3>
+                        <p style="color: var(--text-dim); line-height: 1.6; margin-bottom: 14px;">
+                            DBAs and DevOps managers can manage connection strings in one hardened location, review pending access requests, and enforce role-based access matrix rules across all four database engines.
+                        </p>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <span class="badge-chip"><Icon Name="cog" /> Central Secrets</span>
+                            <span class="badge-chip"><Icon Name="shield" /> Object Scopes</span>
+                            <span class="badge-chip"><Icon Name="lock" /> WebAuthn Passkeys</span>
+                        </div>
+                    </div>
+                    <div style="padding: 16px; border-radius: 8px; background: var(--bg-sunken); border: 1px solid var(--line); font-size: 0.8rem; line-height: 1.5;">
+                        <strong style="color: var(--brand-ink); display: block; margin-bottom: 6px;">Key Admin Advantage:</strong>
+                        <span>Instantly revoke access across all systems with a single click, without having to change database passwords on live database servers.</span>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div style="display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 24px; align-items: center;">
+                    <div>
+                        <h3 style="font-size: 1.25rem; margin-bottom: 10px;">Zero-Trust Audit Logs &amp; SOC 2 Compliance</h3>
+                        <p style="color: var(--text-dim); line-height: 1.6; margin-bottom: 14px;">
+                            Compliance officers and external auditors can view complete query records, actor timestamps, and permission matrix snapshots without requiring direct read permissions to business database tables.
+                        </p>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <span class="badge-chip"><Icon Name="list" /> Comprehensive Trails</span>
+                            <span class="badge-chip"><Icon Name="shield" /> SOC 2 / HIPAA Ready</span>
+                            <span class="badge-chip"><Icon Name="lock" /> Immutable Storage</span>
+                        </div>
+                    </div>
+                    <div style="padding: 16px; border-radius: 8px; background: var(--bg-sunken); border: 1px solid var(--line); font-size: 0.8rem; line-height: 1.5;">
+                        <strong style="color: var(--brand-ink); display: block; margin-bottom: 6px;">Key Auditor Advantage:</strong>
+                        <span>Pre-execution audit logging ensures no statement can touch the database without first writing a permanent audit record into PostgreSQL storage.</span>
+                    </div>
+                </div>
+            }
         </div>
     </section>
+
+    <!-- Comprehensive Feature Grid -->
+    <section class="landing-features" aria-labelledby="features-title">
+        <div class="landing-section-head">
+            <span class="landing-kicker">CONTROL WITHOUT THE FRICTION</span>
+            <h2 id="features-title">Enterprise features for every modern stack.</h2>
+            <p>Designed for organizations that require strict security, compliance oversight, and high developer productivity.</p>
+        </div>
+        <div class="landing-feature-grid">
+            <article class="landing-feature">
+                <span class="landing-feature-icon"><Icon Name="shield" /></span>
+                <h3>Permission-gated SQL</h3>
+                <p>Every SQL statement is parsed with Microsoft ScriptDom in memory and validated against effective permissions before transmission.</p>
+            </article>
+            <article class="landing-feature">
+                <span class="landing-feature-icon"><Icon Name="db" /></span>
+                <h3>Granular object scoping</h3>
+                <p>Control access at database, schema, table, and view levels with role-specific whitelists and blacklists.</p>
+            </article>
+            <article class="landing-feature">
+                <span class="landing-feature-icon"><Icon Name="lock" /></span>
+                <h3>Dynamic data masking</h3>
+                <p>In-flight redaction protects card numbers, emails, and medical identifiers for HIPAA, GDPR, and PCI-DSS compliance.</p>
+            </article>
+            <article class="landing-feature">
+                <span class="landing-feature-icon"><Icon Name="activity" /></span>
+                <h3>Visual explain plans</h3>
+                <p>Inspect query execution plans, operator tree hierarchies, and node costs to identify bottlenecks before execution.</p>
+            </article>
+            <article class="landing-feature">
+                <span class="landing-feature-icon"><Icon Name="download" /></span>
+                <h3>Multi-format export</h3>
+                <p>Export results directly to CSV, Excel (.xlsx, .xlsb), JSON, Markdown, or runnable SQL INSERT scripts.</p>
+            </article>
+            <article class="landing-feature">
+                <span class="landing-feature-icon"><Icon Name="clock" /></span>
+                <h3>Access on your terms</h3>
+                <p>Manage role and user grants, review access approval requests, and enforce temporary expiring access windows.</p>
+            </article>
+            <article class="landing-feature">
+                <span class="landing-feature-icon"><Icon Name="list" /></span>
+                <h3>Accountability built in</h3>
+                <p>Fail-closed architecture guarantees a persistent audit row write before any statement reaches the database engine.</p>
+            </article>
+            <article class="landing-feature">
+                <span class="landing-feature-icon"><Icon Name="terminal" /></span>
+                <h3>Monaco SQL workspace</h3>
+                <p>Explore database objects, write queries with autocomplete, and manage multiple query tabs in one unified interface.</p>
+            </article>
+            <article class="landing-feature">
+                <span class="landing-feature-icon"><Icon Name="lock" /></span>
+                <h3>Passkeys and 2FA</h3>
+                <p>Sign in with WebAuthn passkeys or TOTP authenticator apps for modern, phishing-resistant security.</p>
+            </article>
+        </div>
+    </section>
+
+    <!-- Deployment Guides -->
     <section class="landing-section landing-start" aria-labelledby="start-title">
-        <div class="landing-section-head"><span class="landing-kicker">GET STARTED</span><h2 id="start-title">Choose where to run Query Gate.</h2><p>You need a reachable database, Docker or the .NET 10 SDK, and an HTTPS certificate. Pick a deployment guide below and follow the migration and secrets steps.</p></div>
+        <div class="landing-section-head">
+            <span class="landing-kicker">GET STARTED</span>
+            <h2 id="start-title">Deploy Query Gate anywhere.</h2>
+            <p>Query Gate runs wherever .NET 10 and PostgreSQL are supported. Pick a deployment target below to view setup instructions.</p>
+        </div>
         <div class="landing-link-list" aria-label="Deployment guides">
-            <a href="/documentation#docker">Docker</a><a href="/documentation#iis">IIS</a><a href="/documentation#azure">Azure App Service</a><a href="/documentation#linux">Linux server</a>
+            <a href="/documentation#docker">Docker container</a>
+            <a href="/documentation#iis">Windows IIS</a>
+            <a href="/documentation#azure">Azure App Service</a>
+            <a href="/documentation#linux">Linux server (systemd)</a>
         </div>
     </section>
+
+    <!-- Project Information and Security Scope -->
     <section class="landing-section landing-info-grid" aria-label="Project information">
         <article class="landing-info-card">
-            <span class="landing-kicker">OPEN SOURCE</span><h2>Build with the community.</h2>
-            <p>Explore the code, report an issue or contribute an improvement. Start with the contribution guide for local setup and tests.</p>
-            <div class="landing-link-list"><a href="https://github.com/arjunreddy-001/query-gate">GitHub repository</a><a href="https://github.com/arjunreddy-001/query-gate/issues">Issues</a><a href="https://github.com/arjunreddy-001/query-gate/blob/main/CONTRIBUTING.md">Contributing</a><a href="https://github.com/arjunreddy-001/query-gate/blob/main/LICENSE">License</a></div>
+            <span class="landing-kicker">OPEN SOURCE</span>
+            <h2>Built for the community.</h2>
+            <p>Explore the source code, review security implementations, report issues, or contribute new database providers.</p>
+            <div class="landing-link-list">
+                <a href="https://github.com/arjunreddy-001/query-gate">GitHub repository</a>
+                <a href="https://github.com/arjunreddy-001/query-gate/issues">Issues</a>
+                <a href="https://github.com/arjunreddy-001/query-gate/blob/main/CONTRIBUTING.md">Contributing</a>
+                <a href="https://github.com/arjunreddy-001/query-gate/blob/main/LICENSE">MIT License</a>
+            </div>
         </article>
         <article class="landing-info-card">
-            <span class="landing-kicker">SECURITY AND SCOPE</span><h2>Use guardrails with least privilege.</h2>
-            <p>Application permissions complement database server permissions. Use dedicated least-privilege database accounts, HTTPS, protected secrets and secure backups.</p>
+            <span class="landing-kicker">SECURITY AND SCOPE</span>
+            <h2>Guardrails with least privilege.</h2>
+            <p>Application-level permissions complement native database permissions. Use dedicated least-privilege accounts, enforced TLS, and protected connection strings.</p>
             <div class="landing-scope-box">
-                <strong>Capabilities &amp; guardrails:</strong>
+                <strong>Capabilities and guardrails:</strong>
                 <ul>
-                    <li>Supports SQL Server, PostgreSQL, MySQL and MariaDB targets.</li>
+                    <li>Runs on .NET 10 and PostgreSQL. Supports PostgreSQL, SQL Server, MySQL, and MariaDB targets.</li>
                     <li>Granular object-level scoping and role inclusion/exclusion boundaries.</li>
-                    <li>Automatic PII data masking (HIPAA, GDPR, PCI-DSS, SOC 2).</li>
+                    <li>Dynamic PII data masking (HIPAA, GDPR, PCI-DSS, SOC 2).</li>
                     <li>Multi-format exports: CSV, Excel (.xlsx, .xlsb), JSON, Markdown, and SQL INSERT.</li>
                     <li>Fail-closed audit-first query pipeline and Monaco editor workspace.</li>
                 </ul>
@@ -121,8 +1238,142 @@
 @code {
     private bool hasUsers = true;
 
+    // --- Hero Simulator State ---
+    private string heroEngine = "postgres";
+    private string heroScenario = "select";
+    private bool heroRunning = false;
+    private bool heroUnmask = false;
+    private int heroElapsedMs = 24;
+
+    // --- Workspace Sandbox State ---
+    private string wsActiveTab = "orders";
+    private string wsResultsTab = "data";
+    private bool wsRunning = false;
+    private int wsElapsedMs = 38;
+    private bool exportedNotice = false;
+
+    // --- 4-Step Lifecycle State ---
+    private int activeStep = 1;
+
+    // --- Masking Lab State ---
+    private string maskPreset = "pci";
+    private bool maskUnmaskActive = false;
+
+    // --- Persona Showcase State ---
+    private string activePersona = "developers";
+
     protected override async Task OnInitializedAsync()
     {
         hasUsers = await UserManager.Users.AnyAsync();
+    }
+
+    // Hero Simulator Methods
+    private void SetHeroEngine(string engine)
+    {
+        heroEngine = engine;
+    }
+
+    private void SelectHeroScenario(string scenario)
+    {
+        heroScenario = scenario;
+        heroUnmask = false;
+        heroElapsedMs = scenario == "blocked" ? 2 : 24;
+    }
+
+    private async Task RunHeroSimulation()
+    {
+        heroRunning = true;
+        await Task.Delay(180);
+        heroRunning = false;
+        heroElapsedMs = heroScenario == "blocked" ? 2 : (heroScenario == "masking" ? 31 : 24);
+    }
+
+    private void ToggleHeroUnmask()
+    {
+        heroUnmask = !heroUnmask;
+    }
+
+    private string GetHeroEngineDisplayName() => heroEngine switch
+    {
+        "sqlserver" => "SQL Server 2022",
+        "mysql" => "MySQL 8.0",
+        "mariadb" => "MariaDB 11.2",
+        _ => "PostgreSQL 16"
+    };
+
+    private string GetFormattedHeroQuery() => heroScenario switch
+    {
+        "blocked" => "<span class='sql-kw'>DROP TABLE</span> public.orders;",
+        "masking" => "<span class='sql-kw'>SELECT</span> customer_id, full_name, email, card_number <span class='sql-kw'>FROM</span> public.customers;",
+        _ => "<span class='sql-kw'>SELECT</span> order_id, customer_name, total_usd <span class='sql-kw'>FROM</span> public.orders <span class='sql-kw'>WHERE</span> status = <span class='sql-str'>'shipped'</span>;"
+    };
+
+    // Workspace Sandbox Methods
+    private void SwitchWsTab(string tab)
+    {
+        wsActiveTab = tab;
+        if (tab == "explain")
+        {
+            wsResultsTab = "explain";
+        }
+        else
+        {
+            wsResultsTab = "data";
+        }
+    }
+
+    private void SelectWsTable(string table)
+    {
+        SwitchWsTab(table);
+    }
+
+    private void SetWsResultsTab(string tab)
+    {
+        wsResultsTab = tab;
+    }
+
+    private async Task ExecuteWorkspaceQuery()
+    {
+        wsRunning = true;
+        await Task.Delay(150);
+        wsRunning = false;
+        wsElapsedMs = wsActiveTab == "explain" ? 54 : 38;
+    }
+
+    private async Task TriggerMockExport()
+    {
+        exportedNotice = true;
+        await Task.Delay(2000);
+        exportedNotice = false;
+    }
+
+    private int GetResultRowCount() => wsActiveTab switch
+    {
+        "customers" => 4,
+        "orders" => 4,
+        _ => 1
+    };
+
+    // Lifecycle Methods
+    private void SetStep(int step)
+    {
+        activeStep = step;
+    }
+
+    // Masking Lab Methods
+    private void SetMaskPreset(string preset)
+    {
+        maskPreset = preset;
+    }
+
+    private void ToggleMaskPlaygroundUnmask()
+    {
+        maskUnmaskActive = !maskUnmaskActive;
+    }
+
+    // Persona Methods
+    private void SetPersona(string persona)
+    {
+        activePersona = persona;
     }
 }

@@ -26,7 +26,7 @@ You only need Docker Engine with Docker Compose installed.
 
 The stack automatically starts:
 
-- A bundled **SQL Server 2022** container with data persisted in the `mssql-data` volume.
+- A bundled **PostgreSQL 17** container with data persisted in the `postgres-data` volume.
 - Automatic Entity Framework Core migrations on startup.
 - Auto-generated 32-byte encryption key and 64-byte JWT key persisted in the `data-protection-keys` volume.
 
@@ -82,29 +82,29 @@ cp .env.example .env
 | Variable                   | Description                                                              | Default                               |
 | -------------------------- | ------------------------------------------------------------------------ | ------------------------------------- |
 | `PORT`                     | Host port mapped to Query Gate                                           | `5176`                                |
-| `DB_PASSWORD`              | SA password for the bundled SQL Server 2022 container                    | `QueryGateDefault!2026`               |
-| `DB_CONNECTION_STRING`     | Optional custom connection string if using an external database          | (uses bundled `mssql` container)      |
+| `DB_PASSWORD`              | Password for the bundled PostgreSQL container                            | `QueryGateDefault!2026`               |
+| `DB_CONNECTION_STRING`     | Optional custom connection string if using an external database          | (uses bundled `querygate-postgres`)   |
 | `ENCRYPTION_KEY`           | Optional static base64 32-byte key (auto-generated in volume if omitted) | (persisted in `/var/query-gate/keys`) |
 | `JWT_KEY`                  | Optional static base64 64-byte key (auto-generated in volume if omitted) | (persisted in `/var/query-gate/keys`) |
 | `BOOTSTRAP_ADMIN_EMAIL`    | Optional headless admin email (leave empty for web setup wizard)         | (empty)                               |
 | `BOOTSTRAP_ADMIN_PASSWORD` | Optional headless admin password (leave empty for web setup wizard)      | (empty)                               |
 | `APPLY_MIGRATIONS`         | Apply EF Core migrations on startup                                      | `true`                                |
 
-### Using an External SQL Server
+### Using an External PostgreSQL Database
 
-If you prefer to connect to an existing enterprise SQL Server instead of running the bundled container:
+If you prefer to connect to an existing PostgreSQL database instead of running the bundled container:
 
-1. In `.env`, set `DB_CONNECTION_STRING` to your database address and credentials.
-   - On Docker Desktop, use `host.docker.internal` to reach a SQL Server on the host.
+1. In `.env`, set `DB_CONNECTION_STRING` to your database address and credentials (e.g. `Host=host.docker.internal;Port=5432;Database=QueryGate;Username=querygate;Password=replace-me`).
+   - On Docker Desktop, use `host.docker.internal` to reach a PostgreSQL database on the host.
    - On Linux hosts, use the host IP or bridge network IP.
-2. In `compose.yaml`, you can comment out the `mssql` service and the `depends_on` block if you do not need the container.
+2. In `compose.yaml`, you can comment out the `querygate-postgres` service and the `depends_on` block if you do not need the container.
 
 ## Operations and Upgrades
 
 - **Logs**: `docker compose logs -f query-gate` shows startup and runtime logs.
 - **Stop**: `docker compose down` stops the containers while preserving all data volumes.
 - **Backups**: Back up both Docker volumes regularly:
-  - `mssql-data`: contains the application database, audit logs, and configurations.
+  - `postgres-data`: contains the application database, audit logs, and configurations.
   - `data-protection-keys`: contains the encryption key used to decrypt saved database connections and user session tokens. Losing this volume makes saved connection strings unreadable if `ENCRYPTION_KEY` was not statically provided.
 - **Upgrades**:
   1. Pull new code or update your image tag.
