@@ -24,7 +24,7 @@ services:
     build: .
     restart: unless-stopped
     depends_on:
-      mssql:
+      querygate-mssql:
         condition: service_healthy
     ports:
       - "${PORT:-5176}:5176"
@@ -35,10 +35,10 @@ services:
       # Single-level only. The image entrypoint turns DB_PASSWORD into the SQL
       # connection string. A nested ${DB_PASSWORD} inside this default is left
       # unexpanded by Dokploy, so the app logged in with a different password
-      # than MSSQL_SA_PASSWORD and SQL Server returned error 18456.
+      # than _SA_PASSWORD and SQL Server returned error 18456.
       DB_PASSWORD: "${DB_PASSWORD:-QueryGateDefault!2026}"
-      DB_CONNECTION_STRING: "Server=querygate-mssql,1433;Database=QueryGate;User Id=sa;Password=${DB_PASSWORD:-QueryGateDefault!2026};TrustServerCertificate=True;Encrypt=False"
-      ConnectionStrings__DefaultConnection: "Server=querygate-mssql,1433;Database=QueryGate;User Id=sa;Password=${DB_PASSWORD:-QueryGateDefault!2026};TrustServerCertificate=True;Encrypt=False"
+      DB_CONNECTION_STRING: "Server=querygate-,1433;Database=QueryGate;User Id=sa;Password=${DB_PASSWORD:-QueryGateDefault!2026};TrustServerCertificate=True;Encrypt=False"
+      ConnectionStrings__DefaultConnection: "Server=querygate-,1433;Database=QueryGate;User Id=sa;Password=${DB_PASSWORD:-QueryGateDefault!2026};TrustServerCertificate=True;Encrypt=False"
       Encryption__Key: "${ENCRYPTION_KEY:-}"
       Jwt__Key: "${JWT_KEY:-}"
       BootstrapAdmin__Email: "${BOOTSTRAP_ADMIN_EMAIL:-}"
@@ -49,6 +49,6 @@ services:
       - data-protection-keys:/var/query-gate/keys
 
 volumes:
-  mssql-system:
+  -system:
   mssql-data:
   data-protection-keys:
