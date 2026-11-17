@@ -1,6 +1,6 @@
 # Claude Code Guidelines - Query Gate
 
-Query Gate is a .NET 10 Blazor Server application (`DbAccessManager.csproj`) with Entity Framework Core and SQL Server.
+Query Gate is a .NET 10 Blazor Server application (`DbAccessManager.csproj`) with Entity Framework Core and PostgreSQL.
 
 ## Repository Skills & Runbooks
 
@@ -9,7 +9,7 @@ Specialized procedures and runbooks are located in `.github/skills/`. Whenever y
 - **Run and Verify** (`.github/skills/run-and-verify/SKILL.md`):
   Build, test, run, and browser-verify procedures, port handling, and troubleshooting locked executables.
 - **Entity Framework Migrations** (`.github/skills/ef-migrations/SKILL.md`):
-  Creating, applying, resetting, and troubleshooting EF Core migrations for SQL Server.
+  Creating, applying, resetting, and troubleshooting EF Core migrations for PostgreSQL.
 - **SQL Gate & Permissions** (`.github/skills/sql-gate-and-permissions/SKILL.md`):
   ScriptDom SQL gate rules, dialect analysis, permission models, statement validation, execution pipelines, and audit trails.
 - **Database Providers** (`.github/skills/database-providers/SKILL.md`):

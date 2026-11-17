@@ -85,7 +85,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.HasIndex(grant => new { grant.RoleId, grant.DatabaseId, grant.PermissionCode, grant.Schema, grant.ObjectName });
             entity.ToTable(table => table.HasCheckConstraint(
                 "CK_PermissionGrants_ExactlyOnePrincipal",
-                "(CASE WHEN [UserId] IS NULL THEN 0 ELSE 1 END + CASE WHEN [RoleId] IS NULL THEN 0 ELSE 1 END) = 1"));
+                "(CASE WHEN \"UserId\" IS NULL THEN 0 ELSE 1 END + CASE WHEN \"RoleId\" IS NULL THEN 0 ELSE 1 END) = 1"));
         });
 
         builder.Entity<AuditLog>(entity =>

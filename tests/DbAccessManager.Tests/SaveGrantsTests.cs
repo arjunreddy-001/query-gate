@@ -17,7 +17,7 @@ public class SaveGrantsTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddDbContextFactory<ApplicationDbContext>(options =>
-            options.UseSqlServer("Server=dummy;Database=dummy;TrustServerCertificate=True;"));
+            options.UseInMemoryDatabase("SaveGrantsTests_" + Guid.NewGuid()));
         services.AddScoped(sp => sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
         services.AddIdentityCore<ApplicationUser>()
             .AddRoles<IdentityRole>()
