@@ -16,21 +16,25 @@
             <h1 id="hero-title">Give your team access.<br /><span>Keep the guardrails.</span></h1>
             <p>Centralise database access, enforce strict AST query gates, mask sensitive PII on the fly, and guarantee a tamper-evident audit trail without sharing raw database credentials.</p>
             <div class="landing-actions">
-                <AuthorizeView>
-                    <Authorized><a class="btn btn-primary landing-button" href="/query">Open query workspace <Icon Name="chevron" /></a></Authorized>
-                    <NotAuthorized>
-                        @if (!hasUsers)
-                        {
-                            <a class="btn btn-primary landing-button" href="/Account/Setup">Set up Query Gate <Icon Name="chevron" /></a>
-                        }
-                        else
-                        {
-                            <a class="btn btn-primary landing-button" href="/Account/Login">Sign in to Query Gate <Icon Name="chevron" /></a>
-                        }
-                    </NotAuthorized>
-                </AuthorizeView>
-                <a class="btn landing-button" href="#interactive-workspace"><Icon Name="terminal" /> Try live workspace</a>
-                <a class="btn landing-button" href="/documentation"><Icon Name="list" /> Documentation</a>
+                <div class="landing-actions-primary">
+                    <AuthorizeView>
+                        <Authorized><a class="btn btn-primary landing-button" href="/query">Open query workspace <Icon Name="chevron" /></a></Authorized>
+                        <NotAuthorized>
+                            @if (!hasUsers)
+                            {
+                                <a class="btn btn-primary landing-button" href="/Account/Setup">Set up Query Gate <Icon Name="chevron" /></a>
+                            }
+                            else
+                            {
+                                <a class="btn btn-primary landing-button" href="/Account/Login">Sign in to Query Gate <Icon Name="chevron" /></a>
+                            }
+                        </NotAuthorized>
+                    </AuthorizeView>
+                </div>
+                <div class="landing-actions-secondary">
+                    <a class="btn landing-button" href="#interactive-workspace"><Icon Name="terminal" /> Try live workspace</a>
+                    <a class="btn landing-button" href="/documentation"><Icon Name="list" /> Documentation</a>
+                </div>
             </div>
             <div class="landing-badges">
                 <span class="badge-chip"><Icon Name="github" /> Open source</span>
@@ -250,7 +254,9 @@
                     <Icon Name="terminal" /> Query Gate · Governed SQL Workspace (Post-Login View)
                 </div>
                 <div class="preview-disclaimer-pill">
-                    <Icon Name="shield" /> Representational Preview · Actual UI May Differ After Login
+                    <Icon Name="shield" />
+                    <span>Representational Preview</span>
+                    <span class="preview-disclaimer-extra"> · Actual UI May Differ</span>
                 </div>
             </div>
 
@@ -667,9 +673,20 @@
         <!-- Disclaimer Box -->
         <div class="preview-disclaimer-note">
             <Icon Name="shield" />
-            <div>
-                <strong>Representational Interface Disclaimer:</strong>
-                <span>This interactive preview provides a simulated demonstration of Query Gate workflows and layouts. The actual post-login application interface can differ based on your assigned user roles, permissions, theme settings, database engines, and browser configuration. In the production app, users work with a full Monaco SQL editor with live IntelliSense schema autocomplete, resizable split panels, multi-tab state persistence, and direct file downloads for CSV, Excel (.xlsx, .xlsb), and JSON.</span>
+            <div class="preview-disclaimer-content">
+                <div class="preview-disclaimer-lead">
+                    <strong>Representational Interface:</strong>
+                    <span>Interactive simulation. Actual interface adapts to your assigned roles, permissions, and database engines.</span>
+                </div>
+                <details class="preview-disclaimer-expand">
+                    <summary class="preview-disclaimer-more-btn">
+                        <span>Read details</span>
+                        <Icon Name="chevron" />
+                    </summary>
+                    <p class="preview-disclaimer-details-text">
+                        Production workspaces feature a full Monaco SQL editor with IntelliSense autocomplete, resizable split panels, persistent tabs, and multi-format exports for CSV, Excel (.xlsx, .xlsb), JSON, Markdown, and SQL INSERT.
+                    </p>
+                </details>
             </div>
         </div>
     </section>
@@ -757,7 +774,7 @@
                             <span>Temporary Window: <strong>2 hours (auto-revoked)</strong></span>
                         </div>
                     </div>
-                    <div style="padding: 16px; border-radius: 10px; background: var(--bg-sunken); border: 1px solid var(--line); font-size: 0.78rem;">
+                    <div style="padding: 16px; border-radius: 10px; background: var(--bg-sunken); border: 1px solid var(--line); font-size: 0.78rem; overflow-x: auto;">
                         <table style="width: 100%; border-collapse: collapse;">
                             <thead>
                                 <tr style="border-bottom: 1px solid var(--line); color: var(--text-dim); text-align: left;">
@@ -858,6 +875,15 @@
                     </div>
                 </div>
             }
+            <div class="lifecycle-mobile-controls">
+                <button type="button" class="btn btn-sm" @onclick="PrevStep" disabled="@(activeStep == 1)">
+                    <Icon Name="chevron" Style="transform: rotate(180deg);" /> Previous step
+                </button>
+                <span class="lifecycle-step-counter">Step @activeStep of 4</span>
+                <button type="button" class="btn btn-sm btn-primary" @onclick="NextStep" disabled="@(activeStep == 4)">
+                    Next step <Icon Name="chevron" />
+                </button>
+            </div>
         </div>
     </section>
 
@@ -893,7 +919,8 @@
             </div>
 
             <!-- Comparison Table -->
-            <table class="sim-table" style="font-size: 0.8rem;">
+            <div class="masking-table-wrap">
+                <table class="sim-table" style="font-size: 0.8rem;">
                 <thead>
                     <tr>
                         <th>Data Field</th>
@@ -1004,6 +1031,7 @@
                     }
                 </tbody>
             </table>
+            </div>
         </div>
     </section>
 
@@ -1020,28 +1048,28 @@
                 <Icon Name="terminal" />
                 <div>
                     <strong>Developers</strong>
-                    <div style="font-size: 0.75rem; color: var(--text-dim);">Fast, permitted querying</div>
+                    <div class="persona-desc">Fast, permitted querying</div>
                 </div>
             </div>
             <div class="persona-tab-btn @(activePersona == "qa" ? "active" : "")" role="tab" tabindex="0" @onclick='() => SetPersona("qa")'>
                 <Icon Name="check" />
                 <div>
                     <strong>QA &amp; Testers</strong>
-                    <div style="font-size: 0.75rem; color: var(--text-dim);">Test data verification</div>
+                    <div class="persona-desc">Test data verification</div>
                 </div>
             </div>
             <div class="persona-tab-btn @(activePersona == "admins" ? "active" : "")" role="tab" tabindex="0" @onclick='() => SetPersona("admins")'>
                 <Icon Name="cog" />
                 <div>
                     <strong>Administrators</strong>
-                    <div style="font-size: 0.75rem; color: var(--text-dim);">Least-privilege control</div>
+                    <div class="persona-desc">Least-privilege control</div>
                 </div>
             </div>
             <div class="persona-tab-btn @(activePersona == "auditors" ? "active" : "")" role="tab" tabindex="0" @onclick='() => SetPersona("auditors")'>
                 <Icon Name="list" />
                 <div>
                     <strong>Auditors</strong>
-                    <div style="font-size: 0.75rem; color: var(--text-dim);">Immutable trails</div>
+                    <div class="persona-desc">Immutable trails</div>
                 </div>
             </div>
         </div>
@@ -1127,6 +1155,14 @@
                     </div>
                 </div>
             }
+            <div class="persona-mobile-controls">
+                <button type="button" class="btn btn-sm" @onclick="PrevPersona" disabled="@(activePersona == "developers")">
+                    <Icon Name="chevron" Style="transform: rotate(180deg);" /> Previous role
+                </button>
+                <button type="button" class="btn btn-sm btn-primary" @onclick="NextPersona" disabled="@(activePersona == "auditors")">
+                    Next role <Icon Name="chevron" />
+                </button>
+            </div>
         </div>
     </section>
 
@@ -1139,48 +1175,66 @@
         </div>
         <div class="landing-feature-grid">
             <article class="landing-feature">
-                <span class="landing-feature-icon"><Icon Name="shield" /></span>
-                <h3>Permission-gated SQL</h3>
+                <div class="landing-feature-header">
+                    <span class="landing-feature-icon"><Icon Name="shield" /></span>
+                    <h3>Permission-gated SQL</h3>
+                </div>
                 <p>Every SQL statement is parsed with Microsoft ScriptDom in memory and validated against effective permissions before transmission.</p>
             </article>
             <article class="landing-feature">
-                <span class="landing-feature-icon"><Icon Name="db" /></span>
-                <h3>Granular object scoping</h3>
+                <div class="landing-feature-header">
+                    <span class="landing-feature-icon"><Icon Name="db" /></span>
+                    <h3>Granular object scoping</h3>
+                </div>
                 <p>Control access at database, schema, table, and view levels with role-specific whitelists and blacklists.</p>
             </article>
             <article class="landing-feature">
-                <span class="landing-feature-icon"><Icon Name="lock" /></span>
-                <h3>Dynamic data masking</h3>
+                <div class="landing-feature-header">
+                    <span class="landing-feature-icon"><Icon Name="lock" /></span>
+                    <h3>Dynamic data masking</h3>
+                </div>
                 <p>In-flight redaction protects card numbers, emails, and medical identifiers for HIPAA, GDPR, and PCI-DSS compliance.</p>
             </article>
             <article class="landing-feature">
-                <span class="landing-feature-icon"><Icon Name="activity" /></span>
-                <h3>Visual explain plans</h3>
+                <div class="landing-feature-header">
+                    <span class="landing-feature-icon"><Icon Name="activity" /></span>
+                    <h3>Visual explain plans</h3>
+                </div>
                 <p>Inspect query execution plans, operator tree hierarchies, and node costs to identify bottlenecks before execution.</p>
             </article>
             <article class="landing-feature">
-                <span class="landing-feature-icon"><Icon Name="download" /></span>
-                <h3>Multi-format export</h3>
+                <div class="landing-feature-header">
+                    <span class="landing-feature-icon"><Icon Name="download" /></span>
+                    <h3>Multi-format export</h3>
+                </div>
                 <p>Export results directly to CSV, Excel (.xlsx, .xlsb), JSON, Markdown, or runnable SQL INSERT scripts.</p>
             </article>
             <article class="landing-feature">
-                <span class="landing-feature-icon"><Icon Name="clock" /></span>
-                <h3>Access on your terms</h3>
+                <div class="landing-feature-header">
+                    <span class="landing-feature-icon"><Icon Name="clock" /></span>
+                    <h3>Access on your terms</h3>
+                </div>
                 <p>Manage role and user grants, review access approval requests, and enforce temporary expiring access windows.</p>
             </article>
             <article class="landing-feature">
-                <span class="landing-feature-icon"><Icon Name="list" /></span>
-                <h3>Accountability built in</h3>
+                <div class="landing-feature-header">
+                    <span class="landing-feature-icon"><Icon Name="list" /></span>
+                    <h3>Accountability built in</h3>
+                </div>
                 <p>Fail-closed architecture guarantees a persistent audit row write before any statement reaches the database engine.</p>
             </article>
             <article class="landing-feature">
-                <span class="landing-feature-icon"><Icon Name="terminal" /></span>
-                <h3>Monaco SQL workspace</h3>
+                <div class="landing-feature-header">
+                    <span class="landing-feature-icon"><Icon Name="terminal" /></span>
+                    <h3>Monaco SQL workspace</h3>
+                </div>
                 <p>Explore database objects, write queries with autocomplete, and manage multiple query tabs in one unified interface.</p>
             </article>
             <article class="landing-feature">
-                <span class="landing-feature-icon"><Icon Name="lock" /></span>
-                <h3>Passkeys and 2FA</h3>
+                <div class="landing-feature-header">
+                    <span class="landing-feature-icon"><Icon Name="lock" /></span>
+                    <h3>Passkeys and 2FA</h3>
+                </div>
                 <p>Sign in with WebAuthn passkeys or TOTP authenticator apps for modern, phishing-resistant security.</p>
             </article>
         </div>
@@ -1358,6 +1412,16 @@
         activeStep = step;
     }
 
+    private void PrevStep()
+    {
+        if (activeStep > 1) activeStep--;
+    }
+
+    private void NextStep()
+    {
+        if (activeStep < 4) activeStep++;
+    }
+
     // Masking Lab Methods
     private void SetMaskPreset(string preset)
     {
@@ -1370,8 +1434,22 @@
     }
 
     // Persona Methods
+    private readonly string[] personaList = ["developers", "qa", "admins", "auditors"];
+
     private void SetPersona(string persona)
     {
         activePersona = persona;
+    }
+
+    private void PrevPersona()
+    {
+        int idx = Array.IndexOf(personaList, activePersona);
+        if (idx > 0) activePersona = personaList[idx - 1];
+    }
+
+    private void NextPersona()
+    {
+        int idx = Array.IndexOf(personaList, activePersona);
+        if (idx >= 0 && idx < personaList.Length - 1) activePersona = personaList[idx + 1];
     }
 }

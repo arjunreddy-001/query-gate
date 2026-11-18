@@ -1,5 +1,6 @@
 @page "/documentation"
 @layout PublicLayout
+@inject IJSRuntime JS
 
 <PageTitle>Documentation · Query Gate</PageTitle>
 
@@ -176,40 +177,50 @@
                             <span class="docs-deploy-icon"><Icon Name="terminal" /></span>
                             <span class="docs-deploy-badge">Recommended</span>
                         </div>
-                        <strong class="docs-deploy-card-title">Docker Compose</strong>
-                        <p>One-command setup with bundled PostgreSQL 17, automated migrations, persistent keys, and setup wizard.</p>
+                        <div class="docs-deploy-card-body">
+                            <strong class="docs-deploy-card-title">Docker Compose</strong>
+                            <p>One-command setup with bundled PostgreSQL 17, automated migrations, persistent keys, and setup wizard.</p>
+                        </div>
                         <span class="docs-deploy-action">View setup <Icon Name="chevron" /></span>
                     </a>
                     <a href="/documentation#reverse-proxies" class="docs-deploy-card">
                         <div class="docs-deploy-card-top">
                             <span class="docs-deploy-icon"><Icon Name="shield" /></span>
                         </div>
-                        <strong class="docs-deploy-card-title">Reverse Proxies &amp; Coolify</strong>
-                        <p>Production TLS termination with Caddy, Nginx, Traefik, Cloudflare Tunnel, or Coolify PaaS.</p>
+                        <div class="docs-deploy-card-body">
+                            <strong class="docs-deploy-card-title">Reverse Proxies &amp; Coolify</strong>
+                            <p>Production TLS termination with Caddy, Nginx, Traefik, Cloudflare Tunnel, or Coolify PaaS.</p>
+                        </div>
                         <span class="docs-deploy-action">View setup <Icon Name="chevron" /></span>
                     </a>
                     <a href="/documentation#iis" class="docs-deploy-card">
                         <div class="docs-deploy-card-top">
                             <span class="docs-deploy-icon"><Icon Name="db" /></span>
                         </div>
-                        <strong class="docs-deploy-card-title">IIS on Windows</strong>
-                        <p>Dedicated application pool with No Managed Code, WebSockets, and .NET 10 Hosting Bundle.</p>
+                        <div class="docs-deploy-card-body">
+                            <strong class="docs-deploy-card-title">IIS on Windows</strong>
+                            <p>Dedicated application pool with No Managed Code, WebSockets, and .NET 10 Hosting Bundle.</p>
+                        </div>
                         <span class="docs-deploy-action">View setup <Icon Name="chevron" /></span>
                     </a>
                     <a href="/documentation#azure" class="docs-deploy-card">
                         <div class="docs-deploy-card-top">
                             <span class="docs-deploy-icon"><Icon Name="activity" /></span>
                         </div>
-                        <strong class="docs-deploy-card-title">Azure App Service</strong>
-                        <p>Managed cloud hosting with HTTPS Only, WebSockets, persistent keys, and Key Vault integration.</p>
+                        <div class="docs-deploy-card-body">
+                            <strong class="docs-deploy-card-title">Azure App Service</strong>
+                            <p>Managed cloud hosting with HTTPS Only, WebSockets, persistent keys, and Key Vault integration.</p>
+                        </div>
                         <span class="docs-deploy-action">View setup <Icon Name="chevron" /></span>
                     </a>
                     <a href="/documentation#linux" class="docs-deploy-card">
                         <div class="docs-deploy-card-top">
                             <span class="docs-deploy-icon"><Icon Name="code" /></span>
                         </div>
-                        <strong class="docs-deploy-card-title">Linux Server (systemd)</strong>
-                        <p>Direct Kestrel HTTPS service under a dedicated unprivileged user managed with systemd.</p>
+                        <div class="docs-deploy-card-body">
+                            <strong class="docs-deploy-card-title">Linux Server (systemd)</strong>
+                            <p>Direct Kestrel HTTPS service under a dedicated unprivileged user managed with systemd.</p>
+                        </div>
                         <span class="docs-deploy-action">View setup <Icon Name="chevron" /></span>
                     </a>
                 </div>
@@ -406,3 +417,20 @@ docker compose logs -f query-gate</code></pre>
         <span>Top</span>
     </a>
 </div>
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("initDocumentationPage");
+            }
+            catch
+            {
+                // Circuit may be disconnected
+            }
+        }
+    }
+}

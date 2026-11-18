@@ -570,10 +570,10 @@ window.dbam = (function () {
       ));
       if (matchingLinks.length) {
         var heading = el.querySelector('h2, h3');
-        var title = matchingLinks[0].innerText.replace(/[\n\r]+/g, ' ').replace(/✓/g, '').trim();
+        var title = (matchingLinks[0].textContent || '').replace(/[\n\r]+/g, ' ').replace(/✓/g, '').trim();
         title = title.replace(/\b(Fast|Recommended)\b/gi, '').trim();
         if (!title && heading) {
-          title = heading.innerText.trim();
+          title = (heading.textContent || '').trim();
         }
         sections.push({
           id: id,
@@ -613,7 +613,7 @@ window.dbam = (function () {
       if (isBottom) {
         activeSection = sections[sections.length - 1];
       } else {
-        var threshold = 160;
+        var threshold = 140;
         for (var i = 0; i < sections.length; i++) {
           var rect = sections[i].el.getBoundingClientRect();
           if (rect.top <= threshold) {
@@ -635,6 +635,7 @@ window.dbam = (function () {
 
     window._docsScrollHandler = onScroll;
     window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll, { passive: true });
     onScroll();
 
     window._updateActiveDocsSectionById = function (id) {
@@ -644,6 +645,13 @@ window.dbam = (function () {
       }
     };
   }
+
+  // Export globally for Blazor component invocations
+  window.initDocumentationPage = function () {
+    attachDocsNavHighlight();
+    setupMobileToc();
+    attachCodeCopyButtons();
+  };
 
   /* ── Mobile TOC Dropdown Toggle and Auto-Close ── */
   let mobileTocHandlerAttached = false;
@@ -745,4 +753,18 @@ window.dbam = (function () {
     init();
   }
   document.addEventListener('blazor:enhancedload', init);
+
+  // Auto-detect when docs content is rendered by client-side Blazor routing
+  try {
+    var observer = new MutationObserver(function () {
+      if (document.querySelector('.docs-content') && !window._docsScrollHandler) {
+        init();
+      }
+    });
+    if (document.body) {
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
+  } catch (e) {
+    // Ignore in unsupported environments
+  }
 })();
