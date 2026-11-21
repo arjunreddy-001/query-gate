@@ -13,7 +13,13 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace DbAccessManager.Services;
 
-public sealed class DatabaseAdminService(IDbContextFactory<ApplicationDbContext> factory, CryptoService crypto, AuditService audit, DatabaseProviderFactory providers)
+public sealed class DatabaseAdminService(
+    IDbContextFactory<ApplicationDbContext> factory,
+    CryptoService crypto,
+    AuditService audit,
+    DatabaseProviderFactory providers,
+    IDatabaseCache? databaseCache = null,
+    PermissionService? permissions = null)
 {
     public async Task<(bool Ok, string Message)> TestAsync(string connectionString, DatabaseEngine engine = DatabaseEngine.SqlServer)
     {
@@ -62,6 +68,8 @@ public sealed class DatabaseAdminService(IDbContextFactory<ApplicationDbContext>
             db.PermissionGrants.Add(new PermissionGrant { RoleId = grant.RoleId, DatabaseId = entity.Id, PermissionCode = grant.PermissionCode, Effect = PermissionEffect.Allow });
         await db.SaveChangesAsync();
         await tx.CommitAsync();
+        databaseCache?.Invalidate(entity.Id);
+        permissions?.Invalidate(databaseId: entity.Id);
         await audit.TryWriteAsync(actor, "DatabaseAdmin", "Register", "Success", $"{name} ({environment}) [{engine}]", entity.Id, name);
         return OpResult.Success();
     }
@@ -105,6 +113,8 @@ public sealed class DatabaseAdminService(IDbContextFactory<ApplicationDbContext>
         }
         await db.SaveChangesAsync();
         await tx.CommitAsync();
+        databaseCache?.Invalidate(d.Id);
+        permissions?.Invalidate(databaseId: d.Id);
         await audit.TryWriteAsync(actor, "DatabaseAdmin", "Update", "Success", $"{d.Name} ({d.Environment}) [{d.Engine}] active={active}", d.Id, d.Name);
         return OpResult.Success();
     }
@@ -152,6 +162,7 @@ public sealed class DatabaseAdminService(IDbContextFactory<ApplicationDbContext>
         }
         await db.SaveChangesAsync();
         await tx.CommitAsync();
+        permissions?.Invalidate(databaseId: databaseId);
         await audit.TryWriteAsync(actor, "DatabaseAdmin", "RoleScopeRuleSaved", "Success", $"db={database.Name}; role={role.Name}; inc={rule.IncludedObjects}; exc={rule.ExcludedObjects}", databaseId, database.Name);
         return OpResult.Success();
     }
@@ -165,6 +176,7 @@ public sealed class DatabaseAdminService(IDbContextFactory<ApplicationDbContext>
         db.DatabaseRoleScopeRules.Remove(rule);
         await db.SaveChangesAsync();
         await tx.CommitAsync();
+        permissions?.Invalidate(databaseId: databaseId);
         await audit.TryWriteAsync(actor, "DatabaseAdmin", "RoleScopeRuleDeleted", "Success", $"db={databaseId}; role={roleId}", databaseId);
         return OpResult.Success();
     }
@@ -185,6 +197,8 @@ public sealed class DatabaseAdminService(IDbContextFactory<ApplicationDbContext>
         database.ExcludedObjects = cleanExc;
         await db.SaveChangesAsync();
         await tx.CommitAsync();
+        databaseCache?.Invalidate(databaseId);
+        permissions?.Invalidate(databaseId: databaseId);
         await audit.TryWriteAsync(actor, "DatabaseAdmin", "DatabaseObjectRulesUpdated", "Success", $"db={database.Name}; inc={database.IncludedObjects}; exc={database.ExcludedObjects}", databaseId, database.Name);
         return OpResult.Success();
     }
@@ -208,7 +222,13 @@ public sealed record DbObjectInfo(string Schema, string Name, string Type, List<
 
 public sealed record MetadataCacheEntry(Guid DatabaseId, int ObjectCount, DateTimeOffset LoadedAt);
 
-public sealed class MetadataService(IDbContextFactory<ApplicationDbContext> factory, CryptoService crypto, IMemoryCache cache, SettingsService settings, DatabaseProviderFactory providers)
+public sealed class MetadataService(
+    IDbContextFactory<ApplicationDbContext> factory,
+    CryptoService crypto,
+    IMemoryCache cache,
+    SettingsService settings,
+    DatabaseProviderFactory providers,
+    IDatabaseCache? databaseCache = null)
 {
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, MetadataCacheEntry> entries = new();
     private CancellationTokenSource resetToken = new();
@@ -236,12 +256,25 @@ public sealed class MetadataService(IDbContextFactory<ApplicationDbContext> fact
         var key = Key(databaseId);
         if (enabled && !refresh && cache.TryGetValue(key, out List<DbObjectInfo>? cached) && cached is not null) return cached;
 
-        await using var db = await factory.CreateDbContextAsync();
-        var database = await db.ManagedDatabases.AsNoTracking().FirstOrDefaultAsync(d => d.Id == databaseId && d.IsActive)
-            ?? throw new InvalidOperationException("Database not found.");
+        DatabaseEngine engine;
+        string connStr;
+        CachedDatabaseDescriptor? dbDesc = databaseCache != null ? await databaseCache.GetAsync(databaseId) : null;
+        if (dbDesc is not null)
+        {
+            if (!dbDesc.IsActive) throw new InvalidOperationException("Database not found.");
+            engine = dbDesc.Engine;
+            connStr = dbDesc.DecryptedConnectionString;
+        }
+        else
+        {
+            await using var db = await factory.CreateDbContextAsync();
+            var database = await db.ManagedDatabases.AsNoTracking().FirstOrDefaultAsync(d => d.Id == databaseId && d.IsActive)
+                ?? throw new InvalidOperationException("Database not found.");
+            engine = database.Engine;
+            connStr = crypto.Decrypt(database.EncryptedConnectionString);
+        }
 
-        var provider = providers.GetProvider(database.Engine);
-        var connStr = crypto.Decrypt(database.EncryptedConnectionString);
+        var provider = providers.GetProvider(engine);
         var list = await provider.LoadMetadataAsync(connStr);
 
         if (enabled)

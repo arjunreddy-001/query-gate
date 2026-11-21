@@ -7,6 +7,7 @@
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject ToastService Toast
 @inject NavigationManager Nav
+@inject ITenantLookupCache TenantCache
 
 <PageTitle>Platform Administration - Workspaces</PageTitle>
 
@@ -435,6 +436,7 @@
             };
             db.Tenants.Add(tenant);
             await db.SaveChangesAsync();
+            TenantCache.Invalidate();
 
             // If an admin email was provided, associate them
             if (!string.IsNullOrWhiteSpace(newAdminEmail))
@@ -501,6 +503,7 @@
                 existing.ContactEmail = string.IsNullOrWhiteSpace(editingTenant.ContactEmail) ? null : editingTenant.ContactEmail.Trim();
                 existing.Plan = string.IsNullOrWhiteSpace(editingTenant.Plan) ? null : editingTenant.Plan.Trim();
                 await db.SaveChangesAsync();
+                TenantCache.Invalidate();
                 Toast.Show("Workspace updated.");
                 showEditModal = false;
                 await LoadTenantsAsync();
@@ -526,6 +529,7 @@
             {
                 existing.IsActive = !existing.IsActive;
                 await db.SaveChangesAsync();
+                TenantCache.Invalidate();
                 Toast.Show($"Workspace {(existing.IsActive ? "enabled" : "disabled")}.");
                 await LoadTenantsAsync();
             }
@@ -573,6 +577,7 @@
             };
             db.TenantDomains.Add(item);
             await db.SaveChangesAsync();
+            TenantCache.Invalidate();
 
             newDomainInput = "";
             currentTenantDomains = await db.TenantDomains.IgnoreQueryFilters().Where(d => d.TenantId == selectedTenantForDomains.Id).ToListAsync();
@@ -596,6 +601,7 @@
             {
                 db.TenantDomains.Remove(item);
                 await db.SaveChangesAsync();
+                TenantCache.Invalidate();
                 currentTenantDomains = await db.TenantDomains.IgnoreQueryFilters().Where(d => d.TenantId == selectedTenantForDomains.Id).ToListAsync();
                 Toast.Show("Domain removed.");
                 await LoadTenantsAsync();

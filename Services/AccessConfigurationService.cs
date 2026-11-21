@@ -11,7 +11,8 @@ public sealed class AccessConfigurationService(
     IServiceScopeFactory scopes,
     AuditService audit,
     ILogger<AccessConfigurationService>? logger = null,
-    AppLogService? appLog = null)
+    AppLogService? appLog = null,
+    PermissionService? permissionService = null)
 {
     public const string CapabilityClaim = "querygate:capability";
     public const string AuditCapability = "audit";
@@ -162,6 +163,7 @@ public sealed class AccessConfigurationService(
                         .ExecuteUpdateAsync(s => s.SetProperty(d => d.Environment, name));
                 }
                 await db.SaveChangesAsync();
+                permissionService?.Invalidate();
                 await tx.CommitAsync();
                 await audit.TryWriteAsync(actor, "Permission", "EnvironmentSaved", "Success", old is null ? name : $"{old} -> {name}");
                 return OpResult.Success();
@@ -203,6 +205,7 @@ public sealed class AccessConfigurationService(
                     return OpResult.Fail("Remove databases and default grants from this environment first.");
                 db.DatabaseEnvironments.Remove(env);
                 await db.SaveChangesAsync();
+                permissionService?.Invalidate();
                 await tx.CommitAsync();
                 await audit.TryWriteAsync(actor, "Permission", "EnvironmentDeleted", "Success", env.Name);
                 return OpResult.Success();
@@ -251,6 +254,7 @@ public sealed class AccessConfigurationService(
                 }));
                 await db.SaveChangesAsync();
                 await tx.CommitAsync();
+                permissionService?.Invalidate();
                 await audit.TryWriteAsync(actor, "Permission", "EnvironmentDefaultsUpdated", "Success", $"environment={environmentId}; role={roleId}; permissions={string.Join(",", codes)}");
                 return OpResult.Success();
             });
@@ -394,6 +398,7 @@ public sealed class AccessConfigurationService(
             }
 
             await db.SaveChangesAsync();
+            permissionService?.Invalidate(userId: cleanUserId, databaseId: databaseId);
 
             var subjectKind = cleanRoleId != null ? "role" : "user";
             var subjectId = cleanRoleId ?? cleanUserId;

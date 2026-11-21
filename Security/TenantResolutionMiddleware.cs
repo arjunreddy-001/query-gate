@@ -6,6 +6,7 @@ namespace DbAccessManager.Security;
 public sealed class TenantResolutionMiddleware(
     RequestDelegate next,
     IDbContextFactory<ApplicationDbContext> dbFactory,
+    ITenantLookupCache tenantCache,
     ILogger<TenantResolutionMiddleware> logger)
 {
     public async Task InvokeAsync(HttpContext context, ITenantContext tenantContext, ITenantContextAccessor tenantAccessor)
@@ -34,31 +35,36 @@ public sealed class TenantResolutionMiddleware(
             return;
         }
 
-        await using var db = await dbFactory.CreateDbContextAsync();
-
         // 2. Custom Domain Resolution
         var host = context.Request.Host.Host;
         if (!string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase))
         {
-            var domainMatch = await db.TenantDomains
-                .IgnoreQueryFilters()
-                .AsNoTracking()
-                .FirstOrDefaultAsync(d => d.Domain.ToLower() == host.ToLower() && d.IsVerified);
-
-            if (domainMatch is not null)
+            if (!tenantCache.TryGetByDomain(host, out var domainTenant))
             {
-                var tenant = await db.Tenants
+                await using var db = await dbFactory.CreateDbContextAsync();
+                var domainMatch = await db.TenantDomains
                     .IgnoreQueryFilters()
                     .AsNoTracking()
-                    .FirstOrDefaultAsync(t => t.Id == domainMatch.TenantId && t.IsActive);
+                    .FirstOrDefaultAsync(d => d.Domain.ToLower() == host.ToLower() && d.IsVerified);
 
-                if (tenant is not null)
+                if (domainMatch is not null)
                 {
-                    tenantContext.SetTenant(tenant.Id, tenant.Slug, tenant.Name);
-                    await next(context);
-                    return;
+                    var tenant = await db.Tenants
+                        .IgnoreQueryFilters()
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(t => t.Id == domainMatch.TenantId && t.IsActive);
+
+                    domainTenant = tenant is not null ? new CachedTenant(tenant.Id, tenant.Slug, tenant.Name, tenant.IsActive) : null;
                 }
+                tenantCache.SetByDomain(host, domainTenant);
+            }
+
+            if (domainTenant is not null)
+            {
+                tenantContext.SetTenant(domainTenant.Id, domainTenant.Slug, domainTenant.Name);
+                await next(context);
+                return;
             }
         }
 
@@ -69,14 +75,21 @@ public sealed class TenantResolutionMiddleware(
             if (segments.Length > 0)
             {
                 var slug = segments[0];
-                var tenant = await db.Tenants
-                    .IgnoreQueryFilters()
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(t => t.Slug.ToLower() == slug.ToLower() && t.IsActive);
-
-                if (tenant is not null)
+                if (!tenantCache.TryGetBySlug(slug, out var slugTenant))
                 {
-                    tenantContext.SetTenant(tenant.Id, tenant.Slug, tenant.Name);
+                    await using var db = await dbFactory.CreateDbContextAsync();
+                    var tenant = await db.Tenants
+                        .IgnoreQueryFilters()
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(t => t.Slug.ToLower() == slug.ToLower() && t.IsActive);
+
+                    slugTenant = tenant is not null ? new CachedTenant(tenant.Id, tenant.Slug, tenant.Name, tenant.IsActive) : null;
+                    tenantCache.SetBySlug(slug, slugTenant);
+                }
+
+                if (slugTenant is not null)
+                {
+                    tenantContext.SetTenant(slugTenant.Id, slugTenant.Slug, slugTenant.Name);
 
                     // Adjust PathBase and Path for downstream routing
                     context.Request.PathBase = context.Request.PathBase.Add($"/t/{slug}");
@@ -97,14 +110,21 @@ public sealed class TenantResolutionMiddleware(
         var headerSlug = context.Request.Headers["X-Tenant-Slug"].FirstOrDefault();
         if (!string.IsNullOrWhiteSpace(headerSlug))
         {
-            var tenant = await db.Tenants
-                .IgnoreQueryFilters()
-                .AsNoTracking()
-                .FirstOrDefaultAsync(t => t.Slug.ToLower() == headerSlug.ToLower() && t.IsActive);
-
-            if (tenant is not null)
+            if (!tenantCache.TryGetBySlug(headerSlug, out var headerTenant))
             {
-                tenantContext.SetTenant(tenant.Id, tenant.Slug, tenant.Name);
+                await using var db = await dbFactory.CreateDbContextAsync();
+                var tenant = await db.Tenants
+                    .IgnoreQueryFilters()
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(t => t.Slug.ToLower() == headerSlug.ToLower() && t.IsActive);
+
+                headerTenant = tenant is not null ? new CachedTenant(tenant.Id, tenant.Slug, tenant.Name, tenant.IsActive) : null;
+                tenantCache.SetBySlug(headerSlug, headerTenant);
+            }
+
+            if (headerTenant is not null)
+            {
+                tenantContext.SetTenant(headerTenant.Id, headerTenant.Slug, headerTenant.Name);
                 await next(context);
                 return;
             }
@@ -117,17 +137,24 @@ public sealed class TenantResolutionMiddleware(
             path.Value != "/" &&
             path.Value != "/documentation")
         {
-            var activeTenants = await db.Tenants
-                .IgnoreQueryFilters()
-                .AsNoTracking()
-                .Where(t => t.IsActive)
-                .Take(2)
-                .ToListAsync();
-
-            if (activeTenants.Count == 1)
+            if (!tenantCache.TryGetSingleActive(out var isSingle, out var singleTenant))
             {
-                var single = activeTenants[0];
-                tenantContext.SetTenant(single.Id, single.Slug, single.Name);
+                await using var db = await dbFactory.CreateDbContextAsync();
+                var activeTenants = await db.Tenants
+                    .IgnoreQueryFilters()
+                    .AsNoTracking()
+                    .Where(t => t.IsActive)
+                    .Take(2)
+                    .ToListAsync();
+
+                isSingle = activeTenants.Count == 1;
+                singleTenant = isSingle ? new CachedTenant(activeTenants[0].Id, activeTenants[0].Slug, activeTenants[0].Name, true) : null;
+                tenantCache.SetSingleActive(isSingle, singleTenant);
+            }
+
+            if (isSingle && singleTenant is not null)
+            {
+                tenantContext.SetTenant(singleTenant.Id, singleTenant.Slug, singleTenant.Name);
             }
         }
 

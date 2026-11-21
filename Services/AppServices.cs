@@ -146,7 +146,9 @@ public sealed class UserAdminService(
     IDbContextFactory<ApplicationDbContext> factory,
     IServiceScopeFactory scopes,
     AuditService audit,
-    ExecutionService execution)
+    ExecutionService execution,
+    IUserStatusCache? userStatusCache = null,
+    PermissionService? permissions = null)
 {
     public static string GeneratePassword(int length = 16)
     {
@@ -242,6 +244,7 @@ public sealed class UserAdminService(
         await users.UpdateAsync(user);
         await users.ResetAccessFailedCountAsync(user);
         await users.SetLockoutEndDateAsync(user, null);
+        userStatusCache?.Invalidate(userId);
         await audit.TryWriteAsync(actor, "UserAdmin", "ResetPassword", "Success", user.Email);
         return OpResult.Success(password);
     }
@@ -263,6 +266,7 @@ public sealed class UserAdminService(
             await db.RefreshTokens.Where(t => t.UserId == userId && t.RevokedAt == null)
                 .ExecuteUpdateAsync(s => s.SetProperty(t => t.RevokedAt, DateTimeOffset.UtcNow));
         }
+        userStatusCache?.Invalidate(userId);
         await audit.TryWriteAsync(actor, "UserAdmin", active ? "Activate" : "Deactivate", "Success", user.Email);
         return OpResult.Success();
     }
@@ -286,6 +290,8 @@ public sealed class UserAdminService(
         var stamp = await users.UpdateSecurityStampAsync(user);
         if (!stamp.Succeeded) return OpResult.Fail(string.Join(" ", stamp.Errors.Select(e => e.Description)));
         await transaction.CommitAsync();
+        userStatusCache?.Invalidate(userId);
+        permissions?.Invalidate(userId: userId);
         await audit.TryWriteAsync(actor, "UserAdmin", "SetRole", "Success", $"{user.Email} -> {role}");
         return OpResult.Success();
     }
@@ -299,6 +305,7 @@ public sealed class UserAdminService(
         user.ExpiresAt = expiresAt;
         user.TimeoutOverrideSeconds = timeoutOverride;
         await users.UpdateAsync(user);
+        userStatusCache?.Invalidate(userId);
         await audit.TryWriteAsync(actor, "UserAdmin", "SetExpiry", "Success", $"{user.Email} expires={expiresAt:u} timeout={timeoutOverride}");
         return OpResult.Success();
     }
@@ -309,7 +316,8 @@ public sealed class RequestService(
     SettingsService settings,
     NotificationService notifications,
     AuditService audit,
-    ExecutionService execution)
+    ExecutionService execution,
+    PermissionService? permissions = null)
 {
     public async Task<OpResult> SubmitAccessAsync(Actor actor, Guid databaseId, string[] perms, string justification, string? ticket, int hours, bool extension, string? targetScope = null)
     {
@@ -361,6 +369,7 @@ public sealed class RequestService(
         }
         db.RequestStatusHistory.Add(new RequestStatusHistory { RequestType = "Access", RequestId = id, Status = req.Status, ChangedBy = actor.UserName, Comment = comment });
         await db.SaveChangesAsync();
+        if (approve) permissions?.Invalidate(userId: req.RequesterId, databaseId: req.DatabaseId);
         await audit.TryWriteAsync(actor, "Request", approve ? "ApproveAccess" : "RejectAccess", "Success", req.Permissions, req.DatabaseId, null, id);
         await notifications.NotifyAsync(req.RequesterId, approve ? "Access approved" : "Access rejected", comment ?? (approve ? "Your access request was approved." : "Your access request was rejected."), "/access");
         return OpResult.Success();

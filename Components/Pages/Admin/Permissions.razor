@@ -6,6 +6,7 @@
 @inject AppLogService AppLog
 @inject IServiceScopeFactory Scopes
 @inject AccessConfigurationService AccessConfig
+@inject PermissionService PermissionsSvc
 
 <PageTitle>Permissions · Query Gate</PageTitle>
 
@@ -1025,6 +1026,7 @@
                 {
                     await db.PermissionGrants.Where(x => ids.Contains(x.Id)).ExecuteDeleteAsync();
                 }
+                PermissionsSvc.Invalidate(databaseId: r.DatabaseId);
                 var subjectName = r.Grants.Count > 0 ? Subject(r.Grants[0]) : "Subject";
                 await AuditSvc.TryWriteAsync(Me, "Permission", "GrantRemoved", "Success", $"{r.Effect} {r.PermissionCode} ({r.Scopes.Count} scopes) from {subjectName}", r.DatabaseId, GetDbName(r.DatabaseId));
                 Say("Grant removed.");

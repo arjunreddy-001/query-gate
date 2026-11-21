@@ -1,7 +1,10 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using DbAccessManager.Data;
+using DbAccessManager.Security;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace DbAccessManager.Services;
 
@@ -16,8 +19,9 @@ public sealed class ClientInfo
 public sealed class CryptoService
 {
     private readonly byte[] _key;
+    private readonly ConcurrentDictionary<string, string> _decryptionCache = new();
 
-    public CryptoService(IConfiguration configuration, IHostEnvironment environment)
+    public CryptoService(IConfiguration configuration, IHostEnvironment? environment = null)
     {
         var configured = configuration["Encryption:Key"];
         if (!string.IsNullOrWhiteSpace(configured))
@@ -25,6 +29,11 @@ public sealed class CryptoService
             _key = Convert.FromBase64String(configured);
             if (_key.Length != 32) throw new InvalidOperationException("Encryption:Key must be a base64-encoded 32-byte (AES-256) key.");
             return;
+        }
+
+        if (environment is null)
+        {
+            throw new InvalidOperationException("Encryption:Key must be configured when no IHostEnvironment is provided.");
         }
 
         var keyDirectory = configuration["DataProtection:KeyPath"];
@@ -56,6 +65,7 @@ public sealed class CryptoService
 
     public string Decrypt(string payload)
     {
+        if (_decryptionCache.TryGetValue(payload, out var cached)) return cached;
         if (!payload.StartsWith("v1:", StringComparison.Ordinal)) throw new CryptographicException("Unknown payload format.");
         var raw = Convert.FromBase64String(payload[3..]);
         var nonce = raw[..12];
@@ -64,14 +74,23 @@ public sealed class CryptoService
         var plain = new byte[cipher.Length];
         using var aes = new AesGcm(_key, 16);
         aes.Decrypt(nonce, cipher, tag, plain);
-        return Encoding.UTF8.GetString(plain);
+        var result = Encoding.UTF8.GetString(plain);
+        _decryptionCache[payload] = result;
+        return result;
     }
+
+    public void ClearCache() => _decryptionCache.Clear();
 
     public static string Sha256(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 }
 
-public sealed class SettingsService(IDbContextFactory<ApplicationDbContext> factory)
+public sealed class SettingsService(
+    IDbContextFactory<ApplicationDbContext> factory,
+    IMemoryCache? cache = null,
+    ITenantContextAccessor? tenantAccessor = null)
 {
+    private Guid ResolveTenantId() => tenantAccessor?.Current?.TenantId ?? TenantContextAccessor.FallbackDefaultTenant?.TenantId ?? Guid.Empty;
+
     public static readonly IReadOnlyDictionary<string, (string Default, string Label)> Definitions = new Dictionary<string, (string, string)>
     {
         ["DefaultTimeoutSeconds"] = ("30", "Default query timeout (seconds)"),
@@ -89,9 +108,8 @@ public sealed class SettingsService(IDbContextFactory<ApplicationDbContext> fact
 
     public async Task<string> GetAsync(string key)
     {
-        await using var db = await factory.CreateDbContextAsync();
-        var stored = await db.Settings.AsNoTracking().FirstOrDefaultAsync(s => s.Key == key);
-        return stored?.Value ?? (Definitions.TryGetValue(key, out var def) ? def.Default : "");
+        var raw = await GetRawAsync(key);
+        return raw ?? (Definitions.TryGetValue(key, out var def) ? def.Default : "");
     }
 
     public async Task<int> GetIntAsync(string key)
@@ -105,9 +123,26 @@ public sealed class SettingsService(IDbContextFactory<ApplicationDbContext> fact
 
     public async Task<Dictionary<string, string>> GetAllAsync()
     {
+        var tenantId = ResolveTenantId();
+        var allKey = $"settings:all:{tenantId}";
+        if (cache != null && cache.TryGetValue(allKey, out Dictionary<string, string>? cachedAll) && cachedAll != null)
+        {
+            return new Dictionary<string, string>(cachedAll);
+        }
+
         await using var db = await factory.CreateDbContextAsync();
         var stored = await db.Settings.AsNoTracking().ToDictionaryAsync(s => s.Key, s => s.Value);
-        return Definitions.ToDictionary(d => d.Key, d => stored.GetValueOrDefault(d.Key, d.Value.Default));
+        var result = Definitions.ToDictionary(d => d.Key, d => stored.GetValueOrDefault(d.Key, d.Value.Default));
+
+        if (cache != null)
+        {
+            cache.Set(allKey, result, TimeSpan.FromMinutes(30));
+            foreach (var (k, v) in stored)
+            {
+                cache.Set($"setting:raw:{tenantId}:{k}", (string?)v, TimeSpan.FromMinutes(30));
+            }
+        }
+        return new Dictionary<string, string>(result);
     }
 
     public async Task SetAsync(string key, string value)
@@ -118,9 +153,22 @@ public sealed class SettingsService(IDbContextFactory<ApplicationDbContext> fact
 
     public async Task<string?> GetRawAsync(string key)
     {
+        var tenantId = ResolveTenantId();
+        var cacheKey = $"setting:raw:{tenantId}:{key}";
+        if (cache != null && cache.TryGetValue(cacheKey, out string? cached))
+        {
+            return cached;
+        }
+
         await using var db = await factory.CreateDbContextAsync();
         var stored = await db.Settings.AsNoTracking().FirstOrDefaultAsync(s => s.Key == key);
-        return stored?.Value;
+        var val = stored?.Value;
+
+        if (cache != null)
+        {
+            cache.Set(cacheKey, val, TimeSpan.FromMinutes(30));
+        }
+        return val;
     }
 
     public async Task SetRawAsync(string key, string value)
@@ -130,6 +178,24 @@ public sealed class SettingsService(IDbContextFactory<ApplicationDbContext> fact
         if (existing is null) db.Settings.Add(new SettingEntry { Key = key, Value = value });
         else existing.Value = value;
         await db.SaveChangesAsync();
+
+        var tenantId = db.CurrentTenantId ?? ResolveTenantId();
+        if (cache != null)
+        {
+            cache.Set($"setting:raw:{tenantId}:{key}", (string?)value, TimeSpan.FromMinutes(30));
+            cache.Remove($"settings:all:{tenantId}");
+        }
+    }
+
+    public void InvalidateCache(string? key = null, Guid? tenantId = null)
+    {
+        if (cache == null) return;
+        var tId = tenantId ?? ResolveTenantId();
+        if (key != null)
+        {
+            cache.Remove($"setting:raw:{tId}:{key}");
+        }
+        cache.Remove($"settings:all:{tId}");
     }
 
     public async Task<SmtpConfig> GetSmtpConfigAsync(CryptoService crypto, IConfiguration? fallback = null)

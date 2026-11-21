@@ -8,15 +8,26 @@ using DbAccessManager.Security;
 using DbAccessManager.Services.Providers;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace DbAccessManager.Services;
 
-public sealed class PermissionService(IDbContextFactory<ApplicationDbContext> factory)
+public sealed class PermissionService(
+    IDbContextFactory<ApplicationDbContext> factory,
+    IMemoryCache? cache = null)
 {
     private readonly PermissionResolver _resolver = new();
+    private readonly ConcurrentDictionary<string, byte> _trackedKeys = new();
 
     public async Task<List<PermissionRule>> GetRulesAsync(ApplicationDbContext db, string userId, Guid databaseId)
     {
+        var tenantId = db.CurrentTenantId ?? Guid.Empty;
+        var cacheKey = $"perm:rules:{tenantId}:{userId}:{databaseId}";
+        if (cache != null && cache.TryGetValue(cacheKey, out List<PermissionRule>? cached) && cached != null)
+        {
+            return cached;
+        }
+
         var roleIds = await db.UserRoles.Where(r => r.UserId == userId).Select(r => r.RoleId).ToListAsync();
         var roleNames = await db.Roles.Where(r => roleIds.Contains(r.Id)).ToDictionaryAsync(r => r.Id, r => r.Name ?? "");
         var grants = await db.PermissionGrants.AsNoTracking()
@@ -62,7 +73,38 @@ public sealed class PermissionService(IDbContextFactory<ApplicationDbContext> fa
             }
         }
 
+        if (cache != null)
+        {
+            cache.Set(cacheKey, rules, TimeSpan.FromMinutes(10));
+            _trackedKeys.TryAdd(cacheKey, 0);
+        }
+
         return rules;
+    }
+
+    public void Invalidate(string? userId = null, Guid? databaseId = null, Guid? tenantId = null)
+    {
+        if (cache == null) return;
+        var prefix = tenantId.HasValue ? $"perm:rules:{tenantId.Value}:" : "perm:rules:";
+        foreach (var k in _trackedKeys.Keys.ToList())
+        {
+            if (!k.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            var parts = k.Split(':');
+            if (parts.Length >= 5)
+            {
+                var kUser = parts[3];
+                var kDb = parts[4];
+
+                var matchUser = userId == null || string.Equals(kUser, userId, StringComparison.OrdinalIgnoreCase);
+                var matchDb = databaseId == null || string.Equals(kDb, databaseId.ToString(), StringComparison.OrdinalIgnoreCase);
+
+                if (matchUser && matchDb)
+                {
+                    cache.Remove(k);
+                    _trackedKeys.TryRemove(k, out _);
+                }
+            }
+        }
     }
 
     public async Task<List<EffectivePermission>> GetEffectiveAsync(string userId, Guid databaseId)
@@ -154,7 +196,9 @@ public sealed class ExecutionService(
     CryptoService crypto,
     SettingsService settings,
     ILogger<ExecutionService> logger,
-    DatabaseProviderFactory providers)
+    DatabaseProviderFactory providers,
+    IDatabaseCache? databaseCache = null,
+    IUserStatusCache? userStatusCache = null)
 {
     private readonly ConcurrentDictionary<Guid, (string UserId, CancellationTokenSource Cts)> _running = new();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _userSlots = new();
@@ -235,7 +279,29 @@ public sealed class ExecutionService(
         var stopwatch = Stopwatch.StartNew();
 
         await using var db = await factory.CreateDbContextAsync(ct);
-        var database = await db.ManagedDatabases.AsNoTracking().FirstOrDefaultAsync(d => d.Id == options.DatabaseId, ct);
+        CachedDatabaseDescriptor? dbDesc = databaseCache != null ? await databaseCache.GetAsync(options.DatabaseId) : null;
+        ManagedDatabase? database = null;
+        if (dbDesc is not null)
+        {
+            database = new ManagedDatabase
+            {
+                Id = dbDesc.Id,
+                TenantId = dbDesc.TenantId,
+                Name = dbDesc.Name,
+                Environment = dbDesc.Environment,
+                Engine = dbDesc.Engine,
+                IsActive = dbDesc.IsActive,
+                DefaultTimeoutSeconds = dbDesc.DefaultTimeoutSeconds,
+                MaxRows = dbDesc.MaxRows,
+                IncludedObjects = dbDesc.IncludedObjects,
+                ExcludedObjects = dbDesc.ExcludedObjects,
+                EncryptedConnectionString = ""
+            };
+        }
+        else
+        {
+            database = await db.ManagedDatabases.AsNoTracking().FirstOrDefaultAsync(d => d.Id == options.DatabaseId, ct);
+        }
 
         async Task<ExecutionResult> Deny(string outcome, string reason, GateAnalysis? analysis = null)
         {
@@ -250,8 +316,20 @@ public sealed class ExecutionService(
 
         using var scope = scopes.CreateScope();
         var users = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<ApplicationUser>>();
-        var user = await users.FindByIdAsync(actor.UserId);
-        if (!isSystem && (user is null || !user.CanSignIn(DateTimeOffset.UtcNow))) return await Deny("Denied", "Your account is inactive or expired.");
+        CachedUserStatus? userStatus = null;
+        if (!isSystem)
+        {
+            if (userStatusCache != null)
+            {
+                userStatus = await userStatusCache.GetOrLoadAsync(actor.UserId, users);
+            }
+            else
+            {
+                var u = await users.FindByIdAsync(actor.UserId);
+                userStatus = u is not null ? new CachedUserStatus(u.Id, u.Email ?? "", u.IsActive, u.ExpiresAt, u.TimeoutOverrideSeconds, u.SecurityStamp) : null;
+            }
+            if (userStatus is null || !userStatus.CanSignIn(DateTimeOffset.UtcNow)) return await Deny("Denied", "Your account is inactive or expired.");
+        }
         if (!database.IsActive) return await Deny("Denied", "This database is disabled.");
 
         var analysis = gate.Analyze(options.SqlText, database.Engine);
@@ -290,9 +368,9 @@ public sealed class ExecutionService(
         }
 
         // Role-level inclusion and exclusion guardrails per database
-        if (!isSystem && user != null)
+        if (!isSystem)
         {
-            var roleIds = await db.UserRoles.Where(r => r.UserId == user.Id).Select(r => r.RoleId).ToListAsync();
+            var roleIds = await db.UserRoles.Where(r => r.UserId == actor.UserId).Select(r => r.RoleId).ToListAsync();
             var roleRules = await db.DatabaseRoleScopeRules.AsNoTracking()
                 .Where(r => r.DatabaseId == database.Id && roleIds.Contains(r.RoleId))
                 .ToListAsync();
@@ -369,7 +447,7 @@ public sealed class ExecutionService(
 
         var maxTimeout = await settings.GetIntAsync("MaxTimeoutSeconds");
         var defaultTimeout = database.DefaultTimeoutSeconds > 0 ? database.DefaultTimeoutSeconds : await settings.GetIntAsync("DefaultTimeoutSeconds");
-        var timeout = Math.Min(maxTimeout, options.TimeoutSeconds ?? user?.TimeoutOverrideSeconds ?? defaultTimeout);
+        var timeout = Math.Min(maxTimeout, options.TimeoutSeconds ?? userStatus?.TimeoutOverrideSeconds ?? defaultTimeout);
         var maxRows = database.MaxRows > 0 ? database.MaxRows : await settings.GetIntAsync("DefaultMaxRows");
 
         var perUser = Math.Max(1, await settings.GetIntAsync("MaxConcurrentPerUser"));
@@ -402,7 +480,7 @@ public sealed class ExecutionService(
 
             try
             {
-                await RunAsync(database, options, analysis, result, timeout, maxRows, cts.Token);
+                await RunAsync(database, dbDesc?.DecryptedConnectionString, options, analysis, result, timeout, maxRows, cts.Token);
                 result.Outcome = "Success";
 
                 var canUnmask = permissions.Resolve(Perm.Unmask, rules);
@@ -489,7 +567,30 @@ public sealed class ExecutionService(
         var stopwatch = Stopwatch.StartNew();
 
         await using var db = await factory.CreateDbContextAsync(ct);
-        var database = await db.ManagedDatabases.AsNoTracking().FirstOrDefaultAsync(d => d.Id == databaseId, ct);
+        CachedDatabaseDescriptor? dbDesc = databaseCache != null ? await databaseCache.GetAsync(databaseId) : null;
+        ManagedDatabase? database = null;
+        if (dbDesc is not null)
+        {
+            database = new ManagedDatabase
+            {
+                Id = dbDesc.Id,
+                TenantId = dbDesc.TenantId,
+                Name = dbDesc.Name,
+                Environment = dbDesc.Environment,
+                Engine = dbDesc.Engine,
+                IsActive = dbDesc.IsActive,
+                DefaultTimeoutSeconds = dbDesc.DefaultTimeoutSeconds,
+                MaxRows = dbDesc.MaxRows,
+                IncludedObjects = dbDesc.IncludedObjects,
+                ExcludedObjects = dbDesc.ExcludedObjects,
+                EncryptedConnectionString = ""
+            };
+        }
+        else
+        {
+            database = await db.ManagedDatabases.AsNoTracking().FirstOrDefaultAsync(d => d.Id == databaseId, ct);
+        }
+
         if (database is null)
         {
             result.Outcome = "Denied";
@@ -499,8 +600,17 @@ public sealed class ExecutionService(
 
         using var scope = scopes.CreateScope();
         var users = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<ApplicationUser>>();
-        var user = await users.FindByIdAsync(actor.UserId);
-        if (user is null || !user.CanSignIn(DateTimeOffset.UtcNow))
+        CachedUserStatus? userStatus = null;
+        if (userStatusCache != null)
+        {
+            userStatus = await userStatusCache.GetOrLoadAsync(actor.UserId, users);
+        }
+        else
+        {
+            var u = await users.FindByIdAsync(actor.UserId);
+            userStatus = u is not null ? new CachedUserStatus(u.Id, u.Email ?? "", u.IsActive, u.ExpiresAt, u.TimeoutOverrideSeconds, u.SecurityStamp) : null;
+        }
+        if (userStatus is null || !userStatus.CanSignIn(DateTimeOffset.UtcNow))
         {
             result.Outcome = "Denied";
             result.Error = "Your account is inactive or expired.";
@@ -535,7 +645,7 @@ public sealed class ExecutionService(
 
         var maxTimeout = await settings.GetIntAsync("MaxTimeoutSeconds");
         var defaultTimeout = database.DefaultTimeoutSeconds > 0 ? database.DefaultTimeoutSeconds : await settings.GetIntAsync("DefaultTimeoutSeconds");
-        var timeout = Math.Min(maxTimeout, timeoutSeconds ?? user?.TimeoutOverrideSeconds ?? defaultTimeout);
+        var timeout = Math.Min(maxTimeout, timeoutSeconds ?? userStatus?.TimeoutOverrideSeconds ?? defaultTimeout);
 
         var perUser = Math.Max(1, await settings.GetIntAsync("MaxConcurrentPerUser"));
         var perDb = Math.Max(1, await settings.GetIntAsync("MaxConcurrentPerDatabase"));
@@ -558,7 +668,7 @@ public sealed class ExecutionService(
         try
         {
             var provider = providers.GetProvider(database.Engine);
-            var connectionString = crypto.Decrypt(database.EncryptedConnectionString);
+            var connectionString = dbDesc?.DecryptedConnectionString ?? crypto.Decrypt(database.EncryptedConnectionString);
             var plan = await provider.ExplainPlanAsync(connectionString, sql, timeout, ct);
             if (plan is not null)
             {
@@ -619,10 +729,12 @@ public sealed class ExecutionService(
         return result;
     }
 
-    private async Task RunAsync(ManagedDatabase database, ExecutionOptions options, GateAnalysis analysis, ExecutionResult result, int timeout, int maxRows, CancellationToken ct)
+    private async Task RunAsync(ManagedDatabase database, string? decryptedConnectionString, ExecutionOptions options, GateAnalysis analysis, ExecutionResult result, int timeout, int maxRows, CancellationToken ct)
     {
         var provider = providers.GetProvider(database.Engine);
-        var connectionString = crypto.Decrypt(database.EncryptedConnectionString);
+        var connectionString = !string.IsNullOrEmpty(decryptedConnectionString)
+            ? decryptedConnectionString
+            : crypto.Decrypt(database.EncryptedConnectionString);
         await using var connection = provider.CreateConnection(connectionString);
         provider.RegisterMessageListener(connection, msg => result.Messages.Add(msg));
         await connection.OpenAsync(ct);

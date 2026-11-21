@@ -16,7 +16,8 @@ public class AppLogServiceTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddDbContextFactory<ApplicationDbContext>(options =>
-            options.UseInMemoryDatabase(dbName));
+            options.UseInMemoryDatabase(dbName)
+                   .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning)));
         services.AddScoped(sp => sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
         services.AddIdentityCore<ApplicationUser>()
             .AddRoles<IdentityRole>()

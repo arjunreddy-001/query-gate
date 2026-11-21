@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using DbAccessManager.Data;
@@ -38,7 +39,7 @@ public static class DataMaskingService
         public required bool Enabled { get; init; }
     }
 
-    private static volatile MaskingConfigCache? _cachedConfig;
+    private static readonly ConcurrentDictionary<Guid, MaskingConfigCache> _tenantConfigCache = new();
 
     public enum MaskingStrategy
     {
@@ -58,7 +59,13 @@ public static class DataMaskingService
         CustomText
     }
 
-    public static void InvalidateCache() => _cachedConfig = null;
+    public static void InvalidateCache(Guid? tenantId = null)
+    {
+        if (tenantId.HasValue)
+            _tenantConfigCache.TryRemove(tenantId.Value, out _);
+        else
+            _tenantConfigCache.Clear();
+    }
 
     public static string StandardBadgeClass(string standard) => standard.ToUpperInvariant() switch
     {
@@ -201,10 +208,10 @@ public static class DataMaskingService
 
     public static async Task<(List<MaskingRule> Rules, bool Enabled)> GetConfigAsync(IDbContextFactory<ApplicationDbContext> factory)
     {
-        var cached = _cachedConfig;
-        if (cached is not null) return (cached.Rules, cached.Enabled);
-
         await using var db = await factory.CreateDbContextAsync();
+        var tenantId = db.CurrentTenantId ?? Guid.Empty;
+        if (_tenantConfigCache.TryGetValue(tenantId, out var cached)) return (cached.Rules, cached.Enabled);
+
         var enabledSetting = await db.Settings.AsNoTracking().FirstOrDefaultAsync(s => s.Key == SettingsKeyEnabled);
         var enabled = enabledSetting is null || !bool.TryParse(enabledSetting.Value, out var en) || en;
 
@@ -239,15 +246,9 @@ public static class DataMaskingService
         if (rules.Count == 0)
         {
             rules = GetDefaultRules();
-            // Automatically persist individual rows so they exist in database
-            _ = Task.Run(async () =>
-            {
-                try { await SaveConfigAsync(factory, rules, enabled); }
-                catch { }
-            });
         }
 
-        _cachedConfig = new MaskingConfigCache { Rules = rules, Enabled = enabled };
+        _tenantConfigCache[tenantId] = new MaskingConfigCache { Rules = rules, Enabled = enabled };
         return (rules, enabled);
     }
 
@@ -256,7 +257,7 @@ public static class DataMaskingService
         await using var db = await factory.CreateDbContextAsync();
 
         // 1. Remove legacy single blob row if it exists
-        var legacy = await db.Settings.FindAsync("DataMasking:Rules");
+        var legacy = await db.Settings.FirstOrDefaultAsync(s => s.Key == "DataMasking:Rules");
         if (legacy is not null) db.Settings.Remove(legacy);
 
         // 2. Fetch existing individual rule keys
@@ -289,7 +290,7 @@ public static class DataMaskingService
         }
 
         // Save enabled state
-        var existingEnabled = await db.Settings.FindAsync(SettingsKeyEnabled);
+        var existingEnabled = await db.Settings.FirstOrDefaultAsync(s => s.Key == SettingsKeyEnabled);
         if (existingEnabled is null)
         {
             db.Settings.Add(new SettingEntry { Key = SettingsKeyEnabled, Value = enabled ? "true" : "false" });
@@ -300,7 +301,8 @@ public static class DataMaskingService
         }
 
         await db.SaveChangesAsync();
-        _cachedConfig = new MaskingConfigCache { Rules = rules, Enabled = enabled };
+        var tenantId = db.CurrentTenantId ?? Guid.Empty;
+        _tenantConfigCache[tenantId] = new MaskingConfigCache { Rules = rules, Enabled = enabled };
     }
 
     public static void ApplyMasking(ExecutionResult result, IReadOnlyList<MaskingRule>? rules = null)

@@ -54,10 +54,12 @@ builder.Services.AddAuthentication()
         {
             OnTokenValidated = async context =>
             {
-                var users = context.HttpContext.RequestServices.GetRequiredService<UserManager<ApplicationUser>>();
                 var id = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
-                var user = id is null ? null : await users.FindByIdAsync(id);
-                if (user is null || !user.CanSignIn(DateTimeOffset.UtcNow)) context.Fail("Account is inactive.");
+                if (id is null) { context.Fail("Invalid token principal."); return; }
+                var userCache = context.HttpContext.RequestServices.GetRequiredService<IUserStatusCache>();
+                var users = context.HttpContext.RequestServices.GetRequiredService<UserManager<ApplicationUser>>();
+                var status = await userCache.GetOrLoadAsync(id, users);
+                if (status is null || !status.CanSignIn(DateTimeOffset.UtcNow)) context.Fail("Account is inactive.");
             }
         };
     });
@@ -120,6 +122,9 @@ builder.Services.AddRateLimiter(options =>
         _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 
+builder.Services.AddSingleton<ITenantLookupCache, TenantLookupCache>();
+builder.Services.AddSingleton<IDatabaseCache, DatabaseCache>();
+builder.Services.AddSingleton<IUserStatusCache, UserStatusCache>();
 builder.Services.AddSingleton<PermissionResolver>();
 builder.Services.AddSingleton<SqlGate>();
 builder.Services.AddSingleton<CryptoService>();
