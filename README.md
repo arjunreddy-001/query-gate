@@ -37,13 +37,14 @@ Full usage documentation: [docs/USER-GUIDE.md](./docs/USER-GUIDE.md). Admin quic
 | `ConnectionStrings:DefaultConnection`  | PostgreSQL application database                                                                                               |
 | `Encryption:Key`                       | Base64 32-byte key for managed connection strings (dev falls back to `App_Data/dev-encryption.key`; always set in production) |
 | `Jwt:Key`                              | JWT signing key (random per process if unset, which invalidates tokens on restart)                                            |
-| `BootstrapAdmin__Email` / `__Password` | One-time first admin                                                                                                          |
+| `BootstrapAdmin__Email` / `__Password` | Initial admin creation or SuperAdmin role promotion (platform workspace management at `/platform/tenants`)    |
 | `Smtp:*`                               | Optional email notifications                                                                                                  |
 | `Database:ApplyMigrationsOnStartup`    | Opt in to applying EF migrations at startup outside Development; use one instance at a time                                  |
 | `DataProtection:KeyPath`               | Optional persistent directory for ASP.NET Core data protection keys                                                           |
 
 ## What's included
 
+- Multi-tenancy & Workspaces: row-level isolation via EF Core global query filters, path-prefix routing (`/t/{slug}/`), custom domain mappings, multi-workspace user memberships, per-tenant settings (SMTP, webhooks, branding), and platform administration (`/platform/tenants`).
 - Custom-designed UI with light/dark themes, role-based navigation, idle timeout, notifications.
 - Multi-database support: connects natively to Microsoft SQL Server, PostgreSQL, MySQL, and MariaDB targets with engine-specific metadata extraction, statement splitting, dialect analysis, and execution plan estimation.
 - Query workspace: Monaco editor with schema-aware completion, tabs, saved queries, history, formatting, dry-run (rollback), timeout, cancel, results grid with column sorting, row filtering, double-click cell copy, and multi-format export: CSV, Excel (.xls), JSON, Markdown table, and SQL INSERT statements (needs `EXPORT`, audited).

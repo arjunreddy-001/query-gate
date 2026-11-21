@@ -15,6 +15,7 @@ Before executing procedures or workflows in this project, refer to the documenta
 | **Data Masking**       | `.github/skills/data-masking/SKILL.md`             | In-flight dynamic data masking (GDPR, HIPAA, PCI-DSS, SOC 2), strategies, UNMASK bypass, and tests. |
 | **Blazor Pages**       | `.github/skills/blazor-page-conventions/SKILL.md`  | Page lifecycle, admin menus, navigation, and first-render handling.                                 |
 | **UI Design**          | `.github/skills/ui-design-system/SKILL.md`         | Design tokens (`app.css`), themes, sidebar layout, and Monaco editor integration.                   |
+| **Multi-Tenancy**      | `.github/skills/multi-tenancy/SKILL.md`            | Workspaces (/t/{slug}), custom domains, user memberships, data isolation, and platform admin.       |
 
 ## Quick Architecture Map (Token Saver)
 

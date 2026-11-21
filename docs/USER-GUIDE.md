@@ -219,14 +219,62 @@ Authenticate with `POST /api/v1/auth/login` (returns a 15-minute JWT; a refresh 
 | `POST /query/execute`                               | Run SQL (same gate, permissions and audit as the UI) |
 | `POST /query/{runId}/cancel`                        | Cancel a run                                         |
 
-## 10. Operations notes
+## 10. Multi-Tenancy and Workspaces
+
+Query Gate supports multi-tenant workspaces with complete data isolation across organizations.
+
+### Architecture and Isolation
+- **Workspace URLs**: Each workspace is accessible via path prefix `/t/{slug}/` (for example, `/t/acme/dashboard` or `/t/acme/query`).
+- **Custom domains**: Connect custom hostnames (such as `data.acme.com`) to any workspace. Point your DNS record to the server, and Query Gate automatically routes requests by Host header without requiring a path prefix.
+- **Data isolation**: All database registrations, permission grants, audit logs, saved queries, query history, access requests, and notifications are isolated per workspace via row-level security with Entity Framework Core global query filters.
+- **Multiple memberships**: A single user identity can belong to multiple workspaces with different roles in each. Switch between workspaces using the topbar workspace dropdown or the `/select-tenant` page.
+- **Tenant-level settings**: SMTP email mailers, notification webhooks, and branding are configured independently per workspace under _Admin -> Settings_.
+
+### SuperAdmin Role and Platform Administration
+Users with the `SuperAdmin` role operate outside individual tenant data boundaries and manage all workspaces, domains, and global platform status at `/platform/tenants`.
+
+To grant or assume the `SuperAdmin` role:
+
+1. **Bootstrap Configuration (Recommended)**:
+   Configure the bootstrap administrator in your environment file or deployment settings:
+   ```env
+   BOOTSTRAP_ADMIN_EMAIL=admin@company.com
+   BOOTSTRAP_ADMIN_PASSWORD=YourPassword!1234
+   ```
+   On application startup, Query Gate creates the user (or locates an existing account with that email) and assigns both `Admin` and `SuperAdmin` roles.
+
+2. **Direct PostgreSQL Database Assignment**:
+   If the application is already running and you want to elevate an existing account without restarting:
+   ```sql
+   INSERT INTO "AspNetRoles" ("Id", "Name", "NormalizedName", "ConcurrencyStamp")
+   VALUES (gen_random_uuid()::text, 'SuperAdmin', 'SUPERADMIN', gen_random_uuid()::text)
+   ON CONFLICT ("NormalizedName") DO NOTHING;
+
+   INSERT INTO "AspNetUserRoles" ("UserId", "RoleId")
+   SELECT u."Id", r."Id"
+   FROM "AspNetUsers" u
+   JOIN "AspNetRoles" r ON r."NormalizedName" = 'SUPERADMIN'
+   WHERE u."NormalizedEmail" = UPPER('admin@company.com')
+   ON CONFLICT DO NOTHING;
+   ```
+   Log out and log back in to refresh the authentication session.
+
+### Provisioning Workspaces and Onboarding Users
+Query Gate uses an administrative onboarding model rather than public self-service signup to protect internal database infrastructure:
+
+1. **Create a Workspace**: Sign in as a `SuperAdmin`, open `/platform/tenants`, and click **Create Workspace**. Provide the organization name, slug, contact email, and an initial administrator email.
+2. **Configure Custom Domains (Optional)**: Click **Domains** on the workspace row, add your hostname (e.g., `sql.acme.com`), and point your DNS CNAME or A record to the Query Gate host.
+3. **Add Users to the Workspace**: A workspace administrator signs in to `/t/{slug}/dashboard`, opens **Admin -> Users** (`/admin/users`), and clicks **New user**. If the user already has an account, they are immediately granted access to the workspace; otherwise, a temporary password is generated for initial sign-in.
+4. **Switching Workspaces**: Users assigned to multiple workspaces can switch at any time using the workspace dropdown in the top header or by visiting `/select-tenant`.
+
+## 11. Operations notes
 
 - Set `Encryption:Key` (Base64, 32 bytes) and `Jwt:Key` in production; otherwise keys are not stable across restarts.
 - Apply migrations with `dotnet ef database update` during deployment.
 - Configure `Smtp:*` to enable email notifications.
 - A background worker runs every minute: sends expiry reminders, removes expired grants, expires stale requests, and runs approved auto-run scripts.
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 | Symptom                                    | Fix                                                                                  |
 | ------------------------------------------ | ------------------------------------------------------------------------------------ |

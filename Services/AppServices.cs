@@ -166,11 +166,18 @@ public sealed class UserAdminService(
     {
         await using var db = await factory.CreateDbContextAsync();
         var q = db.Users.AsNoTracking();
+        if (db.CurrentTenantId.HasValue && db.CurrentTenantId.Value != Guid.Empty)
+        {
+            var memberUserIds = await db.UserTenantMemberships.Select(m => m.UserId).ToListAsync();
+            q = q.Where(u => memberUserIds.Contains(u.Id));
+        }
+
         if (!string.IsNullOrWhiteSpace(search))
             q = q.Where(u => u.Email!.Contains(search) || (u.DisplayName != null && u.DisplayName.Contains(search)));
         var users = await q.OrderBy(u => u.Email).ToListAsync();
         var roleMap = await (from ur in db.UserRoles join r in db.Roles on ur.RoleId equals r.Id select new { ur.UserId, r.Name }).ToListAsync();
-        return users.Select(u => (u, roleMap.Where(r => r.UserId == u.Id).Select(r => r.Name!).OrderBy(n => n).ToArray())).ToList();
+        var tenantRoleMap = db.CurrentTenantId.HasValue ? await db.UserTenantMemberships.ToDictionaryAsync(m => m.UserId, m => m.Role) : new Dictionary<string, string>();
+        return users.Select(u => (u, tenantRoleMap.TryGetValue(u.Id, out var tr) ? [tr] : roleMap.Where(r => r.UserId == u.Id).Select(r => r.Name!).OrderBy(n => n).ToArray())).ToList();
     }
 
     public async Task<OpResult> CreateAsync(Actor actor, string email, string displayName, string role, DateTimeOffset? expiresAt)
@@ -179,23 +186,46 @@ public sealed class UserAdminService(
         var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         var roles = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
         if (!await roles.RoleExistsAsync(role)) return OpResult.Fail("Role not found.");
-        if (await users.FindByEmailAsync(email) is not null) return OpResult.Fail("A user with that email already exists.");
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         await using var transaction = await db.Database.BeginTransactionAsync();
-        var password = GeneratePassword();
-        var finalDisplayName = string.IsNullOrWhiteSpace(displayName) ? email.Split('@')[0] : displayName.Trim();
-        var user = new ApplicationUser
+        
+        var existingUser = await users.FindByEmailAsync(email);
+        string? password = null;
+        ApplicationUser user;
+        if (existingUser is not null)
         {
-            UserName = email, Email = email, EmailConfirmed = true, DisplayName = finalDisplayName, IsActive = true,
-            MustChangePassword = true, ExpiresAt = expiresAt, CreatedBy = actor.UserName
-        };
-        var result = await users.CreateAsync(user, password);
-        if (!result.Succeeded) return OpResult.Fail(string.Join(" ", result.Errors.Select(e => e.Description)));
-        var assigned = await users.AddToRoleAsync(user, role);
-        if (!assigned.Succeeded) return OpResult.Fail(string.Join(" ", assigned.Errors.Select(e => e.Description)));
+            user = existingUser;
+            var isMember = await db.UserTenantMemberships.AnyAsync(m => m.UserId == user.Id);
+            if (isMember) return OpResult.Fail("User is already a member of this workspace.");
+        }
+        else
+        {
+            password = GeneratePassword();
+            var finalDisplayName = string.IsNullOrWhiteSpace(displayName) ? email.Split('@')[0] : displayName.Trim();
+            user = new ApplicationUser
+            {
+                UserName = email, Email = email, EmailConfirmed = true, DisplayName = finalDisplayName, IsActive = true,
+                MustChangePassword = true, ExpiresAt = expiresAt, CreatedBy = actor.UserName
+            };
+            var result = await users.CreateAsync(user, password);
+            if (!result.Succeeded) return OpResult.Fail(string.Join(" ", result.Errors.Select(e => e.Description)));
+            await users.AddToRoleAsync(user, role);
+        }
+
+        if (db.CurrentTenantId.HasValue && db.CurrentTenantId.Value != Guid.Empty)
+        {
+            db.UserTenantMemberships.Add(new UserTenantMembership
+            {
+                UserId = user.Id,
+                TenantId = db.CurrentTenantId.Value,
+                Role = role
+            });
+            await db.SaveChangesAsync();
+        }
+
         await transaction.CommitAsync();
         await audit.TryWriteAsync(actor, "UserAdmin", "CreateUser", "Success", $"{email} role={role}");
-        return OpResult.Success(password);
+        return OpResult.Success(password ?? "Existing user was added to this workspace.");
     }
 
     public async Task<OpResult> ResetPasswordAsync(Actor actor, string userId)

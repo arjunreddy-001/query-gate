@@ -78,13 +78,16 @@ namespace DbAccessManager.Data.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Ticket")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Status", "CreatedAt");
+                    b.HasIndex("TenantId", "Status", "CreatedAt");
 
                     b.ToTable("AccessRequests");
                 });
@@ -117,6 +120,9 @@ namespace DbAccessManager.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset>("Timestamp")
                         .HasColumnType("timestamp with time zone");
 
@@ -126,7 +132,7 @@ namespace DbAccessManager.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Timestamp");
+                    b.HasIndex("TenantId", "Timestamp");
 
                     b.ToTable("AppLogs");
                 });
@@ -295,6 +301,9 @@ namespace DbAccessManager.Data.Migrations
                     b.Property<string>("StatementTypes")
                         .HasColumnType("text");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset>("Timestamp")
                         .HasColumnType("timestamp with time zone");
 
@@ -312,9 +321,9 @@ namespace DbAccessManager.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Timestamp");
+                    b.HasIndex("TenantId", "Timestamp");
 
-                    b.HasIndex("UserId", "DatabaseId", "Timestamp");
+                    b.HasIndex("TenantId", "UserId", "DatabaseId", "Timestamp");
 
                     b.ToTable("AuditLogs");
                 });
@@ -330,9 +339,12 @@ namespace DbAccessManager.Data.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("Name")
+                    b.HasIndex("TenantId", "Name")
                         .IsUnique();
 
                     b.ToTable("DatabaseEnvironments");
@@ -363,14 +375,19 @@ namespace DbAccessManager.Data.Migrations
                         .HasMaxLength(450)
                         .HasColumnType("character varying(450)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
+                    b.HasIndex("DatabaseId");
+
                     b.HasIndex("RoleId");
 
-                    b.HasIndex("DatabaseId", "RoleId")
+                    b.HasIndex("TenantId", "DatabaseId", "RoleId")
                         .IsUnique();
 
                     b.ToTable("DatabaseRoleScopeRules");
@@ -378,6 +395,9 @@ namespace DbAccessManager.Data.Migrations
 
             modelBuilder.Entity("DbAccessManager.Data.EnvironmentDefaultGrant", b =>
                 {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("EnvironmentId")
                         .HasColumnType("uuid");
 
@@ -389,7 +409,9 @@ namespace DbAccessManager.Data.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
-                    b.HasKey("EnvironmentId", "RoleId", "PermissionCode");
+                    b.HasKey("TenantId", "EnvironmentId", "RoleId", "PermissionCode");
+
+                    b.HasIndex("EnvironmentId");
 
                     b.HasIndex("RoleId");
 
@@ -444,9 +466,12 @@ namespace DbAccessManager.Data.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("Name", "Environment")
+                    b.HasIndex("TenantId", "Name", "Environment")
                         .IsUnique();
 
                     b.ToTable("ManagedDatabases");
@@ -475,6 +500,9 @@ namespace DbAccessManager.Data.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -487,7 +515,7 @@ namespace DbAccessManager.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserId", "IsRead", "CreatedAt");
+                    b.HasIndex("TenantId", "UserId", "IsRead", "CreatedAt");
 
                     b.ToTable("Notifications");
                 });
@@ -537,6 +565,9 @@ namespace DbAccessManager.Data.Migrations
                     b.Property<DateTimeOffset?>("StartsAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("UserId")
                         .HasColumnType("text");
 
@@ -544,9 +575,13 @@ namespace DbAccessManager.Data.Migrations
 
                     b.HasIndex("DatabaseId");
 
-                    b.HasIndex("RoleId", "DatabaseId", "PermissionCode", "Schema", "ObjectName");
+                    b.HasIndex("RoleId");
 
-                    b.HasIndex("UserId", "DatabaseId", "PermissionCode", "Schema", "ObjectName");
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("TenantId", "RoleId", "DatabaseId", "PermissionCode", "Schema", "ObjectName");
+
+                    b.HasIndex("TenantId", "UserId", "DatabaseId", "PermissionCode", "Schema", "ObjectName");
 
                     b.ToTable("PermissionGrants", t =>
                         {
@@ -580,6 +615,9 @@ namespace DbAccessManager.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("UserId")
                         .IsRequired()
                         .HasMaxLength(450)
@@ -587,7 +625,7 @@ namespace DbAccessManager.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserId", "ExecutedAt");
+                    b.HasIndex("TenantId", "UserId", "ExecutedAt");
 
                     b.ToTable("QueryHistory");
                 });
@@ -611,6 +649,9 @@ namespace DbAccessManager.Data.Migrations
                     b.Property<DateTimeOffset?>("RevokedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("TokenHash")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -626,7 +667,7 @@ namespace DbAccessManager.Data.Migrations
                     b.HasIndex("TokenHash")
                         .IsUnique();
 
-                    b.HasIndex("UserId");
+                    b.HasIndex("TenantId", "UserId");
 
                     b.ToTable("RefreshTokens");
                 });
@@ -662,9 +703,12 @@ namespace DbAccessManager.Data.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("RequestType", "RequestId");
+                    b.HasIndex("TenantId", "RequestType", "RequestId");
 
                     b.ToTable("RequestStatusHistory");
                 });
@@ -698,6 +742,9 @@ namespace DbAccessManager.Data.Migrations
                         .HasMaxLength(400)
                         .HasColumnType("character varying(400)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -708,7 +755,7 @@ namespace DbAccessManager.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserId", "DatabaseId", "Name")
+                    b.HasIndex("TenantId", "UserId", "DatabaseId", "Name")
                         .IsUnique();
 
                     b.ToTable("SavedQueries");
@@ -774,6 +821,9 @@ namespace DbAccessManager.Data.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -781,13 +831,16 @@ namespace DbAccessManager.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Status", "CreatedAt");
+                    b.HasIndex("TenantId", "Status", "CreatedAt");
 
                     b.ToTable("ScriptRequests");
                 });
 
             modelBuilder.Entity("DbAccessManager.Data.SettingEntry", b =>
                 {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Key")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
@@ -797,9 +850,121 @@ namespace DbAccessManager.Data.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
-                    b.HasKey("Key");
+                    b.HasKey("TenantId", "Key");
 
                     b.ToTable("Settings");
+                });
+
+            modelBuilder.Entity("DbAccessManager.Data.Tenant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContactEmail")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Plan")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Slug")
+                        .IsUnique();
+
+                    b.ToTable("Tenants");
+                });
+
+            modelBuilder.Entity("DbAccessManager.Data.TenantDomain", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Domain")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<bool>("IsVerified")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Domain")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("TenantDomains");
+                });
+
+            modelBuilder.Entity("DbAccessManager.Data.TenantRole", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RoleId")
+                        .HasMaxLength(450)
+                        .HasColumnType("character varying(450)");
+
+                    b.HasKey("TenantId", "RoleId");
+
+                    b.ToTable("TenantRoles");
+                });
+
+            modelBuilder.Entity("DbAccessManager.Data.UserTenantMembership", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("JoinedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("character varying(450)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "TenantId")
+                        .IsUnique();
+
+                    b.ToTable("UserTenantMemberships");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole", b =>

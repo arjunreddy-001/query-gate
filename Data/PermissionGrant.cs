@@ -3,6 +3,7 @@ namespace DbAccessManager.Data;
 public sealed class PermissionGrant
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
     public string? UserId { get; set; }
     public string? RoleId { get; set; }
     public Guid DatabaseId { get; set; }

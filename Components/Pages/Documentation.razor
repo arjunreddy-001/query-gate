@@ -34,6 +34,7 @@
                     <a href="/documentation#object-rules">Object scoping</a>
                     <a href="/documentation#data-masking">Data masking</a>
                     <a href="/documentation#exports-and-plans">Exports &amp; Explain</a>
+                    <a href="/documentation#multi-tenancy">Multi-tenancy &amp; Workspaces</a>
                 </div>
                 <div class="docs-nav-group">
                     <span class="docs-nav-group-title">Deployment</span>
@@ -70,6 +71,7 @@
                     <a href="/documentation#object-rules">Object scoping</a>
                     <a href="/documentation#data-masking">Data masking</a>
                     <a href="/documentation#exports-and-plans">Exports &amp; Explain</a>
+                    <a href="/documentation#multi-tenancy">Multi-tenancy &amp; Workspaces</a>
                 </div>
 
                 <div class="docs-nav-group">
@@ -162,6 +164,53 @@
                     <li><b>Markdown:</b> Clean GitHub-flavored Markdown table copied directly to clipboard.</li>
                     <li><b>SQL INSERT script:</b> Generates runnable <code>INSERT INTO</code> scripts with optional idempotency (<code>IF NOT EXISTS</code>) checks based on selected primary/unique keys.</li>
                     <li><b>Explain Plan:</b> Click <b>Explain</b> in the query workspace to generate and visualize estimated subtree costs, operator hierarchies, and execution steps.</li>
+                </ul>
+            </section>
+
+            <section id="multi-tenancy">
+                <h2>Multi-tenancy and workspaces</h2>
+                <p>Query Gate supports multi-tenant workspaces with complete data isolation, allowing multiple independent organizations or departments to share a single platform deployment.</p>
+                <ul>
+                    <li><b>Path-prefix routing (/t/[slug]/):</b> Workspaces are accessed using a clean path prefix such as <code>/t/acme/dashboard</code> or <code>/t/marketing/query</code>. All navigation, query tabs, and administrative tools operate within that workspace context.</li>
+                    <li><b>Custom domain mapping:</b> Map dedicated hostnames (such as <code>data.acme.com</code>) directly to a workspace. Query Gate resolves the tenant directly from the Host header with no path prefix required.</li>
+                    <li><b>Row-level data isolation:</b> All tenant entities (databases, permission grants, audit logs, saved queries, query history, access requests, script requests, and environments) are strictly partitioned by <code>TenantId</code> using Entity Framework Core global query filters. Queries cannot read or write data across tenant boundaries.</li>
+                    <li><b>Multi-tenant user memberships:</b> A single user account can belong to multiple workspaces with different roles in each (for example, Administrator in one workspace and Developer in another). Users can switch between workspaces using the topbar dropdown or the <code>/select-tenant</code> hub.</li>
+                    <li><b>Tenant-isolated settings:</b> Each workspace maintains its own SMTP email server configuration, outgoing team notification webhooks (Slack, Teams, Discord, Zoho Cliq), and branding preferences.</li>
+                    <li><b>Platform administration:</b> Users in the <code>SuperAdmin</code> role have access to <code>/platform/tenants</code> to provision workspaces, configure custom domains, toggle tenant access, and inspect global health. Platform administrators exist outside tenant data boundaries to preserve tenant privacy.</li>
+                </ul>
+
+                <h3>Setting up the SuperAdmin role</h3>
+                <p>The <code>SuperAdmin</code> role unlocks platform-level management at <code>/platform/tenants</code>. There are two ways to assign this role:</p>
+                <ol>
+                    <li>
+                        <b>Bootstrap configuration (Recommended):</b> Set <code>BOOTSTRAP_ADMIN_EMAIL</code> and <code>BOOTSTRAP_ADMIN_PASSWORD</code> (or <code>BootstrapAdmin__Email</code> and <code>BootstrapAdmin__Password</code>). During startup, Query Gate automatically creates the user account (or finds the existing user) and assigns both <code>Admin</code> and <code>SuperAdmin</code> roles.
+                    </li>
+                    <li>
+                        <b>Direct PostgreSQL SQL assignment:</b> If Query Gate is already running and you need to elevate an account immediately without restarting:
+                        <div class="code-block-wrap" style="margin:12px 0">
+                            <pre><code>-- Ensure the SuperAdmin role exists
+INSERT INTO "AspNetRoles" ("Id", "Name", "NormalizedName", "ConcurrencyStamp")
+VALUES (gen_random_uuid()::text, 'SuperAdmin', 'SUPERADMIN', gen_random_uuid()::text)
+ON CONFLICT ("NormalizedName") DO NOTHING;
+
+-- Assign SuperAdmin role to the user
+INSERT INTO "AspNetUserRoles" ("UserId", "RoleId")
+SELECT u."Id", r."Id"
+FROM "AspNetUsers" u
+JOIN "AspNetRoles" r ON r."NormalizedName" = 'SUPERADMIN'
+WHERE u."NormalizedEmail" = UPPER('admin@company.com')
+ON CONFLICT DO NOTHING;</code></pre>
+                        </div>
+                        <p class="muted small">Sign out and sign back in after running the query to refresh authentication session claims.</p>
+                    </li>
+                </ol>
+
+                <h3>Workspace provisioning and user onboarding</h3>
+                <p>To preserve tight security controls over internal database infrastructure, Query Gate disables public self-service signup. Workspaces and users follow an administrative workflow:</p>
+                <ul>
+                    <li><b>Provisioning a workspace:</b> A SuperAdmin navigates to <code>/platform/tenants</code>, clicks <b>Create Workspace</b>, and specifies the name, slug, contact email, plan, and initial administrator email.</li>
+                    <li><b>Connecting custom domains:</b> Click <b>Domains</b> on any workspace row in <code>/platform/tenants</code> to bind a custom hostname (for example, <code>sql.acme.com</code>). Point your DNS CNAME or A record to the Query Gate host for direct host-based routing.</li>
+                    <li><b>Adding users to a workspace:</b> Workspace administrators navigate to <b>Admin &rarr; Users</b> (<code>/admin/users</code>) and click <b>New user</b>. Existing platform accounts are associated with the workspace immediately, while new users receive a generated temporary password and must set their password upon initial sign in.</li>
                 </ul>
             </section>
 
@@ -337,7 +386,7 @@ docker compose logs -f query-gate</code></pre>
                             <tr><td><code>DB_CONNECTION_STRING</code></td><td>PostgreSQL connection string overriding the bundled container. (Optional)</td><td><code>Host=querygate-postgres;Port=5432;Database=QueryGate;Username=querygate;Password=...</code></td></tr>
                             <tr><td><code>Encryption__Key</code></td><td>Base-64 key used to encrypt stored database connection strings. Auto-generated and persisted in volume if unset. (Optional)</td><td><span class="inline-code-copy"><code>openssl rand -base64 32</code><button type="button" class="btn-inline-copy" data-copy="openssl rand -base64 32" title="Copy command" aria-label="Copy command"><Icon Name="copy" /></button></span></td></tr>
                             <tr><td><code>Jwt__Key</code></td><td>Base-64 key used to sign session tokens. Auto-generated and persisted in volume if unset. (Optional)</td><td><span class="inline-code-copy"><code>openssl rand -base64 64</code><button type="button" class="btn-inline-copy" data-copy="openssl rand -base64 64" title="Copy command" aria-label="Copy command"><Icon Name="copy" /></button></span></td></tr>
-                            <tr><td><code>BootstrapAdmin__Email</code></td><td>Optional email for headless administrator creation. If omitted, the web setup wizard is used.</td><td><code>admin@company.com</code></td></tr>
+                            <tr><td><code>BootstrapAdmin__Email</code></td><td>Optional email for administrator creation or SuperAdmin role promotion (enables <code>/platform/tenants</code>). If omitted, the web setup wizard is used.</td><td><code>admin@company.com</code></td></tr>
                             <tr><td><code>BootstrapAdmin__Password</code></td><td>Optional password for headless administrator creation.</td><td>Min 12 chars, mixed case + digit</td></tr>
                             <tr><td><code>Database__ApplyMigrationsOnStartup</code></td><td>Automatically apply EF Core migrations on startup. (Optional)</td><td><code>true</code></td></tr>
                             <tr><td><code>DataProtection__KeyPath</code></td><td>Persistent volume path for key files.</td><td><code>/var/query-gate/keys</code></td></tr>

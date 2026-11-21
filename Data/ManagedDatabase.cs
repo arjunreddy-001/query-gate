@@ -3,6 +3,7 @@ namespace DbAccessManager.Data;
 public sealed class ManagedDatabase
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
     public required string Name { get; set; }
     public required string Environment { get; set; }
     public DatabaseEngine Engine { get; set; } = DatabaseEngine.SqlServer;

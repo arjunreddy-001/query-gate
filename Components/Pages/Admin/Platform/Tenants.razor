@@ -1,0 +1,609 @@
+@page "/platform/tenants"
+@attribute [Authorize(Roles = Roles.SuperAdmin)]
+@using Microsoft.EntityFrameworkCore
+@using DbAccessManager.Data
+@using DbAccessManager.Security
+@using DbAccessManager.Services
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+<PageTitle>Platform Administration - Workspaces</PageTitle>
+
+<div class="admin-page">
+    <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+        <div>
+            <h1 style="font-size:24px;font-weight:700;margin:0 0 4px 0">Platform Workspaces</h1>
+            <p style="color:var(--text-muted);font-size:14px;margin:0">Manage multi-tenant organizations, domains, and administrator access.</p>
+        </div>
+        <button class="btn btn-primary" type="button" @onclick="OpenCreateModal" style="display:inline-flex;align-items:center;gap:6px">
+            <Icon Name="plus" />Create Workspace
+        </button>
+    </div>
+
+    <div class="card" style="margin-bottom:20px">
+        <div style="display:flex;gap:12px;padding:16px">
+            <input type="text" class="input" placeholder="Search by name, slug, or contact email..." @bind="searchQuery" @bind:event="oninput" style="max-width:360px" />
+            <select class="input" style="max-width:180px" @bind="statusFilter">
+                <option value="All">All statuses</option>
+                <option value="Active">Active only</option>
+                <option value="Inactive">Inactive only</option>
+            </select>
+        </div>
+    </div>
+
+    @if (loading)
+    {
+        <div class="card" style="padding:48px;text-align:center;color:var(--text-muted)">Loading workspaces...</div>
+    }
+    else if (filteredTenants.Count == 0)
+    {
+        <div class="card" style="padding:48px;text-align:center;color:var(--text-muted)">
+            <Icon Name="db" />
+            <div style="margin-top:12px;font-weight:600">No workspaces found</div>
+            <div style="font-size:13px;margin-top:4px">Create your first tenant workspace to get started.</div>
+        </div>
+    }
+    else
+    {
+        <div class="card" style="overflow-x:auto">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Workspace</th>
+                        <th>Slug / Path</th>
+                        <th>Custom Domains</th>
+                        <th>Databases</th>
+                        <th>Members</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th style="text-align:right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in filteredTenants)
+                    {
+                        var t = item.Tenant;
+                        <tr>
+                            <td>
+                                <div style="font-weight:600">@t.Name</div>
+                                @if (!string.IsNullOrEmpty(t.ContactEmail))
+                                {
+                                    <div style="font-size:12px;color:var(--text-muted)">@t.ContactEmail</div>
+                                }
+                            </td>
+                            <td>
+                                <code style="font-size:12px;padding:2px 6px;background:rgba(99,102,241,0.1);color:#818cf8;border-radius:4px">/t/@t.Slug</code>
+                            </td>
+                            <td>
+                                @if (item.Domains.Count == 0)
+                                {
+                                    <span style="font-size:12px;color:var(--text-muted)">None</span>
+                                }
+                                else
+                                {
+                                    @foreach (var d in item.Domains)
+                                    {
+                                        <span class="badge" style="display:inline-block;margin:2px 4px 2px 0;font-size:11px">@d.Domain</span>
+                                    }
+                                }
+                            </td>
+                            <td>@item.DatabaseCount</td>
+                            <td>@item.UserCount</td>
+                            <td>
+                                @if (t.IsActive)
+                                {
+                                    <span class="badge badge-success" style="color:#10b981">Active</span>
+                                }
+                                else
+                                {
+                                    <span class="badge badge-danger" style="color:#ef4444">Disabled</span>
+                                }
+                            </td>
+                            <td style="font-size:13px;color:var(--text-muted)">@t.CreatedAt.ToString("MMM dd, yyyy")</td>
+                            <td style="text-align:right">
+                                <div style="display:inline-flex;gap:6px">
+                                    <a class="btn btn-sm btn-secondary" href="/t/@t.Slug/dashboard" target="_blank" title="Open workspace in new tab">
+                                        Open
+                                    </a>
+                                    <button class="btn btn-sm btn-secondary" type="button" @onclick="() => OpenDomainsModal(t)">
+                                        Domains
+                                    </button>
+                                    <button class="btn btn-sm btn-secondary" type="button" @onclick="() => OpenEditModal(t)">
+                                        Edit
+                                    </button>
+                                    <button class="btn btn-sm @(t.IsActive ? "btn-danger" : "btn-primary")" type="button" @onclick="() => ToggleActiveAsync(t)">
+                                        @(t.IsActive ? "Disable" : "Enable")
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@if (showCreateModal)
+{
+    <div class="modal-backdrop">
+        <div class="modal-dialog" style="max-width:520px">
+            <div class="modal-header">
+                <h3>Create New Workspace</h3>
+                <button class="icon-btn" type="button" @onclick="() => showCreateModal = false"><Icon Name="x" /></button>
+            </div>
+            <div class="modal-body" style="display:flex;flex-direction:column;gap:16px">
+                <div>
+                    <label class="label">Workspace Name *</label>
+                    <input type="text" class="input" @bind="newTenantName" @bind:after="OnNewNameChanged" placeholder="e.g. Acme Corporation" />
+                </div>
+                <div>
+                    <label class="label">Slug (URL path prefix) *</label>
+                    <div style="display:flex;align-items:center;gap:6px">
+                        <span style="font-size:13px;color:var(--text-muted)">/t/</span>
+                        <input type="text" class="input" @bind="newTenantSlug" placeholder="acme" />
+                    </div>
+                    <span style="font-size:11px;color:var(--text-muted)">Letters, numbers, and hyphens only. Used in URL: /t/[slug]/</span>
+                </div>
+                <div>
+                    <label class="label">Contact Email</label>
+                    <input type="email" class="input" @bind="newTenantEmail" placeholder="admin@acme.com" />
+                </div>
+                <div>
+                    <label class="label">Plan</label>
+                    <input type="text" class="input" @bind="newTenantPlan" placeholder="Enterprise, Pro, Standard..." />
+                </div>
+                <div style="border-top:1px solid var(--border-color);padding-top:16px">
+                    <h4 style="font-size:14px;margin:0 0 8px 0">Initial Administrator</h4>
+                    <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px 0">Enter an admin email to grant immediate access to this workspace.</p>
+                    <input type="email" class="input" @bind="newAdminEmail" placeholder="admin@acme.com" />
+                </div>
+            </div>
+            <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px;padding-top:16px">
+                <button class="btn btn-secondary" type="button" @onclick="() => showCreateModal = false">Cancel</button>
+                <button class="btn btn-primary" type="button" @onclick="CreateTenantAsync" disabled="@saving">
+                    @(saving ? "Creating..." : "Create Workspace")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showEditModal && editingTenant is not null)
+{
+    <div class="modal-backdrop">
+        <div class="modal-dialog" style="max-width:480px">
+            <div class="modal-header">
+                <h3>Edit Workspace</h3>
+                <button class="icon-btn" type="button" @onclick="() => showEditModal = false"><Icon Name="x" /></button>
+            </div>
+            <div class="modal-body" style="display:flex;flex-direction:column;gap:16px">
+                <div>
+                    <label class="label">Workspace Name *</label>
+                    <input type="text" class="input" @bind="editingTenant.Name" />
+                </div>
+                <div>
+                    <label class="label">Slug</label>
+                    <input type="text" class="input" @bind="editingTenant.Slug" disabled />
+                    <span style="font-size:11px;color:var(--text-muted)">Slugs cannot be changed once created.</span>
+                </div>
+                <div>
+                    <label class="label">Contact Email</label>
+                    <input type="email" class="input" @bind="editingTenant.ContactEmail" />
+                </div>
+                <div>
+                    <label class="label">Plan</label>
+                    <input type="text" class="input" @bind="editingTenant.Plan" />
+                </div>
+            </div>
+            <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px;padding-top:16px">
+                <button class="btn btn-secondary" type="button" @onclick="() => showEditModal = false">Cancel</button>
+                <button class="btn btn-primary" type="button" @onclick="SaveEditAsync" disabled="@saving">
+                    @(saving ? "Saving..." : "Save Changes")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showDomainsModal && selectedTenantForDomains is not null)
+{
+    <div class="modal-backdrop">
+        <div class="modal-dialog" style="max-width:540px">
+            <div class="modal-header">
+                <h3>Custom Domains: @selectedTenantForDomains.Name</h3>
+                <button class="icon-btn" type="button" @onclick="() => showDomainsModal = false"><Icon Name="x" /></button>
+            </div>
+            <div class="modal-body" style="display:flex;flex-direction:column;gap:16px">
+                <p style="font-size:13px;color:var(--text-muted);margin:0">
+                    Connect custom hostnames directly to this workspace. Point your DNS CNAME or A record to this server.
+                </p>
+
+                <div style="display:flex;gap:8px">
+                    <input type="text" class="input" placeholder="e.g. sql.acme.com" @bind="newDomainInput" />
+                    <button class="btn btn-primary" type="button" @onclick="AddDomainAsync" disabled="@string.IsNullOrWhiteSpace(newDomainInput)">
+                        Add Domain
+                    </button>
+                </div>
+
+                <div style="margin-top:8px">
+                    <h4 style="font-size:13px;margin:0 0 8px 0">Configured Domains</h4>
+                    @if (currentTenantDomains.Count == 0)
+                    {
+                        <div style="font-size:13px;color:var(--text-muted);padding:12px;background:var(--bg-subtle);border-radius:6px">No custom domains configured. Workspace is accessible via path: <code>/t/@selectedTenantForDomains.Slug</code></div>
+                    }
+                    else
+                    {
+                        <div style="display:flex;flex-direction:column;gap:8px">
+                            @foreach (var d in currentTenantDomains)
+                            {
+                                <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--bg-subtle);border-radius:6px">
+                                    <div>
+                                        <div style="font-weight:600;font-size:13px">@d.Domain</div>
+                                        <div style="font-size:11px;color:var(--text-muted)">Added @d.CreatedAt.ToString("g")</div>
+                                    </div>
+                                    <button class="btn btn-sm btn-danger" type="button" @onclick="() => RemoveDomainAsync(d.Id)">
+                                        Remove
+                                    </button>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+            <div class="modal-footer" style="display:flex;justify-content:flex-end">
+                <button class="btn btn-secondary" type="button" @onclick="() => showDomainsModal = false">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.65);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        backdrop-filter: blur(2px);
+    }
+    .modal-dialog {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 24px;
+        width: 100%;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+    }
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 16px;
+    }
+    .modal-header h3 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 700;
+    }
+    .badge-success {
+        background: rgba(16, 185, 129, 0.15);
+        border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+    .badge-danger {
+        background: rgba(239, 68, 68, 0.15);
+        border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+</style>
+
+@code {
+    private sealed class TenantSummary
+    {
+        public Tenant Tenant { get; set; } = default!;
+        public List<TenantDomain> Domains { get; set; } = [];
+        public int DatabaseCount { get; set; }
+        public int UserCount { get; set; }
+    }
+
+    private List<TenantSummary> allTenants = [];
+    private bool loading = true;
+    private bool saving = false;
+    private string searchQuery = "";
+    private string statusFilter = "All";
+
+    private bool showCreateModal = false;
+    private string newTenantName = "";
+    private string newTenantSlug = "";
+    private string newTenantEmail = "";
+    private string newTenantPlan = "Standard";
+    private string newAdminEmail = "";
+
+    private bool showEditModal = false;
+    private Tenant? editingTenant;
+
+    private bool showDomainsModal = false;
+    private Tenant? selectedTenantForDomains;
+    private List<TenantDomain> currentTenantDomains = [];
+    private string newDomainInput = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadTenantsAsync();
+    }
+
+    private async Task LoadTenantsAsync()
+    {
+        loading = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var tenants = await db.Tenants.IgnoreQueryFilters().OrderByDescending(t => t.CreatedAt).ToListAsync();
+            var domains = await db.TenantDomains.IgnoreQueryFilters().ToListAsync();
+            var dbCounts = await db.ManagedDatabases.IgnoreQueryFilters()
+                .GroupBy(d => d.TenantId)
+                .Select(g => new { TenantId = g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.TenantId, x => x.Count);
+            var userCounts = await db.UserTenantMemberships.IgnoreQueryFilters()
+                .GroupBy(m => m.TenantId)
+                .Select(g => new { TenantId = g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.TenantId, x => x.Count);
+
+            allTenants = tenants.Select(t => new TenantSummary
+            {
+                Tenant = t,
+                Domains = domains.Where(d => d.TenantId == t.Id).ToList(),
+                DatabaseCount = dbCounts.GetValueOrDefault(t.Id, 0),
+                UserCount = userCounts.GetValueOrDefault(t.Id, 0)
+            }).ToList();
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private List<TenantSummary> filteredTenants => allTenants
+        .Where(item =>
+        {
+            if (statusFilter == "Active" && !item.Tenant.IsActive) return false;
+            if (statusFilter == "Inactive" && item.Tenant.IsActive) return false;
+            if (!string.IsNullOrWhiteSpace(searchQuery))
+            {
+                var q = searchQuery.Trim();
+                var nameMatch = item.Tenant.Name.Contains(q, StringComparison.OrdinalIgnoreCase);
+                var slugMatch = item.Tenant.Slug.Contains(q, StringComparison.OrdinalIgnoreCase);
+                var emailMatch = item.Tenant.ContactEmail?.Contains(q, StringComparison.OrdinalIgnoreCase) == true;
+                return nameMatch || slugMatch || emailMatch;
+            }
+            return true;
+        })
+        .ToList();
+
+    private void OpenCreateModal()
+    {
+        newTenantName = "";
+        newTenantSlug = "";
+        newTenantEmail = "";
+        newTenantPlan = "Standard";
+        newAdminEmail = "";
+        showCreateModal = true;
+    }
+
+    private void OnNewNameChanged()
+    {
+        if (string.IsNullOrWhiteSpace(newTenantSlug) && !string.IsNullOrWhiteSpace(newTenantName))
+        {
+            newTenantSlug = System.Text.RegularExpressions.Regex.Replace(newTenantName.ToLowerInvariant(), @"[^a-z0-9]+", "-").Trim('-');
+        }
+    }
+
+    private async Task CreateTenantAsync()
+    {
+        if (string.IsNullOrWhiteSpace(newTenantName))
+        {
+            Toast.Show("Workspace name is required.", isError: true);
+            return;
+        }
+        var slug = (newTenantSlug ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(slug) || !System.Text.RegularExpressions.Regex.IsMatch(slug, @"^[a-z0-9-]+$"))
+        {
+            Toast.Show("Slug must contain only lowercase letters, numbers, and hyphens.", isError: true);
+            return;
+        }
+
+        saving = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var exists = await db.Tenants.IgnoreQueryFilters().AnyAsync(t => t.Slug == slug);
+            if (exists)
+            {
+                Toast.Show("A workspace with that slug already exists.", isError: true);
+                return;
+            }
+
+            var tenant = new Tenant
+            {
+                Name = newTenantName.Trim(),
+                Slug = slug,
+                ContactEmail = string.IsNullOrWhiteSpace(newTenantEmail) ? null : newTenantEmail.Trim(),
+                Plan = string.IsNullOrWhiteSpace(newTenantPlan) ? null : newTenantPlan.Trim(),
+                IsActive = true
+            };
+            db.Tenants.Add(tenant);
+            await db.SaveChangesAsync();
+
+            // If an admin email was provided, associate them
+            if (!string.IsNullOrWhiteSpace(newAdminEmail))
+            {
+                var adminUser = await db.Users.FirstOrDefaultAsync(u => u.Email == newAdminEmail.Trim());
+                if (adminUser is not null)
+                {
+                    db.UserTenantMemberships.Add(new UserTenantMembership
+                    {
+                        UserId = adminUser.Id,
+                        TenantId = tenant.Id,
+                        Role = Roles.Admin
+                    });
+                    await db.SaveChangesAsync();
+                }
+            }
+
+            showCreateModal = false;
+            Toast.Show("Workspace created successfully.");
+            await LoadTenantsAsync();
+        }
+        catch (Exception ex)
+        {
+            Toast.Show($"Failed to create workspace: {ex.Message}", isError: true);
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private void OpenEditModal(Tenant tenant)
+    {
+        editingTenant = new Tenant
+        {
+            Id = tenant.Id,
+            Name = tenant.Name,
+            Slug = tenant.Slug,
+            ContactEmail = tenant.ContactEmail,
+            Plan = tenant.Plan,
+            IsActive = tenant.IsActive,
+            CreatedAt = tenant.CreatedAt
+        };
+        showEditModal = true;
+    }
+
+    private async Task SaveEditAsync()
+    {
+        if (editingTenant is null) return;
+        if (string.IsNullOrWhiteSpace(editingTenant.Name))
+        {
+            Toast.Show("Workspace name is required.", isError: true);
+            return;
+        }
+
+        saving = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var existing = await db.Tenants.IgnoreQueryFilters().FirstOrDefaultAsync(t => t.Id == editingTenant.Id);
+            if (existing is not null)
+            {
+                existing.Name = editingTenant.Name.Trim();
+                existing.ContactEmail = string.IsNullOrWhiteSpace(editingTenant.ContactEmail) ? null : editingTenant.ContactEmail.Trim();
+                existing.Plan = string.IsNullOrWhiteSpace(editingTenant.Plan) ? null : editingTenant.Plan.Trim();
+                await db.SaveChangesAsync();
+                Toast.Show("Workspace updated.");
+                showEditModal = false;
+                await LoadTenantsAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Toast.Show($"Failed to save: {ex.Message}", isError: true);
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private async Task ToggleActiveAsync(Tenant tenant)
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var existing = await db.Tenants.IgnoreQueryFilters().FirstOrDefaultAsync(t => t.Id == tenant.Id);
+            if (existing is not null)
+            {
+                existing.IsActive = !existing.IsActive;
+                await db.SaveChangesAsync();
+                Toast.Show($"Workspace {(existing.IsActive ? "enabled" : "disabled")}.");
+                await LoadTenantsAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Toast.Show($"Failed to update workspace status: {ex.Message}", isError: true);
+        }
+    }
+
+    private async Task OpenDomainsModal(Tenant tenant)
+    {
+        selectedTenantForDomains = tenant;
+        newDomainInput = "";
+        await using var db = await DbFactory.CreateDbContextAsync();
+        currentTenantDomains = await db.TenantDomains.IgnoreQueryFilters().Where(d => d.TenantId == tenant.Id).ToListAsync();
+        showDomainsModal = true;
+    }
+
+    private async Task AddDomainAsync()
+    {
+        if (selectedTenantForDomains is null || string.IsNullOrWhiteSpace(newDomainInput)) return;
+        var domain = newDomainInput.Trim().ToLowerInvariant();
+        if (domain.Contains('/') || domain.Contains(':'))
+        {
+            Toast.Show("Enter a valid hostname only (e.g. data.company.com). Do not include http:// or ports.", isError: true);
+            return;
+        }
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var exists = await db.TenantDomains.IgnoreQueryFilters().AnyAsync(d => d.Domain == domain);
+            if (exists)
+            {
+                Toast.Show("That domain is already mapped to a workspace.", isError: true);
+                return;
+            }
+
+            var item = new TenantDomain
+            {
+                TenantId = selectedTenantForDomains.Id,
+                Domain = domain,
+                IsVerified = true
+            };
+            db.TenantDomains.Add(item);
+            await db.SaveChangesAsync();
+
+            newDomainInput = "";
+            currentTenantDomains = await db.TenantDomains.IgnoreQueryFilters().Where(d => d.TenantId == selectedTenantForDomains.Id).ToListAsync();
+            Toast.Show("Custom domain connected.");
+            await LoadTenantsAsync();
+        }
+        catch (Exception ex)
+        {
+            Toast.Show($"Failed to add domain: {ex.Message}", isError: true);
+        }
+    }
+
+    private async Task RemoveDomainAsync(Guid domainId)
+    {
+        if (selectedTenantForDomains is null) return;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var item = await db.TenantDomains.IgnoreQueryFilters().FirstOrDefaultAsync(d => d.Id == domainId);
+            if (item is not null)
+            {
+                db.TenantDomains.Remove(item);
+                await db.SaveChangesAsync();
+                currentTenantDomains = await db.TenantDomains.IgnoreQueryFilters().Where(d => d.TenantId == selectedTenantForDomains.Id).ToListAsync();
+                Toast.Show("Domain removed.");
+                await LoadTenantsAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Toast.Show($"Failed to remove domain: {ex.Message}", isError: true);
+        }
+    }
+}

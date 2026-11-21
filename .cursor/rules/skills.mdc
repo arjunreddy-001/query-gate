@@ -15,6 +15,7 @@ When performing development or maintenance tasks in this codebase, reference the
 - **Data Masking & Compliance**: Refer to `.github/skills/data-masking/SKILL.md` when modifying dynamic data masking rules, compliance presets (GDPR, HIPAA, PCI-DSS, SOC 2), or UNMASK bypass.
 - **Blazor Pages & Navigation**: Refer to `.github/skills/blazor-page-conventions/SKILL.md` when creating or modifying Razor components, pages, menus, or first-render state.
 - **UI Design System**: Refer to `.github/skills/ui-design-system/SKILL.md` when modifying CSS styles, themes, sidebar layout, results grid, or editor behavior.
+- **Multi-Tenancy & Workspaces**: Refer to `.github/skills/multi-tenancy/SKILL.md` when modifying tenant resolution, workspaces (/t/{slug}), custom domains, user memberships, data isolation, or platform admin.
 
 ## Skill Management Convention
 

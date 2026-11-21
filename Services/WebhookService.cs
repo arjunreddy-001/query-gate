@@ -70,7 +70,7 @@ public sealed class WebhookService(
     public async Task<WebhookSubscription?> GetAsync(Guid id)
     {
         await using var db = await factory.CreateDbContextAsync();
-        var entry = await db.Settings.FindAsync($"{SettingPrefix}{id}");
+        var entry = await db.Settings.FirstOrDefaultAsync(s => s.Key == $"{SettingPrefix}{id}");
         if (entry is null) return null;
         try { return JsonSerializer.Deserialize<WebhookSubscription>(entry.Value); }
         catch { return null; }
@@ -85,7 +85,7 @@ public sealed class WebhookService(
         var json = JsonSerializer.Serialize(webhook);
         await using var db = await factory.CreateDbContextAsync();
         var key = $"{SettingPrefix}{webhook.Id}";
-        var existing = await db.Settings.FindAsync(key);
+        var existing = await db.Settings.FirstOrDefaultAsync(s => s.Key == key);
         if (existing is null)
         {
             db.Settings.Add(new SettingEntry { Key = key, Value = json });
@@ -101,7 +101,7 @@ public sealed class WebhookService(
     {
         await using var db = await factory.CreateDbContextAsync();
         var key = $"{SettingPrefix}{id}";
-        var existing = await db.Settings.FindAsync(key);
+        var existing = await db.Settings.FirstOrDefaultAsync(s => s.Key == key);
         if (existing is not null)
         {
             db.Settings.Remove(existing);

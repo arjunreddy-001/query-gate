@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DbAccessManager.Services;
 
-public sealed record Actor(string UserId, string UserName, string? Ip, string? UserAgent);
+public sealed record Actor(string UserId, string UserName, string? Ip, string? UserAgent, Guid? TenantId = null);
 
 public sealed class ClientInfo
 {
@@ -126,7 +126,7 @@ public sealed class SettingsService(IDbContextFactory<ApplicationDbContext> fact
     public async Task SetRawAsync(string key, string value)
     {
         await using var db = await factory.CreateDbContextAsync();
-        var existing = await db.Settings.FindAsync(key);
+        var existing = await db.Settings.FirstOrDefaultAsync(s => s.Key == key);
         if (existing is null) db.Settings.Add(new SettingEntry { Key = key, Value = value });
         else existing.Value = value;
         await db.SaveChangesAsync();

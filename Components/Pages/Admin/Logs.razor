@@ -64,9 +64,13 @@
         try
         {
             await using var db = await DbFactory.CreateDbContextAsync();
-            var q = db.AppLogs.AsNoTracking().AsQueryable();
+            var q = db.AppLogs.IgnoreQueryFilters().AsNoTracking().AsQueryable();
+            if (db.CurrentTenantId.HasValue && db.CurrentTenantId.Value != Guid.Empty && db.Tenant?.IsPlatformAdmin != true)
+            {
+                q = q.Where(l => l.TenantId == db.CurrentTenantId.Value || l.TenantId == Guid.Empty);
+            }
             if (level != "") q = q.Where(l => l.Level == level);
-            if (!string.IsNullOrWhiteSpace(search)) q = q.Where(l => l.Message.Contains(search) || l.CorrelationId == search);
+            if (!string.IsNullOrWhiteSpace(search)) q = q.Where(l => l.Message.Contains(search) || (l.CorrelationId != null && l.CorrelationId == search));
             logs = await q.OrderByDescending(l => l.Id).Take(200).ToListAsync();
         }
         finally { loading = false; }
@@ -82,9 +86,13 @@
     private async Task<List<AppLog>> GetDataForExportAsync()
     {
         await using var db = await DbFactory.CreateDbContextAsync();
-        var q = db.AppLogs.AsNoTracking().AsQueryable();
+        var q = db.AppLogs.IgnoreQueryFilters().AsNoTracking().AsQueryable();
+        if (db.CurrentTenantId.HasValue && db.CurrentTenantId.Value != Guid.Empty && db.Tenant?.IsPlatformAdmin != true)
+        {
+            q = q.Where(l => l.TenantId == db.CurrentTenantId.Value || l.TenantId == Guid.Empty);
+        }
         if (level != "") q = q.Where(l => l.Level == level);
-        if (!string.IsNullOrWhiteSpace(search)) q = q.Where(l => l.Message.Contains(search) || l.CorrelationId == search);
+        if (!string.IsNullOrWhiteSpace(search)) q = q.Where(l => l.Message.Contains(search) || (l.CorrelationId != null && l.CorrelationId == search));
         return await q.OrderByDescending(l => l.Id).Take(10000).ToListAsync();
     }
 

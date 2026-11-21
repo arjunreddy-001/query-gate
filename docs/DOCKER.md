@@ -86,7 +86,7 @@ cp .env.example .env
 | `DB_CONNECTION_STRING`     | Optional custom connection string if using an external database          | (uses bundled `querygate-postgres`)   |
 | `ENCRYPTION_KEY`           | Optional static base64 32-byte key (auto-generated in volume if omitted) | (persisted in `/var/query-gate/keys`) |
 | `JWT_KEY`                  | Optional static base64 64-byte key (auto-generated in volume if omitted) | (persisted in `/var/query-gate/keys`) |
-| `BOOTSTRAP_ADMIN_EMAIL`    | Optional headless admin email (leave empty for web setup wizard)         | (empty)                               |
+| `BOOTSTRAP_ADMIN_EMAIL`    | Optional admin email / SuperAdmin promotion for `/platform/tenants`      | (empty)                               |
 | `BOOTSTRAP_ADMIN_PASSWORD` | Optional headless admin password (leave empty for web setup wizard)      | (empty)                               |
 | `APPLY_MIGRATIONS`         | Apply EF Core migrations on startup                                      | `true`                                |
 

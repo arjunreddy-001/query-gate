@@ -20,6 +20,8 @@ Specialized procedures and runbooks are located in `.github/skills/`. Whenever y
   Adding/updating Blazor pages, admin navigation, service patterns, and first-render lifecycle conventions.
 - **UI Design System** (`.github/skills/ui-design-system/SKILL.md`):
   Styling (`app.css`), compact sidebar, themes (light/dark), density, layout, Monaco editor integration, and branding.
+- **Multi-Tenancy** (`.github/skills/multi-tenancy/SKILL.md`):
+  Workspaces (/t/{slug}), custom domains, user memberships, data isolation, and platform admin.
 
 ## Quick Architecture Map (Token Saver)
 

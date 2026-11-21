@@ -304,7 +304,7 @@ public sealed class TokenService(SymmetricSecurityKey key, IDbContextFactory<App
     public SymmetricSecurityKey Key => _key;
     public const string Issuer = "DbAccessManager";
 
-    public string CreateAccessToken(ApplicationUser user, IEnumerable<string> roles)
+    public string CreateAccessToken(ApplicationUser user, IEnumerable<string> roles, string? tenantSlug = null, Guid? tenantId = null)
     {
         var claims = new List<Claim>
         {
@@ -312,6 +312,8 @@ public sealed class TokenService(SymmetricSecurityKey key, IDbContextFactory<App
             new(ClaimTypes.NameIdentifier, user.Id),
             new(ClaimTypes.Name, user.UserName ?? user.Email ?? user.Id)
         };
+        if (!string.IsNullOrEmpty(tenantSlug)) claims.Add(new Claim("tenant_slug", tenantSlug));
+        if (tenantId.HasValue && tenantId.Value != Guid.Empty) claims.Add(new Claim("tenant_id", tenantId.Value.ToString()));
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
         var token = new JwtSecurityToken(Issuer, Issuer, claims, expires: DateTime.UtcNow.Add(AccessLifetime),
             signingCredentials: new SigningCredentials(_key, SecurityAlgorithms.HmacSha256));
