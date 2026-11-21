@@ -55,6 +55,7 @@
             {
                 <div class="nav-section">Platform</div>
                 <NavLink class="nav-item" href="platform/tenants" rel="external"><Icon Name="grid" /><span class="lbl">Workspaces</span></NavLink>
+                <NavLink class="nav-item" href="select-tenant" rel="external"><Icon Name="users" /><span class="lbl">Switch workspace</span></NavLink>
             }
         </nav>
         <button class="nav-item pin-btn" type="button" data-nav-toggle title="Pin or unpin sidebar"><Icon Name="panel" /><span class="lbl">Pin sidebar</span></button>
@@ -67,17 +68,17 @@
             @if (!string.IsNullOrEmpty(currentTenantName))
             {
                 <details class="rel" style="margin-left:8px">
-                    <summary style="list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:8px;padding:6px 12px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:8px;font-size:13px;font-weight:600;color:var(--text-primary)">
+                    <summary style="list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:8px;padding:6px 12px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:8px;font-size:13px;font-weight:600;color:var(--text-primary);user-select:none" title="Current workspace (click to switch)">
                         <span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;background:rgba(99,102,241,0.15);color:#818cf8;border-radius:4px;font-size:11px"><Icon Name="@(currentTenantSlug == "platform" ? "grid" : "db")" /></span>
                         <span>@currentTenantName</span>
                         @if (userTenants.Count > 1 || isSuperAdmin)
                         {
-                            <span style="font-size:10px;opacity:0.6;margin-left:2px">&#9662;</span>
+                            <span style="font-size:11px;opacity:0.7;margin-left:2px">&#9662;</span>
                         }
                     </summary>
                     @if (userTenants.Count > 1 || isSuperAdmin)
                     {
-                        <div class="menu" style="min-width:220px;left:0">
+                        <div class="menu" style="min-width:240px;left:0">
                             <div style="padding:6px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">Switch Workspace</div>
                             @foreach (var t in userTenants)
                             {
@@ -100,6 +101,10 @@
                                     }
                                 </a>
                             }
+                            <div style="border-top:1px solid var(--border-color);margin:4px 0"></div>
+                            <a href="/select-tenant" rel="external" style="display:flex;align-items:center;gap:8px;padding:8px 12px;text-decoration:none;color:var(--text-muted);font-size:12px">
+                                <Icon Name="users" />Workspace Hub
+                            </a>
                         </div>
                     }
                 </details>
@@ -120,7 +125,7 @@
                     {
                         <a href="/platform/tenants" rel="external"><Icon Name="grid" />Platform admin</a>
                     }
-                    @if (userTenants.Count > 1)
+                    @if (userTenants.Count > 1 || isSuperAdmin)
                     {
                         <a href="/select-tenant" rel="external"><Icon Name="users" />Switch workspace</a>
                     }
@@ -198,6 +203,12 @@
 
         currentTenantName = TenantContext.IsResolved ? TenantContext.Name : (TenantContext.IsPlatformAdmin ? "Platform Administration" : null);
         currentTenantSlug = TenantContext.IsResolved ? TenantContext.Slug : (TenantContext.IsPlatformAdmin ? "platform" : null);
+
+        if (string.IsNullOrEmpty(currentTenantName) && TenantContextAccessor.FallbackDefaultTenant is not null)
+        {
+            currentTenantName = TenantContextAccessor.FallbackDefaultTenant.Name;
+            currentTenantSlug = TenantContextAccessor.FallbackDefaultTenant.Slug;
+        }
 
         if (userId is not null)
         {

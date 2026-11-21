@@ -7,6 +7,8 @@
 @inject AuthenticationStateProvider AuthProvider
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject NavigationManager Nav
+@inject ToastService Toast
+@inject IJSRuntime JS
 
 <PageTitle>Select Workspace - Query Gate</PageTitle>
 
@@ -39,18 +41,34 @@
         <div style="display:flex;flex-direction:column;gap:12px">
             @foreach (var ws in workspaces)
             {
-                <a href="/t/@ws.Slug/dashboard" rel="external" class="card" style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;text-decoration:none;color:inherit;transition:border-color 0.2s, transform 0.1s;border:1px solid var(--border-color);border-radius:10px" onmouseover="this.style.borderColor='var(--accent-color, #6366f1)'" onmouseout="this.style.borderColor='var(--border-color)'">
+                <div class="card" style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border:1px solid var(--border-color);border-radius:10px">
                     <div style="display:flex;align-items:center;gap:14px">
                         <div style="display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:8px;background:rgba(99,102,241,0.12);color:#818cf8;font-size:18px">
                             <Icon Name="db" />
                         </div>
                         <div>
-                            <div style="font-size:16px;font-weight:600">@ws.Name</div>
-                            <div style="font-size:12px;color:var(--text-muted)">Path: <code>/t/@ws.Slug</code> &bull; Role: <b>@ws.Role</b></div>
+                            <div style="display:flex;align-items:center;gap:8px">
+                                <span style="font-size:16px;font-weight:600">@ws.Name</span>
+                                @if (ws.Slug == defaultWorkspaceSlug)
+                                {
+                                    <span class="badge" style="font-size:11px;padding:2px 8px;border-radius:12px;background:rgba(16,185,129,0.15);color:#10b981;font-weight:600">
+                                        &#10003; Default
+                                    </span>
+                                }
+                            </div>
+                            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Path: <code>/t/@ws.Slug</code> &bull; Role: <b>@ws.Role</b></div>
                         </div>
                     </div>
-                    <span class="btn btn-sm btn-primary" style="pointer-events:none">Launch &rarr;</span>
-                </a>
+                    <div style="display:inline-flex;align-items:center;gap:8px">
+                        @if (ws.Slug != defaultWorkspaceSlug)
+                        {
+                            <button type="button" class="btn btn-sm btn-secondary" @onclick="() => SetAsDefaultAsync(ws.Slug, ws.Name)" title="Set as your default workspace on sign-in">
+                                Set default
+                            </button>
+                        }
+                        <a href="/t/@ws.Slug/dashboard" rel="external" class="btn btn-sm btn-primary">Launch &rarr;</a>
+                    </div>
+                </div>
             }
 
             @if (isSuperAdmin)
@@ -85,6 +103,8 @@
 
     private bool loading = true;
     private bool isSuperAdmin = false;
+    private string? userId;
+    private string defaultWorkspaceSlug = "default";
     private List<WorkspaceItem> workspaces = [];
 
     protected override async Task OnInitializedAsync()
@@ -97,36 +117,102 @@
             return;
         }
 
-        var userId = user.FindFirstValue(ClaimTypes.NameIdentifier);
+        userId = user.FindFirstValue(ClaimTypes.NameIdentifier);
         isSuperAdmin = user.IsInRole(Roles.SuperAdmin);
 
         if (userId is not null)
         {
             await using var db = await DbFactory.CreateDbContextAsync();
-            var memberships = await db.UserTenantMemberships
-                .IgnoreQueryFilters()
-                .Where(m => m.UserId == userId)
-                .ToListAsync();
+            var claim = await db.UserClaims
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.UserId == userId && c.ClaimType == "preferred_tenant_slug");
+            defaultWorkspaceSlug = claim?.ClaimValue ?? "default";
 
-            var tenantIds = memberships.Select(m => m.TenantId).ToList();
-            var tenants = await db.Tenants
-                .IgnoreQueryFilters()
-                .Where(t => tenantIds.Contains(t.Id) && t.IsActive)
-                .ToDictionaryAsync(t => t.Id, t => t);
+            if (isSuperAdmin)
+            {
+                var allTenants = await db.Tenants
+                    .IgnoreQueryFilters()
+                    .Where(t => t.IsActive)
+                    .OrderBy(t => t.Name)
+                    .ToListAsync();
 
-            workspaces = memberships
-                .Where(m => tenants.ContainsKey(m.TenantId))
-                .Select(m => new WorkspaceItem
+                var memberships = await db.UserTenantMemberships
+                    .IgnoreQueryFilters()
+                    .Where(m => m.UserId == userId)
+                    .ToDictionaryAsync(m => m.TenantId, m => m.Role);
+
+                workspaces = allTenants.Select(t => new WorkspaceItem
                 {
-                    Id = m.TenantId,
-                    Name = tenants[m.TenantId].Name,
-                    Slug = tenants[m.TenantId].Slug,
-                    Role = m.Role
-                })
-                .OrderBy(w => w.Name)
-                .ToList();
+                    Id = t.Id,
+                    Name = t.Name,
+                    Slug = t.Slug,
+                    Role = memberships.GetValueOrDefault(t.Id, "SuperAdmin")
+                }).ToList();
+            }
+            else
+            {
+                var memberships = await db.UserTenantMemberships
+                    .IgnoreQueryFilters()
+                    .Where(m => m.UserId == userId)
+                    .ToListAsync();
+
+                var tenantIds = memberships.Select(m => m.TenantId).ToList();
+                var tenants = await db.Tenants
+                    .IgnoreQueryFilters()
+                    .Where(t => tenantIds.Contains(t.Id) && t.IsActive)
+                    .ToDictionaryAsync(t => t.Id, t => t);
+
+                workspaces = memberships
+                    .Where(m => tenants.ContainsKey(m.TenantId))
+                    .Select(m => new WorkspaceItem
+                    {
+                        Id = m.TenantId,
+                        Name = tenants[m.TenantId].Name,
+                        Slug = tenants[m.TenantId].Slug,
+                        Role = m.Role
+                    })
+                    .OrderBy(w => w.Name)
+                    .ToList();
+            }
         }
 
         loading = false;
+    }
+
+    private async Task SetAsDefaultAsync(string slug, string name)
+    {
+        if (userId is null) return;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var claim = await db.UserClaims.FirstOrDefaultAsync(c => c.UserId == userId && c.ClaimType == "preferred_tenant_slug");
+            if (claim is null)
+            {
+                db.UserClaims.Add(new Microsoft.AspNetCore.Identity.IdentityUserClaim<string>
+                {
+                    UserId = userId,
+                    ClaimType = "preferred_tenant_slug",
+                    ClaimValue = slug
+                });
+            }
+            else
+            {
+                claim.ClaimValue = slug;
+            }
+            await db.SaveChangesAsync();
+
+            try
+            {
+                await JS.InvokeVoidAsync("eval", $"document.cookie = 'QueryGate_DefaultWorkspace={slug}; path=/; max-age=31536000; SameSite=Lax'");
+            }
+            catch { }
+
+            defaultWorkspaceSlug = slug;
+            Toast.Show($"'{name}' is now your default workspace.");
+        }
+        catch (Exception ex)
+        {
+            Toast.Show($"Failed to set default workspace: {ex.Message}", isError: true);
+        }
     }
 }

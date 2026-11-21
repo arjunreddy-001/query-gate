@@ -22,7 +22,12 @@ public sealed class TenantResolutionMiddleware(
              path.StartsWithSegments("/favicon.svg") ||
              path.Value?.EndsWith(".css") == true ||
              path.Value?.EndsWith(".js") == true ||
-             path.Value?.EndsWith(".map") == true))
+             path.Value?.EndsWith(".map") == true ||
+             path.Value?.EndsWith(".svg") == true ||
+             path.Value?.EndsWith(".png") == true ||
+             path.Value?.EndsWith(".ico") == true ||
+             path.Value?.EndsWith(".woff") == true ||
+             path.Value?.EndsWith(".woff2") == true))
         {
             await next(context);
             return;
@@ -185,34 +190,53 @@ public sealed class TenantResolutionMiddleware(
             }
         }
 
-        // 5. Single-Tenant Backward Compatibility Fallback
-        // If there is only one active tenant, use it automatically for app routes that are not public landing pages
+        // 5. Default Workspace Fallback for un-prefixed app routes
         if (!tenantContext.IsResolved &&
             !tenantContext.IsPlatformAdmin &&
             !path.StartsWithSegments("/platform") &&
             !path.StartsWithSegments("/select-tenant") &&
+            !path.StartsWithSegments("/Account") &&
+            !path.StartsWithSegments("/api") &&
             !path.StartsWithSegments("/_blazor") &&
             path.Value != "/" &&
+            path.Value != "/not-found" &&
             path.Value != "/documentation")
         {
-            if (!tenantCache.TryGetSingleActive(out var isSingle, out var singleTenant))
+            var targetSlug = context.User.FindFirst("preferred_tenant_slug")?.Value
+                ?? context.Request.Cookies["QueryGate_DefaultWorkspace"]
+                ?? "default";
+
+            if (!tenantCache.TryGetBySlug(targetSlug, out var targetTenant))
             {
                 await using var db = await dbFactory.CreateDbContextAsync();
-                var activeTenants = await db.Tenants
+                var tenant = await db.Tenants
                     .IgnoreQueryFilters()
                     .AsNoTracking()
-                    .Where(t => t.IsActive)
-                    .Take(2)
-                    .ToListAsync();
+                    .FirstOrDefaultAsync(t => t.Slug.ToLower() == targetSlug.ToLower() && t.IsActive);
 
-                isSingle = activeTenants.Count == 1;
-                singleTenant = isSingle ? new CachedTenant(activeTenants[0].Id, activeTenants[0].Slug, activeTenants[0].Name, true) : null;
-                tenantCache.SetSingleActive(isSingle, singleTenant);
+                targetTenant = tenant is not null ? new CachedTenant(tenant.Id, tenant.Slug, tenant.Name, tenant.IsActive) : null;
+                tenantCache.SetBySlug(targetSlug, targetTenant);
             }
 
-            if (isSingle && singleTenant is not null)
+            if (targetTenant is null && targetSlug != "default")
             {
-                tenantContext.SetTenant(singleTenant.Id, singleTenant.Slug, singleTenant.Name);
+                if (!tenantCache.TryGetBySlug("default", out targetTenant))
+                {
+                    await using var db = await dbFactory.CreateDbContextAsync();
+                    var tenant = await db.Tenants
+                        .IgnoreQueryFilters()
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(t => t.Slug == "default" && t.IsActive);
+
+                    targetTenant = tenant is not null ? new CachedTenant(tenant.Id, tenant.Slug, tenant.Name, tenant.IsActive) : null;
+                    tenantCache.SetBySlug("default", targetTenant);
+                }
+            }
+
+            if (targetTenant is not null)
+            {
+                context.Response.Redirect($"/t/{targetTenant.Slug}{path}");
+                return;
             }
         }
 

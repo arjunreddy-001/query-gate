@@ -512,4 +512,79 @@ public class CachingTests
         Assert.True(tenantContext.IsPlatformAdmin);
         Assert.False(tenantContext.IsResolved);
     }
+
+    [Fact]
+    public async Task TenantResolutionMiddleware_Unprefixed_RedirectsToPreferredTenant()
+    {
+        var services = new ServiceCollection();
+        var dbName = "TenantMiddlewareMultiTests_" + Guid.NewGuid();
+        services.AddDbContextFactory<ApplicationDbContext>(options => options.UseInMemoryDatabase(dbName));
+        var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<IDbContextFactory<ApplicationDbContext>>();
+
+        // Seed 2 active tenants
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.Tenants.Add(new Tenant { Name = "Default Workspace", Slug = "default", IsActive = true });
+            db.Tenants.Add(new Tenant { Name = "Tenant 2", Slug = "t2", IsActive = true });
+            await db.SaveChangesAsync();
+        }
+
+        var cache = new TenantLookupCache();
+        var middleware = new TenantResolutionMiddleware(
+            next: ctx => Task.CompletedTask,
+            dbFactory: factory,
+            tenantCache: cache,
+            logger: Microsoft.Extensions.Logging.Abstractions.NullLogger<TenantResolutionMiddleware>.Instance);
+
+        var httpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        httpContext.Request.Path = "/dashboard";
+        httpContext.User = new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity([
+                new System.Security.Claims.Claim("preferred_tenant_slug", "t2")
+            ], "TestAuth"));
+
+        var tenantContext = new TenantContext();
+        var tenantAccessor = new TenantContextAccessor();
+
+        await middleware.InvokeAsync(httpContext, tenantContext, tenantAccessor);
+
+        Assert.Equal(302, httpContext.Response.StatusCode);
+        Assert.Equal("/t/t2/dashboard", httpContext.Response.Headers.Location.ToString());
+    }
+
+    [Fact]
+    public async Task TenantResolutionMiddleware_Unprefixed_FallsBackToDefaultTenant()
+    {
+        var services = new ServiceCollection();
+        var dbName = "TenantMiddlewareDefaultTests_" + Guid.NewGuid();
+        services.AddDbContextFactory<ApplicationDbContext>(options => options.UseInMemoryDatabase(dbName));
+        var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<IDbContextFactory<ApplicationDbContext>>();
+
+        // Seed default tenant
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.Tenants.Add(new Tenant { Name = "Default Workspace", Slug = "default", IsActive = true });
+            await db.SaveChangesAsync();
+        }
+
+        var cache = new TenantLookupCache();
+        var middleware = new TenantResolutionMiddleware(
+            next: ctx => Task.CompletedTask,
+            dbFactory: factory,
+            tenantCache: cache,
+            logger: Microsoft.Extensions.Logging.Abstractions.NullLogger<TenantResolutionMiddleware>.Instance);
+
+        var httpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        httpContext.Request.Path = "/dashboard";
+
+        var tenantContext = new TenantContext();
+        var tenantAccessor = new TenantContextAccessor();
+
+        await middleware.InvokeAsync(httpContext, tenantContext, tenantAccessor);
+
+        Assert.Equal(302, httpContext.Response.StatusCode);
+        Assert.Equal("/t/default/dashboard", httpContext.Response.Headers.Location.ToString());
+    }
 }

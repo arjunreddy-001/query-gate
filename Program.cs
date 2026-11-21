@@ -208,6 +208,7 @@ app.UseHttpsRedirection();
 
 app.UseRateLimiter();
 app.UseMiddleware<TenantResolutionMiddleware>();
+app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();

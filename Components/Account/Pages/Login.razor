@@ -130,7 +130,8 @@
         if (result.Succeeded)
         {
             await Audit.TryWriteAsync(actor, "Auth", "PasskeyLogin", "Success");
-            RedirectManager.RedirectTo(string.IsNullOrEmpty(ReturnUrl) ? "dashboard" : ReturnUrl);
+            var passkeyUser = await UserManager.FindByEmailAsync(Input.Email ?? "");
+            RedirectManager.RedirectTo(await ResolveLoginTargetAsync(passkeyUser, ReturnUrl));
         }
         else if (result.IsLockedOut)
         {
@@ -160,7 +161,7 @@
         if (result.Succeeded)
         {
             await Audit.TryWriteAsync(ActorFor(Input.Email, user?.Id), "Auth", "Login", "Success");
-            RedirectManager.RedirectTo(string.IsNullOrEmpty(ReturnUrl) ? "dashboard" : ReturnUrl);
+            RedirectManager.RedirectTo(await ResolveLoginTargetAsync(user, ReturnUrl));
         }
         else if (result.RequiresTwoFactor)
         {
@@ -176,6 +177,21 @@
             await Audit.TryWriteAsync(ActorFor(Input.Email, user?.Id), "Auth", "Login", "Failed");
             errorMessage = "Invalid login attempt.";
         }
+    }
+
+    private async Task<string> ResolveLoginTargetAsync(ApplicationUser? appUser, string? returnUrl)
+    {
+        if (!string.IsNullOrEmpty(returnUrl)) return returnUrl;
+        if (appUser is not null)
+        {
+            var claims = await UserManager.GetClaimsAsync(appUser);
+            var pref = claims.FirstOrDefault(c => c.Type == "preferred_tenant_slug")?.Value;
+            if (!string.IsNullOrWhiteSpace(pref))
+            {
+                return $"/t/{pref}/dashboard";
+            }
+        }
+        return "/t/default/dashboard";
     }
 
     private sealed class InputModel
