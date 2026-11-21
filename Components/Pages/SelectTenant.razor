@@ -39,7 +39,7 @@
         <div style="display:flex;flex-direction:column;gap:12px">
             @foreach (var ws in workspaces)
             {
-                <a href="/t/@ws.Slug/dashboard" class="card" style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;text-decoration:none;color:inherit;transition:border-color 0.2s, transform 0.1s;border:1px solid var(--border-color);border-radius:10px" onmouseover="this.style.borderColor='var(--accent-color, #6366f1)'" onmouseout="this.style.borderColor='var(--border-color)'">
+                <a href="/t/@ws.Slug/dashboard" rel="external" class="card" style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;text-decoration:none;color:inherit;transition:border-color 0.2s, transform 0.1s;border:1px solid var(--border-color);border-radius:10px" onmouseover="this.style.borderColor='var(--accent-color, #6366f1)'" onmouseout="this.style.borderColor='var(--border-color)'">
                     <div style="display:flex;align-items:center;gap:14px">
                         <div style="display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:8px;background:rgba(99,102,241,0.12);color:#818cf8;font-size:18px">
                             <Icon Name="db" />
@@ -56,7 +56,7 @@
             @if (isSuperAdmin)
             {
                 <div style="margin-top:12px;border-top:1px solid var(--border-color);padding-top:16px">
-                    <a href="/platform/tenants" class="card" style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;text-decoration:none;color:inherit;border:1px dashed rgba(99,102,241,0.5);border-radius:10px;background:rgba(99,102,241,0.04)">
+                    <a href="/platform/tenants" rel="external" class="card" style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;text-decoration:none;color:inherit;border:1px dashed rgba(99,102,241,0.5);border-radius:10px;background:rgba(99,102,241,0.04)">
                         <div style="display:flex;align-items:center;gap:14px">
                             <div style="display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:8px;background:rgba(99,102,241,0.2);color:#818cf8;font-size:18px">
                                 <Icon Name="grid" />

@@ -421,4 +421,95 @@ public class CachingTests
         // Clean up
         DataMaskingService.InvalidateCache();
     }
+
+    [Fact]
+    public async Task TenantResolutionMiddleware_TenantPrefix_RewritesPathAndPathBase_EvenForCss()
+    {
+        var services = new ServiceCollection();
+        var dbName = "TenantMiddlewareTests_" + Guid.NewGuid();
+        services.AddDbContextFactory<ApplicationDbContext>(options => options.UseInMemoryDatabase(dbName));
+        var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<IDbContextFactory<ApplicationDbContext>>();
+
+        var cache = new TenantLookupCache();
+        var tenantId = Guid.NewGuid();
+        cache.SetBySlug("default", new CachedTenant(tenantId, "default", "Default Workspace", true));
+
+        var middleware = new TenantResolutionMiddleware(
+            next: ctx => Task.CompletedTask,
+            dbFactory: factory,
+            tenantCache: cache,
+            logger: Microsoft.Extensions.Logging.Abstractions.NullLogger<TenantResolutionMiddleware>.Instance);
+
+        var httpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        httpContext.Request.Path = "/t/default/app.css";
+
+        var tenantContext = new TenantContext();
+        var tenantAccessor = new TenantContextAccessor();
+
+        await middleware.InvokeAsync(httpContext, tenantContext, tenantAccessor);
+
+        Assert.Equal("/t/default", httpContext.Request.PathBase.Value);
+        Assert.Equal("/app.css", httpContext.Request.Path.Value);
+        Assert.True(tenantContext.IsResolved);
+        Assert.Equal(tenantId, tenantContext.TenantId);
+    }
+
+    [Fact]
+    public async Task TenantResolutionMiddleware_RootCss_SkipsWithoutChangingPath()
+    {
+        var services = new ServiceCollection();
+        var dbName = "TenantMiddlewareTests_" + Guid.NewGuid();
+        services.AddDbContextFactory<ApplicationDbContext>(options => options.UseInMemoryDatabase(dbName));
+        var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<IDbContextFactory<ApplicationDbContext>>();
+
+        var cache = new TenantLookupCache();
+        var middleware = new TenantResolutionMiddleware(
+            next: ctx => Task.CompletedTask,
+            dbFactory: factory,
+            tenantCache: cache,
+            logger: Microsoft.Extensions.Logging.Abstractions.NullLogger<TenantResolutionMiddleware>.Instance);
+
+        var httpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        httpContext.Request.Path = "/app.css";
+
+        var tenantContext = new TenantContext();
+        var tenantAccessor = new TenantContextAccessor();
+
+        await middleware.InvokeAsync(httpContext, tenantContext, tenantAccessor);
+
+        Assert.Equal("", httpContext.Request.PathBase.Value ?? "");
+        Assert.Equal("/app.css", httpContext.Request.Path.Value);
+        Assert.False(tenantContext.IsResolved);
+    }
+
+    [Fact]
+    public async Task TenantResolutionMiddleware_BlazorSignalR_ResolvesFromPlatformReferer()
+    {
+        var services = new ServiceCollection();
+        var dbName = "TenantMiddlewareTests_" + Guid.NewGuid();
+        services.AddDbContextFactory<ApplicationDbContext>(options => options.UseInMemoryDatabase(dbName));
+        var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<IDbContextFactory<ApplicationDbContext>>();
+
+        var cache = new TenantLookupCache();
+        var middleware = new TenantResolutionMiddleware(
+            next: ctx => Task.CompletedTask,
+            dbFactory: factory,
+            tenantCache: cache,
+            logger: Microsoft.Extensions.Logging.Abstractions.NullLogger<TenantResolutionMiddleware>.Instance);
+
+        var httpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        httpContext.Request.Path = "/_blazor";
+        httpContext.Request.Headers.Referer = "http://localhost:5175/platform/tenants";
+
+        var tenantContext = new TenantContext();
+        var tenantAccessor = new TenantContextAccessor();
+
+        await middleware.InvokeAsync(httpContext, tenantContext, tenantAccessor);
+
+        Assert.True(tenantContext.IsPlatformAdmin);
+        Assert.False(tenantContext.IsResolved);
+    }
 }

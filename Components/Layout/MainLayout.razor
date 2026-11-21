@@ -14,20 +14,17 @@
 @inject IJSRuntime JS
 
 <div class="shell" @onkeydown="HandleNavKey">
-    @if (mobileNavOpen)
-    {
-        <button class="mobile-nav-backdrop" type="button" aria-label="Close navigation" @onclick="CloseMobileNav"></button>
-    }
+    <button class="mobile-nav-backdrop @(mobileNavOpen ? "mobile-open" : "")" type="button" aria-label="Close navigation" data-mobile-nav-close @onclick="CloseMobileNav"></button>
     <aside id="app-navigation" class="sidebar @(mobileNavOpen ? "mobile-open" : "")">
         <div class="sidebar-brand">
-        <a class="brand" href="/" @onclick="CloseMobileNav" style="text-decoration:none">
+        <a class="brand" href="/" rel="external" @onclick="CloseMobileNav" style="text-decoration:none">
             <span class="brand-mark"><Icon Name="db" /></span>
             <span class="lbl">Query Gate</span>
         </a>
-        <button class="mobile-nav-close icon-btn" type="button" aria-label="Close navigation" @onclick="CloseMobileNav"><Icon Name="x" /></button>
+        <button class="mobile-nav-close icon-btn" type="button" aria-label="Close navigation" data-mobile-nav-close @onclick="CloseMobileNav"><Icon Name="x" /></button>
         </div>
 
-        <nav aria-label="Application navigation" @onclick="CloseMobileNav">
+        <nav aria-label="Application navigation" data-mobile-nav-close @onclick="CloseMobileNav">
             <div class="nav-section">Workspace</div>
             <NavLink class="nav-item" href="dashboard" Match="NavLinkMatch.All"><Icon Name="home" /><span class="lbl">Dashboard</span></NavLink>
             <NavLink class="nav-item" href="query"><Icon Name="terminal" /><span class="lbl">Query workspace</span></NavLink>
@@ -57,7 +54,7 @@
             @if (isSuperAdmin)
             {
                 <div class="nav-section">Platform</div>
-                <NavLink class="nav-item" href="platform/tenants"><Icon Name="grid" /><span class="lbl">Workspaces</span></NavLink>
+                <NavLink class="nav-item" href="platform/tenants" rel="external"><Icon Name="grid" /><span class="lbl">Workspaces</span></NavLink>
             }
         </nav>
         <button class="nav-item pin-btn" type="button" data-nav-toggle title="Pin or unpin sidebar"><Icon Name="panel" /><span class="lbl">Pin sidebar</span></button>
@@ -65,13 +62,13 @@
 
     <div class="main">
         <header class="topbar">
-            <button class="mobile-nav-toggle icon-btn" type="button" aria-label="Open navigation" aria-controls="app-navigation" aria-expanded="@(mobileNavOpen ? "true" : "false")" @onclick="() => mobileNavOpen = !mobileNavOpen"><Icon Name="panel" /></button>
+            <button class="mobile-nav-toggle icon-btn" type="button" aria-label="Open navigation" aria-controls="app-navigation" aria-expanded="@(mobileNavOpen ? "true" : "false")" data-mobile-nav-toggle @onclick="() => mobileNavOpen = !mobileNavOpen"><Icon Name="panel" /></button>
 
             @if (!string.IsNullOrEmpty(currentTenantName))
             {
                 <details class="rel" style="margin-left:8px">
                     <summary style="list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:8px;padding:6px 12px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:8px;font-size:13px;font-weight:600;color:var(--text-primary)">
-                        <span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;background:rgba(99,102,241,0.15);color:#818cf8;border-radius:4px;font-size:11px"><Icon Name="db" /></span>
+                        <span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;background:rgba(99,102,241,0.15);color:#818cf8;border-radius:4px;font-size:11px"><Icon Name="@(currentTenantSlug == "platform" ? "grid" : "db")" /></span>
                         <span>@currentTenantName</span>
                         @if (userTenants.Count > 1 || isSuperAdmin)
                         {
@@ -84,7 +81,7 @@
                             <div style="padding:6px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">Switch Workspace</div>
                             @foreach (var t in userTenants)
                             {
-                                <a href="/t/@t.Slug/dashboard" style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;text-decoration:none;color:inherit;background:@(t.Slug == currentTenantSlug ? "rgba(99,102,241,0.08)" : "transparent")">
+                                <a href="/t/@t.Slug/dashboard" rel="external" style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;text-decoration:none;color:inherit;background:@(t.Slug == currentTenantSlug ? "rgba(99,102,241,0.08)" : "transparent")">
                                     <span>@t.Name</span>
                                     @if (t.Slug == currentTenantSlug)
                                     {
@@ -95,8 +92,12 @@
                             @if (isSuperAdmin)
                             {
                                 <div style="border-top:1px solid var(--border-color);margin:4px 0"></div>
-                                <a href="/platform/tenants" style="display:flex;align-items:center;gap:8px;padding:8px 12px;text-decoration:none;color:#818cf8">
-                                    <Icon Name="grid" />Platform Admin
+                                <a href="/platform/tenants" rel="external" style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;text-decoration:none;color:#818cf8;background:@(currentTenantSlug == "platform" ? "rgba(99,102,241,0.08)" : "transparent")">
+                                    <span style="display:inline-flex;align-items:center;gap:8px"><Icon Name="grid" />Platform Admin</span>
+                                    @if (currentTenantSlug == "platform")
+                                    {
+                                        <span style="color:#10b981;font-size:12px">&#10003;</span>
+                                    }
                                 </a>
                             }
                         </div>
@@ -117,11 +118,11 @@
                 <div class="menu">
                     @if (isSuperAdmin)
                     {
-                        <a href="/platform/tenants"><Icon Name="grid" />Platform admin</a>
+                        <a href="/platform/tenants" rel="external"><Icon Name="grid" />Platform admin</a>
                     }
                     @if (userTenants.Count > 1)
                     {
-                        <a href="/select-tenant"><Icon Name="users" />Switch workspace</a>
+                        <a href="/select-tenant" rel="external"><Icon Name="users" />Switch workspace</a>
                     }
                     <a href="Account/Manage"><Icon Name="user" />Account settings</a>
                     <a href="Account/Manage/ChangePassword"><Icon Name="lock" />Change password</a>
@@ -195,16 +196,23 @@
         initials = string.Concat(displayName.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpperInvariant(p[0])));
         if (initials.Length == 0) initials = "?";
 
-        currentTenantName = TenantContext.IsResolved ? TenantContext.Name : null;
-        currentTenantSlug = TenantContext.IsResolved ? TenantContext.Slug : null;
+        currentTenantName = TenantContext.IsResolved ? TenantContext.Name : (TenantContext.IsPlatformAdmin ? "Platform Administration" : null);
+        currentTenantSlug = TenantContext.IsResolved ? TenantContext.Slug : (TenantContext.IsPlatformAdmin ? "platform" : null);
 
         if (userId is not null)
         {
-            var memberships = await db.UserTenantMemberships.IgnoreQueryFilters().Where(m => m.UserId == userId).ToListAsync();
-            var tenantIds = memberships.Select(m => m.TenantId).ToList();
-            if (tenantIds.Count > 0)
+            if (isSuperAdmin)
             {
-                userTenants = await db.Tenants.IgnoreQueryFilters().Where(t => tenantIds.Contains(t.Id) && t.IsActive).OrderBy(t => t.Name).ToListAsync();
+                userTenants = await db.Tenants.IgnoreQueryFilters().Where(t => t.IsActive).OrderBy(t => t.Name).ToListAsync();
+            }
+            else
+            {
+                var memberships = await db.UserTenantMemberships.IgnoreQueryFilters().Where(m => m.UserId == userId).ToListAsync();
+                var tenantIds = memberships.Select(m => m.TenantId).ToList();
+                if (tenantIds.Count > 0)
+                {
+                    userTenants = await db.Tenants.IgnoreQueryFilters().Where(t => tenantIds.Contains(t.Id) && t.IsActive).OrderBy(t => t.Name).ToListAsync();
+                }
             }
         }
 

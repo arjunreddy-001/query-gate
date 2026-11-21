@@ -14,17 +14,67 @@ public sealed class TenantResolutionMiddleware(
         tenantAccessor.Current = tenantContext;
         var path = context.Request.Path;
 
-        // Skip static asset requests and health checks
-        if (path.StartsWithSegments("/_framework") ||
-            path.StartsWithSegments("/_content") ||
-            path.StartsWithSegments("/health") ||
-            path.StartsWithSegments("/favicon.svg") ||
-            path.Value?.EndsWith(".css") == true ||
-            path.Value?.EndsWith(".js") == true ||
-            path.Value?.EndsWith(".map") == true)
+        // Skip static asset requests and health checks for root paths
+        if (!path.StartsWithSegments("/t") &&
+            (path.StartsWithSegments("/_framework") ||
+             path.StartsWithSegments("/_content") ||
+             path.StartsWithSegments("/health") ||
+             path.StartsWithSegments("/favicon.svg") ||
+             path.Value?.EndsWith(".css") == true ||
+             path.Value?.EndsWith(".js") == true ||
+             path.Value?.EndsWith(".map") == true))
         {
             await next(context);
             return;
+        }
+
+        // Check if Blazor SignalR connection at root /_blazor - resolve context from referer
+        if (path.StartsWithSegments("/_blazor"))
+        {
+            var referer = context.Request.Headers.Referer.ToString();
+            if (!string.IsNullOrEmpty(referer) && Uri.TryCreate(referer, UriKind.Absolute, out var refUri))
+            {
+                var refPath = refUri.AbsolutePath;
+                if (refPath.StartsWith("/platform", StringComparison.OrdinalIgnoreCase))
+                {
+                    tenantContext.SetPlatformAdmin();
+                    await next(context);
+                    return;
+                }
+                if (refPath.StartsWith("/t/", StringComparison.OrdinalIgnoreCase))
+                {
+                    var segs = refPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                    if (segs.Length >= 2)
+                    {
+                        var refSlug = segs[1];
+                        if (!tenantCache.TryGetBySlug(refSlug, out var refTenant))
+                        {
+                            await using var db = await dbFactory.CreateDbContextAsync();
+                            var tenant = await db.Tenants
+                                .IgnoreQueryFilters()
+                                .AsNoTracking()
+                                .FirstOrDefaultAsync(t => t.Slug.ToLower() == refSlug.ToLower() && t.IsActive);
+
+                            refTenant = tenant is not null ? new CachedTenant(tenant.Id, tenant.Slug, tenant.Name, tenant.IsActive) : null;
+                            tenantCache.SetBySlug(refSlug, refTenant);
+                        }
+
+                        if (refTenant is not null)
+                        {
+                            tenantContext.SetTenant(refTenant.Id, refTenant.Slug, refTenant.Name);
+                            await next(context);
+                            return;
+                        }
+                    }
+                }
+                if (refPath.Equals("/select-tenant", StringComparison.OrdinalIgnoreCase) ||
+                    refPath.Equals("/", StringComparison.OrdinalIgnoreCase) ||
+                    refPath.Equals("/documentation", StringComparison.OrdinalIgnoreCase))
+                {
+                    await next(context);
+                    return;
+                }
+            }
         }
 
         // 1. Check if platform administration area
@@ -94,7 +144,12 @@ public sealed class TenantResolutionMiddleware(
                     // Adjust PathBase and Path for downstream routing
                     context.Request.PathBase = context.Request.PathBase.Add($"/t/{slug}");
                     var remaining = afterT.Value[(slug.Length + 1)..];
-                    context.Request.Path = string.IsNullOrEmpty(remaining) ? "/" : remaining;
+                    if (string.IsNullOrEmpty(remaining) || remaining == "/")
+                    {
+                        context.Response.Redirect($"{context.Request.PathBase}/dashboard");
+                        return;
+                    }
+                    context.Request.Path = remaining;
 
                     await next(context);
                     return;
@@ -133,7 +188,10 @@ public sealed class TenantResolutionMiddleware(
         // 5. Single-Tenant Backward Compatibility Fallback
         // If there is only one active tenant, use it automatically for app routes that are not public landing pages
         if (!tenantContext.IsResolved &&
+            !tenantContext.IsPlatformAdmin &&
+            !path.StartsWithSegments("/platform") &&
             !path.StartsWithSegments("/select-tenant") &&
+            !path.StartsWithSegments("/_blazor") &&
             path.Value != "/" &&
             path.Value != "/documentation")
         {

@@ -6,21 +6,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="@(string.IsNullOrEmpty(HttpContext?.Request?.PathBase.Value) ? "/" : HttpContext.Request.PathBase.Value + "/")" />
     <ResourcePreloader />
-    <script src="@Assets["js/theme.js"]"></script>
-    <link rel="stylesheet" href="@Assets["app.css"]" />
-    <link rel="stylesheet" href="@Assets["DbAccessManager.styles.css"]" />
+    <script src="/@Assets["js/theme.js"]"></script>
+    <link rel="stylesheet" href="/@Assets["app.css"]" />
+    <link rel="stylesheet" href="/@Assets["DbAccessManager.styles.css"]" />
     <ImportMap />
-    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <HeadOutlet @rendermode="PageRenderMode" />
 </head>
 
 <body>
     <Routes @rendermode="PageRenderMode" />
     <ReconnectModal />
-    <script src="@Assets["js/sql-completion.js"]"></script>
-    <script src="@Assets["js/app.js"]"></script>
-    <script src="@Assets["_framework/blazor.web.js"]"></script>
-    <script src="@Assets["Components/Account/Shared/PasskeySubmit.razor.js"]" type="module"></script>
+    <script src="/@Assets["js/sql-completion.js"]"></script>
+    <script src="/@Assets["js/app.js"]"></script>
+    <script src="/@Assets["_framework/blazor.web.js"]"></script>
+    <script src="/@Assets["Components/Account/Shared/PasskeySubmit.razor.js"]" type="module"></script>
 </body>
 
 </html>

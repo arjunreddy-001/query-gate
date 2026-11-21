@@ -2971,16 +2971,22 @@ kbd {
     box-shadow: var(--shadow-lg);
   }
   .sidebar.mobile-open,
+  html[data-mobile-nav="open"] .sidebar,
   html[data-nav="compact"] .sidebar.mobile-open:hover,
-  html[data-nav="compact"] .sidebar.mobile-open:has(:focus-visible) { display: flex; }
-  html[data-nav="compact"] .sidebar.mobile-open:not(:hover):not(:has(:focus-visible)) .lbl { display: inline; }
-  html[data-nav="compact"] .sidebar.mobile-open:not(:hover):not(:has(:focus-visible)) .nav-section {
+  html[data-nav="compact"] html[data-mobile-nav="open"] .sidebar:hover,
+  html[data-nav="compact"] .sidebar.mobile-open:has(:focus-visible),
+  html[data-nav="compact"] html[data-mobile-nav="open"] .sidebar:has(:focus-visible) { display: flex; }
+  html[data-nav="compact"] .sidebar.mobile-open:not(:hover):not(:has(:focus-visible)) .lbl,
+  html[data-nav="compact"] html[data-mobile-nav="open"] .sidebar:not(:hover):not(:has(:focus-visible)) .lbl { display: inline; }
+  html[data-nav="compact"] .sidebar.mobile-open:not(:hover):not(:has(:focus-visible)) .nav-section,
+  html[data-nav="compact"] html[data-mobile-nav="open"] .sidebar:not(:hover):not(:has(:focus-visible)) .nav-section {
     font-size: .68rem;
     padding: 12px 12px 4px;
     margin-top: 0;
     border: 0;
   }
-  html[data-nav="compact"] .sidebar.mobile-open:not(:hover):not(:has(:focus-visible)) .nav-item .count {
+  html[data-nav="compact"] .sidebar.mobile-open:not(:hover):not(:has(:focus-visible)) .nav-item .count,
+  html[data-nav="compact"] html[data-mobile-nav="open"] .sidebar:not(:hover):not(:has(:focus-visible)) .nav-item .count {
     position: static;
     font-size: inherit;
     min-width: 0;
@@ -2989,7 +2995,9 @@ kbd {
     line-height: 18px;
   }
   .mobile-nav-toggle, .mobile-nav-close { display: grid; }
-  .mobile-nav-backdrop { display: block; position: fixed; inset: 0; z-index: 35; border: 0; background: rgba(0, 0, 0, .55); }
+  .mobile-nav-backdrop { display: none; }
+  .mobile-nav-backdrop.mobile-open,
+  html[data-mobile-nav="open"] .mobile-nav-backdrop { display: block; position: fixed; inset: 0; z-index: 35; border: 0; background: rgba(0, 0, 0, .55); }
   .ws, .ws.side-auto, .ws.side-open { position: relative; grid-template-columns: minmax(0, 1fr); height: calc(100dvh - 58px); }
   .ws.side-auto .ws-side, .ws.side-hidden .ws-side, .ws-side-split { display: none; }
   .ws.side-open .ws-side {

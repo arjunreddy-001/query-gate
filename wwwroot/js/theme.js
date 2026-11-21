@@ -19,8 +19,51 @@
     // Enhanced navigation to static pages can reset <html> attributes; re-apply the saved state.
     new MutationObserver(apply).observe(root, { attributes: true, attributeFilter: ['data-theme', 'data-nav'] });
 
+    function closeMobileNav() {
+        root.removeAttribute('data-mobile-nav');
+        var sidebar = document.getElementById('app-navigation');
+        var backdrop = document.querySelector('.mobile-nav-backdrop');
+        var toggles = document.querySelectorAll('[data-mobile-nav-toggle]');
+        if (sidebar) sidebar.classList.remove('mobile-open');
+        if (backdrop) backdrop.classList.remove('mobile-open');
+        toggles.forEach(function (btn) { btn.setAttribute('aria-expanded', 'false'); });
+    }
+
+    function toggleMobileNav() {
+        var isOpen = root.getAttribute('data-mobile-nav') === 'open';
+        var next = !isOpen;
+        if (next) {
+            root.setAttribute('data-mobile-nav', 'open');
+        } else {
+            root.removeAttribute('data-mobile-nav');
+        }
+        var sidebar = document.getElementById('app-navigation');
+        var backdrop = document.querySelector('.mobile-nav-backdrop');
+        var toggles = document.querySelectorAll('[data-mobile-nav-toggle]');
+        if (sidebar) sidebar.classList.toggle('mobile-open', next);
+        if (backdrop) backdrop.classList.toggle('mobile-open', next);
+        toggles.forEach(function (btn) { btn.setAttribute('aria-expanded', next ? 'true' : 'false'); });
+    }
+
     // Inline handlers are blocked by the CSP, so clicks are delegated from the document.
     document.addEventListener('click', function (e) {
+        var navToggle = e.target.closest && e.target.closest('[data-mobile-nav-toggle]');
+        if (navToggle) {
+            toggleMobileNav();
+            return;
+        }
+
+        var navClose = e.target.closest && e.target.closest('[data-mobile-nav-close],.mobile-nav-backdrop');
+        if (navClose) {
+            closeMobileNav();
+            return;
+        }
+
+        var navLink = e.target.closest && e.target.closest('#app-navigation nav a');
+        if (navLink) {
+            closeMobileNav();
+        }
+
         var t = e.target.closest && e.target.closest('[data-theme-toggle],[data-nav-toggle]');
         if (!t) return;
         if (t.hasAttribute('data-theme-toggle')) {
@@ -34,6 +77,15 @@
             if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
         }
     });
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') {
+            closeMobileNav();
+        }
+    });
+
+    document.addEventListener('enhancedload', closeMobileNav);
+    window.addEventListener('popstate', closeMobileNav);
 
     // Draggable splitter between the SQL editor and the results.
     var drag = null;
