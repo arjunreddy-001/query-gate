@@ -1,0 +1,9 @@
+@page "/admin/health"
+@inherits PageBase
+
+@code {
+    protected override void OnInitialized()
+    {
+        Nav.NavigateTo("admin/databases", replace: true);
+    }
+}

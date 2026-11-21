@@ -121,7 +121,7 @@ public class AccessConfigurationPostgresTests
 
         var collection = new ServiceCollection();
         collection.AddLogging();
-        collection.AddDbContextFactory<ApplicationDbContext>(o => o.UseNpgsql(connectionString));
+        collection.AddDbContextFactory<ApplicationDbContext>(o => o.UseNpgsql(connectionString, npgsql => npgsql.EnableRetryOnFailure()));
         collection.AddScoped(sp => sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
         collection.AddIdentityCore<ApplicationUser>(o => o.Stores.SchemaVersion = IdentitySchemaVersions.Version3)
             .AddRoles<IdentityRole>().AddEntityFrameworkStores<ApplicationDbContext>();

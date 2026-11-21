@@ -17,7 +17,7 @@ public sealed class NotificationService(
 {
     public event Action<string, int>? UnreadChanged;
 
-    public async Task NotifyAsync(string userId, string title, string message, string? link = null)
+    public async Task NotifyAsync(string userId, string title, string message, string? link = null, bool broadcastWebhook = true)
     {
         try
         {
@@ -29,8 +29,11 @@ public sealed class NotificationService(
             if (!string.IsNullOrEmpty(email)) _ = Task.Run(() => SendEmailAsync(email, title, message));
 
             // Broadcast to webhooks for significant workflow events
-            var eventType = ClassifyEvent(title);
-            _ = Task.Run(() => webhooks.BroadcastAsync(eventType, title, message, link));
+            if (broadcastWebhook)
+            {
+                var eventType = ClassifyEvent(title);
+                _ = Task.Run(() => webhooks.BroadcastAsync(eventType, title, message, link));
+            }
         }
         catch (Exception ex)
         {
@@ -46,11 +49,22 @@ public sealed class NotificationService(
                          join u in db.Users on ur.UserId equals u.Id
                          where r.Name == role && u.IsActive && ur.UserId != exceptUserId
                          select ur.UserId).ToListAsync();
-        foreach (var id in ids) await NotifyAsync(id, title, message, link);
+        var isFirst = true;
+        foreach (var id in ids)
+        {
+            await NotifyAsync(id, title, message, link, broadcastWebhook: isFirst);
+            isFirst = false;
+        }
+        if (ids.Count == 0)
+        {
+            var eventType = ClassifyEvent(title);
+            _ = Task.Run(() => webhooks.BroadcastAsync(eventType, title, message, link));
+        }
     }
 
     private static string ClassifyEvent(string title)
     {
+        if (title.Contains("online", StringComparison.OrdinalIgnoreCase) || title.Contains("offline", StringComparison.OrdinalIgnoreCase) || title.Contains("health", StringComparison.OrdinalIgnoreCase)) return "Health";
         if (title.Contains("request", StringComparison.OrdinalIgnoreCase)) return "Requests";
         if (title.Contains("executed", StringComparison.OrdinalIgnoreCase) || title.Contains("failed", StringComparison.OrdinalIgnoreCase)) return "Executions";
         return "General";
@@ -189,45 +203,50 @@ public sealed class UserAdminService(
         var roles = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
         if (!await roles.RoleExistsAsync(role)) return OpResult.Fail("Role not found.");
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        await using var transaction = await db.Database.BeginTransactionAsync();
-        
-        var existingUser = await users.FindByEmailAsync(email);
-        string? password = null;
-        ApplicationUser user;
-        if (existingUser is not null)
+        var strategy = db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
         {
-            user = existingUser;
-            var isMember = await db.UserTenantMemberships.AnyAsync(m => m.UserId == user.Id);
-            if (isMember) return OpResult.Fail("User is already a member of this workspace.");
-        }
-        else
-        {
-            password = GeneratePassword();
-            var finalDisplayName = string.IsNullOrWhiteSpace(displayName) ? email.Split('@')[0] : displayName.Trim();
-            user = new ApplicationUser
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync();
+            
+            var existingUser = await users.FindByEmailAsync(email);
+            string? password = null;
+            ApplicationUser user;
+            if (existingUser is not null)
             {
-                UserName = email, Email = email, EmailConfirmed = true, DisplayName = finalDisplayName, IsActive = true,
-                MustChangePassword = true, ExpiresAt = expiresAt, CreatedBy = actor.UserName
-            };
-            var result = await users.CreateAsync(user, password);
-            if (!result.Succeeded) return OpResult.Fail(string.Join(" ", result.Errors.Select(e => e.Description)));
-            await users.AddToRoleAsync(user, role);
-        }
-
-        if (db.CurrentTenantId.HasValue && db.CurrentTenantId.Value != Guid.Empty)
-        {
-            db.UserTenantMemberships.Add(new UserTenantMembership
+                user = existingUser;
+                var isMember = await db.UserTenantMemberships.AnyAsync(m => m.UserId == user.Id);
+                if (isMember) return OpResult.Fail("User is already a member of this workspace.");
+            }
+            else
             {
-                UserId = user.Id,
-                TenantId = db.CurrentTenantId.Value,
-                Role = role
-            });
-            await db.SaveChangesAsync();
-        }
+                password = GeneratePassword();
+                var finalDisplayName = string.IsNullOrWhiteSpace(displayName) ? email.Split('@')[0] : displayName.Trim();
+                user = new ApplicationUser
+                {
+                    UserName = email, Email = email, EmailConfirmed = true, DisplayName = finalDisplayName, IsActive = true,
+                    MustChangePassword = true, ExpiresAt = expiresAt, CreatedBy = actor.UserName
+                };
+                var result = await users.CreateAsync(user, password);
+                if (!result.Succeeded) return OpResult.Fail(string.Join(" ", result.Errors.Select(e => e.Description)));
+                await users.AddToRoleAsync(user, role);
+            }
 
-        await transaction.CommitAsync();
-        await audit.TryWriteAsync(actor, "UserAdmin", "CreateUser", "Success", $"{email} role={role}");
-        return OpResult.Success(password ?? "Existing user was added to this workspace.");
+            if (db.CurrentTenantId.HasValue && db.CurrentTenantId.Value != Guid.Empty)
+            {
+                db.UserTenantMemberships.Add(new UserTenantMembership
+                {
+                    UserId = user.Id,
+                    TenantId = db.CurrentTenantId.Value,
+                    Role = role
+                });
+                await db.SaveChangesAsync();
+            }
+
+            await transaction.CommitAsync();
+            await audit.TryWriteAsync(actor, "UserAdmin", "CreateUser", "Success", $"{email} role={role}");
+            return OpResult.Success(password ?? "Existing user was added to this workspace.");
+        });
     }
 
     public async Task<OpResult> ResetPasswordAsync(Actor actor, string userId)
@@ -281,19 +300,24 @@ public sealed class UserAdminService(
         if (user is null) return OpResult.Fail("User not found.");
         if (userId == actor.UserId && !string.Equals(role, Roles.Admin, StringComparison.OrdinalIgnoreCase)) return OpResult.Fail("You cannot remove your own Admin role.");
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        await using var transaction = await db.Database.BeginTransactionAsync();
-        var current = await users.GetRolesAsync(user);
-        var removed = await users.RemoveFromRolesAsync(user, current);
-        if (!removed.Succeeded) return OpResult.Fail(string.Join(" ", removed.Errors.Select(e => e.Description)));
-        var added = await users.AddToRoleAsync(user, role);
-        if (!added.Succeeded) return OpResult.Fail(string.Join(" ", added.Errors.Select(e => e.Description)));
-        var stamp = await users.UpdateSecurityStampAsync(user);
-        if (!stamp.Succeeded) return OpResult.Fail(string.Join(" ", stamp.Errors.Select(e => e.Description)));
-        await transaction.CommitAsync();
-        userStatusCache?.Invalidate(userId);
-        permissions?.Invalidate(userId: userId);
-        await audit.TryWriteAsync(actor, "UserAdmin", "SetRole", "Success", $"{user.Email} -> {role}");
-        return OpResult.Success();
+        var strategy = db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync();
+            var current = await users.GetRolesAsync(user);
+            var removed = await users.RemoveFromRolesAsync(user, current);
+            if (!removed.Succeeded) return OpResult.Fail(string.Join(" ", removed.Errors.Select(e => e.Description)));
+            var added = await users.AddToRoleAsync(user, role);
+            if (!added.Succeeded) return OpResult.Fail(string.Join(" ", added.Errors.Select(e => e.Description)));
+            var stamp = await users.UpdateSecurityStampAsync(user);
+            if (!stamp.Succeeded) return OpResult.Fail(string.Join(" ", stamp.Errors.Select(e => e.Description)));
+            await transaction.CommitAsync();
+            userStatusCache?.Invalidate(userId);
+            permissions?.Invalidate(userId: userId);
+            await audit.TryWriteAsync(actor, "UserAdmin", "SetRole", "Success", $"{user.Email} -> {role}");
+            return OpResult.Success();
+        });
     }
 
     public async Task<OpResult> SetExpiryAsync(Actor actor, string userId, DateTimeOffset? expiresAt, int? timeoutOverride)

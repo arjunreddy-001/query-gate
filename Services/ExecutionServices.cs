@@ -200,9 +200,11 @@ public sealed class ExecutionService(
     IDatabaseCache? databaseCache = null,
     IUserStatusCache? userStatusCache = null)
 {
-    private readonly ConcurrentDictionary<Guid, (string UserId, CancellationTokenSource Cts)> _running = new();
+    private readonly ConcurrentDictionary<Guid, (string UserId, Guid DatabaseId, CancellationTokenSource Cts)> _running = new();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _userSlots = new();
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _dbSlots = new();
+
+    public int GetInFlightQueryCount(Guid databaseId) => _running.Values.Count(r => r.DatabaseId == databaseId);
 
 
     public async Task<OpResult> AuthorizeExportAsync(Actor actor, Guid databaseId, long rows, string sql, string format = "Csv", string? databaseName = null)
@@ -462,7 +464,7 @@ public sealed class ExecutionService(
         }
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        _running[result.RunId] = (actor.UserId, cts);
+        _running[result.RunId] = (actor.UserId, database.Id, cts);
         long auditId;
         try
         {

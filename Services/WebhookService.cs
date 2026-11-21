@@ -24,7 +24,7 @@ public sealed class WebhookService(
     private const string SettingPrefix = "Webhook:";
 
     public static readonly string[] Platforms = ["Slack", "Teams", "ZohoCliq", "Discord", "Generic"];
-    public static readonly string[] EventFilters = ["All", "Requests", "Executions"];
+    public static readonly string[] EventFilters = ["All", "Requests", "Executions", "Health"];
 
     public static string PlatformLabel(string platform) => platform switch
     {
@@ -41,6 +41,7 @@ public sealed class WebhookService(
         "All" => "All notifications",
         "Requests" => "Access & script requests only",
         "Executions" => "Script executions only",
+        "Health" => "Database health alerts only",
         _ => filter
     };
 
@@ -183,7 +184,10 @@ public sealed class WebhookService(
         if (string.Equals(filter, "Executions", StringComparison.OrdinalIgnoreCase))
             return string.Equals(eventType, "Executions", StringComparison.OrdinalIgnoreCase) ||
                    eventType.Contains("Execut", StringComparison.OrdinalIgnoreCase);
-        return true;
+        if (string.Equals(filter, "Health", StringComparison.OrdinalIgnoreCase))
+            return string.Equals(eventType, "Health", StringComparison.OrdinalIgnoreCase) ||
+                   eventType.Contains("Health", StringComparison.OrdinalIgnoreCase);
+        return false;
     }
 
     public static object BuildPayload(string platform, string eventType, string title, string message, string? link)

@@ -103,7 +103,8 @@ public sealed class SettingsService(
         ["ExpiryReminderHours"] = ("24", "Hours before expiry to send reminders"),
         ["MetadataTtlMinutes"] = ("10", "Object metadata cache TTL (minutes)"),
         ["MetadataCacheEnabled"] = ("true", "Cache object metadata (object explorer and autocomplete)"),
-        ["PasswordResetLength"] = ("16", "Generated temporary password length")
+        ["PasswordResetLength"] = ("16", "Generated temporary password length"),
+        ["HealthVisibleRoles"] = ("", "Additional roles that can view the DB Health dashboard (comma-separated, e.g. Auditor,Developer)")
     };
 
     public async Task<string> GetAsync(string key)

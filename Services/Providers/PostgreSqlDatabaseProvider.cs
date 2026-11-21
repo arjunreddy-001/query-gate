@@ -40,6 +40,73 @@ public sealed class PostgreSqlDatabaseProvider : IDatabaseProvider
         }
     }
 
+    public async Task<TargetTelemetry> CollectTelemetryAsync(string connectionString, CancellationToken ct = default)
+    {
+        int? activeConn = null;
+        int? maxConn = null;
+        string? dbSize = null;
+        double? cacheHit = null;
+        int? blockedCount = null;
+
+        try
+        {
+            var builder = new NpgsqlConnectionStringBuilder(connectionString) { Timeout = 5 };
+            await using var conn = new NpgsqlConnection(builder.ConnectionString);
+            await conn.OpenAsync(ct);
+
+            // 1. Active & Max connections
+            try
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandTimeout = 5;
+                cmd.CommandText = "SELECT (SELECT count(*)::int FROM pg_stat_activity), current_setting('max_connections')::int;";
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                if (await reader.ReadAsync(ct))
+                {
+                    if (!reader.IsDBNull(0)) activeConn = reader.GetInt32(0);
+                    if (!reader.IsDBNull(1)) maxConn = reader.GetInt32(1);
+                }
+            }
+            catch { }
+
+            // 3. Database Size
+            try
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandTimeout = 5;
+                cmd.CommandText = "SELECT pg_size_pretty(pg_database_size(current_database()));";
+                var res = await cmd.ExecuteScalarAsync(ct);
+                if (res is not null && res != DBNull.Value) dbSize = res.ToString();
+            }
+            catch { }
+
+            // 4. Cache Hit Ratio
+            try
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandTimeout = 5;
+                cmd.CommandText = "SELECT ROUND(sum(blks_hit) * 100.0 / nullif(sum(blks_hit + blks_read), 0), 1)::float FROM pg_stat_database WHERE datname = current_database();";
+                var res = await cmd.ExecuteScalarAsync(ct);
+                if (res is not null && res != DBNull.Value) cacheHit = Convert.ToDouble(res);
+            }
+            catch { }
+
+            // 5. Blocked Queries Count
+            try
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandTimeout = 5;
+                cmd.CommandText = "SELECT count(*)::int FROM pg_stat_activity WHERE wait_event_type = 'Lock';";
+                var res = await cmd.ExecuteScalarAsync(ct);
+                if (res is not null && res != DBNull.Value) blockedCount = Convert.ToInt32(res);
+            }
+            catch { }
+        }
+        catch { }
+
+        return new TargetTelemetry(activeConn, maxConn, dbSize, cacheHit, blockedCount);
+    }
+
     public void RegisterMessageListener(DbConnection connection, Action<string> onMessage)
     {
         if (connection is NpgsqlConnection npgsqlConn)

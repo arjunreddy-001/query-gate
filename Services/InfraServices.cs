@@ -42,81 +42,91 @@ public sealed class DatabaseAdminService(
         if (!valid) return OpResult.Fail(error ?? "The connection string is not valid.");
 
         await using var db = await factory.CreateDbContextAsync();
-        await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
-        var env = await db.DatabaseEnvironments.FirstOrDefaultAsync(e => e.Name == environment);
-        if (env is null) return OpResult.Fail("Environment not found.");
-        environment = env.Name;
-        var trimmedName = name.Trim();
-        if (string.IsNullOrWhiteSpace(trimmedName)) return OpResult.Fail("Name is required.");
-        if (await db.ManagedDatabases.AnyAsync(d => d.Name == trimmedName && d.Environment == environment))
-            return OpResult.Fail("A database with that name and environment is already registered.");
-        var cleanInc = string.IsNullOrWhiteSpace(includedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(includedObjects));
-        var cleanExc = string.IsNullOrWhiteSpace(excludedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(excludedObjects, defaultToAll: false));
-        if (DbAccessManager.Security.ObjectScope.HasConflict(cleanInc, cleanExc, out var conflict))
-            return OpResult.Fail($"Conflict detected: '{conflict}' cannot be simultaneously included and excluded.");
-
-        var entity = new ManagedDatabase
+        var strategy = db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
         {
-            Name = trimmedName, Environment = environment, Engine = engine, Description = description,
-            EncryptedConnectionString = crypto.Encrypt(connectionString), DefaultTimeoutSeconds = timeout, MaxRows = maxRows,
-            IncludedObjects = cleanInc,
-            ExcludedObjects = cleanExc
-        };
-        db.ManagedDatabases.Add(entity);
-        var defaults = await db.EnvironmentDefaultGrants.Where(g => g.EnvironmentId == env.Id).ToListAsync();
-        foreach (var grant in defaults)
-            db.PermissionGrants.Add(new PermissionGrant { RoleId = grant.RoleId, DatabaseId = entity.Id, PermissionCode = grant.PermissionCode, Effect = PermissionEffect.Allow });
-        await db.SaveChangesAsync();
-        await tx.CommitAsync();
-        databaseCache?.Invalidate(entity.Id);
-        permissions?.Invalidate(databaseId: entity.Id);
-        await audit.TryWriteAsync(actor, "DatabaseAdmin", "Register", "Success", $"{name} ({environment}) [{engine}]", entity.Id, name);
-        return OpResult.Success();
+            db.ChangeTracker.Clear();
+            await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            var env = await db.DatabaseEnvironments.FirstOrDefaultAsync(e => e.Name == environment);
+            if (env is null) return OpResult.Fail("Environment not found.");
+            environment = env.Name;
+            var trimmedName = name.Trim();
+            if (string.IsNullOrWhiteSpace(trimmedName)) return OpResult.Fail("Name is required.");
+            if (await db.ManagedDatabases.AnyAsync(d => d.Name == trimmedName && d.Environment == environment))
+                return OpResult.Fail("A database with that name and environment is already registered.");
+            var cleanInc = string.IsNullOrWhiteSpace(includedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(includedObjects));
+            var cleanExc = string.IsNullOrWhiteSpace(excludedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(excludedObjects, defaultToAll: false));
+            if (DbAccessManager.Security.ObjectScope.HasConflict(cleanInc, cleanExc, out var conflict))
+                return OpResult.Fail($"Conflict detected: '{conflict}' cannot be simultaneously included and excluded.");
+
+            var entity = new ManagedDatabase
+            {
+                Name = trimmedName, Environment = environment, Engine = engine, Description = description,
+                EncryptedConnectionString = crypto.Encrypt(connectionString), DefaultTimeoutSeconds = timeout, MaxRows = maxRows,
+                IncludedObjects = cleanInc,
+                ExcludedObjects = cleanExc
+            };
+            db.ManagedDatabases.Add(entity);
+            var defaults = await db.EnvironmentDefaultGrants.Where(g => g.EnvironmentId == env.Id).ToListAsync();
+            foreach (var grant in defaults)
+                db.PermissionGrants.Add(new PermissionGrant { RoleId = grant.RoleId, DatabaseId = entity.Id, PermissionCode = grant.PermissionCode, Effect = PermissionEffect.Allow });
+            await db.SaveChangesAsync();
+            await tx.CommitAsync();
+            databaseCache?.Invalidate(entity.Id);
+            permissions?.Invalidate(databaseId: entity.Id);
+            await audit.TryWriteAsync(actor, "DatabaseAdmin", "Register", "Success", $"{name} ({environment}) [{engine}]", entity.Id, name);
+            return OpResult.Success();
+        });
     }
 
     public async Task<OpResult> UpdateAsync(Actor actor, Guid id, string name, string environment, string? description, string? newConnectionString, int timeout, int maxRows, bool active, DatabaseEngine? engine = null, string? includedObjects = null, string? excludedObjects = null)
     {
         await using var db = await factory.CreateDbContextAsync();
-        await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
-        var env = await db.DatabaseEnvironments.FirstOrDefaultAsync(e => e.Name == environment);
-        if (env is null) return OpResult.Fail("Environment not found.");
-        environment = env.Name;
-        var d = await db.ManagedDatabases.FindAsync(id);
-        if (d is null) return OpResult.Fail("Not found.");
-
-        var trimmedName = name.Trim();
-        if (string.IsNullOrWhiteSpace(trimmedName)) return OpResult.Fail("Name is required.");
-        if (await db.ManagedDatabases.AnyAsync(x => x.Id != id && x.Name == trimmedName && x.Environment == environment))
-            return OpResult.Fail("A database with that name and environment is already registered.");
-
-        d.Name = trimmedName;
-        d.Environment = environment;
-        if (engine.HasValue) d.Engine = engine.Value;
-        d.Description = description;
-        d.DefaultTimeoutSeconds = timeout;
-        d.MaxRows = maxRows;
-        d.IsActive = active;
-        var cleanInc = string.IsNullOrWhiteSpace(includedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(includedObjects));
-        var cleanExc = string.IsNullOrWhiteSpace(excludedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(excludedObjects, defaultToAll: false));
-        if (DbAccessManager.Security.ObjectScope.HasConflict(cleanInc, cleanExc, out var conflict))
-            return OpResult.Fail($"Conflict detected: '{conflict}' cannot be simultaneously included and excluded.");
-
-        d.IncludedObjects = cleanInc;
-        d.ExcludedObjects = cleanExc;
-
-        if (!string.IsNullOrWhiteSpace(newConnectionString))
+        var strategy = db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
         {
-            var provider = providers.GetProvider(d.Engine);
-            var (valid, error) = provider.ValidateConnectionString(newConnectionString);
-            if (!valid) return OpResult.Fail(error ?? "The connection string is not valid.");
-            d.EncryptedConnectionString = crypto.Encrypt(newConnectionString);
-        }
-        await db.SaveChangesAsync();
-        await tx.CommitAsync();
-        databaseCache?.Invalidate(d.Id);
-        permissions?.Invalidate(databaseId: d.Id);
-        await audit.TryWriteAsync(actor, "DatabaseAdmin", "Update", "Success", $"{d.Name} ({d.Environment}) [{d.Engine}] active={active}", d.Id, d.Name);
-        return OpResult.Success();
+            db.ChangeTracker.Clear();
+            await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            var env = await db.DatabaseEnvironments.FirstOrDefaultAsync(e => e.Name == environment);
+            if (env is null) return OpResult.Fail("Environment not found.");
+            environment = env.Name;
+            var d = await db.ManagedDatabases.FindAsync(id);
+            if (d is null) return OpResult.Fail("Not found.");
+
+            var trimmedName = name.Trim();
+            if (string.IsNullOrWhiteSpace(trimmedName)) return OpResult.Fail("Name is required.");
+            if (await db.ManagedDatabases.AnyAsync(x => x.Id != id && x.Name == trimmedName && x.Environment == environment))
+                return OpResult.Fail("A database with that name and environment is already registered.");
+
+            d.Name = trimmedName;
+            d.Environment = environment;
+            if (engine.HasValue) d.Engine = engine.Value;
+            d.Description = description;
+            d.DefaultTimeoutSeconds = timeout;
+            d.MaxRows = maxRows;
+            d.IsActive = active;
+            var cleanInc = string.IsNullOrWhiteSpace(includedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(includedObjects));
+            var cleanExc = string.IsNullOrWhiteSpace(excludedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(excludedObjects, defaultToAll: false));
+            if (DbAccessManager.Security.ObjectScope.HasConflict(cleanInc, cleanExc, out var conflict))
+                return OpResult.Fail($"Conflict detected: '{conflict}' cannot be simultaneously included and excluded.");
+
+            d.IncludedObjects = cleanInc;
+            d.ExcludedObjects = cleanExc;
+
+            if (!string.IsNullOrWhiteSpace(newConnectionString))
+            {
+                var provider = providers.GetProvider(d.Engine);
+                var (valid, error) = provider.ValidateConnectionString(newConnectionString);
+                if (!valid) return OpResult.Fail(error ?? "The connection string is not valid.");
+                d.EncryptedConnectionString = crypto.Encrypt(newConnectionString);
+            }
+            await db.SaveChangesAsync();
+            await tx.CommitAsync();
+            databaseCache?.Invalidate(d.Id);
+            permissions?.Invalidate(databaseId: d.Id);
+            await audit.TryWriteAsync(actor, "DatabaseAdmin", "Update", "Success", $"{d.Name} ({d.Environment}) [{d.Engine}] active={active}", d.Id, d.Name);
+            return OpResult.Success();
+        });
     }
 
     public async Task<List<DatabaseRoleScopeRule>> GetRoleScopeRulesAsync(Guid databaseId)
@@ -130,77 +140,92 @@ public sealed class DatabaseAdminService(
     public async Task<OpResult> SaveRoleScopeRuleAsync(Actor actor, Guid databaseId, string roleId, string? includedObjects, string? excludedObjects)
     {
         await using var db = await factory.CreateDbContextAsync();
-        await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
-        var database = await db.ManagedDatabases.FindAsync(databaseId);
-        if (database is null) return OpResult.Fail("Database not found.");
-        var role = await db.Roles.FindAsync(roleId);
-        if (role is null) return OpResult.Fail("Role not found.");
-
-        var cleanInc = string.IsNullOrWhiteSpace(includedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(includedObjects));
-        var cleanExc = string.IsNullOrWhiteSpace(excludedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(excludedObjects, defaultToAll: false));
-        if (DbAccessManager.Security.ObjectScope.HasConflict(cleanInc, cleanExc, out var conflict))
-            return OpResult.Fail($"Conflict detected: '{conflict}' cannot be simultaneously included and excluded.");
-
-        var rule = await db.DatabaseRoleScopeRules.FirstOrDefaultAsync(r => r.DatabaseId == databaseId && r.RoleId == roleId);
-        if (rule is null)
+        var strategy = db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
         {
-            rule = new DatabaseRoleScopeRule
+            db.ChangeTracker.Clear();
+            await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            var database = await db.ManagedDatabases.FindAsync(databaseId);
+            if (database is null) return OpResult.Fail("Database not found.");
+            var role = await db.Roles.FindAsync(roleId);
+            if (role is null) return OpResult.Fail("Role not found.");
+
+            var cleanInc = string.IsNullOrWhiteSpace(includedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(includedObjects));
+            var cleanExc = string.IsNullOrWhiteSpace(excludedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(excludedObjects, defaultToAll: false));
+            if (DbAccessManager.Security.ObjectScope.HasConflict(cleanInc, cleanExc, out var conflict))
+                return OpResult.Fail($"Conflict detected: '{conflict}' cannot be simultaneously included and excluded.");
+
+            var rule = await db.DatabaseRoleScopeRules.FirstOrDefaultAsync(r => r.DatabaseId == databaseId && r.RoleId == roleId);
+            if (rule is null)
             {
-                DatabaseId = databaseId,
-                RoleId = roleId,
-                IncludedObjects = cleanInc,
-                ExcludedObjects = cleanExc,
-                CreatedAt = DateTimeOffset.UtcNow
-            };
-            db.DatabaseRoleScopeRules.Add(rule);
-        }
-        else
-        {
-            rule.IncludedObjects = cleanInc;
-            rule.ExcludedObjects = cleanExc;
-            rule.UpdatedAt = DateTimeOffset.UtcNow;
-        }
-        await db.SaveChangesAsync();
-        await tx.CommitAsync();
-        permissions?.Invalidate(databaseId: databaseId);
-        await audit.TryWriteAsync(actor, "DatabaseAdmin", "RoleScopeRuleSaved", "Success", $"db={database.Name}; role={role.Name}; inc={rule.IncludedObjects}; exc={rule.ExcludedObjects}", databaseId, database.Name);
-        return OpResult.Success();
+                rule = new DatabaseRoleScopeRule
+                {
+                    DatabaseId = databaseId,
+                    RoleId = roleId,
+                    IncludedObjects = cleanInc,
+                    ExcludedObjects = cleanExc,
+                    CreatedAt = DateTimeOffset.UtcNow
+                };
+                db.DatabaseRoleScopeRules.Add(rule);
+            }
+            else
+            {
+                rule.IncludedObjects = cleanInc;
+                rule.ExcludedObjects = cleanExc;
+                rule.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+            await db.SaveChangesAsync();
+            await tx.CommitAsync();
+            permissions?.Invalidate(databaseId: databaseId);
+            await audit.TryWriteAsync(actor, "DatabaseAdmin", "RoleScopeRuleSaved", "Success", $"db={database.Name}; role={role.Name}; inc={rule.IncludedObjects}; exc={rule.ExcludedObjects}", databaseId, database.Name);
+            return OpResult.Success();
+        });
     }
 
     public async Task<OpResult> DeleteRoleScopeRuleAsync(Actor actor, Guid databaseId, string roleId)
     {
         await using var db = await factory.CreateDbContextAsync();
-        await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
-        var rule = await db.DatabaseRoleScopeRules.FirstOrDefaultAsync(r => r.DatabaseId == databaseId && r.RoleId == roleId);
-        if (rule is null) return OpResult.Success();
-        db.DatabaseRoleScopeRules.Remove(rule);
-        await db.SaveChangesAsync();
-        await tx.CommitAsync();
-        permissions?.Invalidate(databaseId: databaseId);
-        await audit.TryWriteAsync(actor, "DatabaseAdmin", "RoleScopeRuleDeleted", "Success", $"db={databaseId}; role={roleId}", databaseId);
-        return OpResult.Success();
+        var strategy = db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            db.ChangeTracker.Clear();
+            await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            var rule = await db.DatabaseRoleScopeRules.FirstOrDefaultAsync(r => r.DatabaseId == databaseId && r.RoleId == roleId);
+            if (rule is null) return OpResult.Success();
+            db.DatabaseRoleScopeRules.Remove(rule);
+            await db.SaveChangesAsync();
+            await tx.CommitAsync();
+            permissions?.Invalidate(databaseId: databaseId);
+            await audit.TryWriteAsync(actor, "DatabaseAdmin", "RoleScopeRuleDeleted", "Success", $"db={databaseId}; role={roleId}", databaseId);
+            return OpResult.Success();
+        });
     }
 
     public async Task<OpResult> UpdateDatabaseObjectRulesAsync(Actor actor, Guid databaseId, string? includedObjects, string? excludedObjects)
     {
         await using var db = await factory.CreateDbContextAsync();
-        await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
-        var database = await db.ManagedDatabases.FindAsync(databaseId);
-        if (database is null) return OpResult.Fail("Database not found.");
+        var strategy = db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            db.ChangeTracker.Clear();
+            await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            var database = await db.ManagedDatabases.FindAsync(databaseId);
+            if (database is null) return OpResult.Fail("Database not found.");
 
-        var cleanInc = string.IsNullOrWhiteSpace(includedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(includedObjects));
-        var cleanExc = string.IsNullOrWhiteSpace(excludedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(excludedObjects, defaultToAll: false));
-        if (DbAccessManager.Security.ObjectScope.HasConflict(cleanInc, cleanExc, out var conflict))
-            return OpResult.Fail($"Conflict detected: '{conflict}' cannot be simultaneously included and excluded.");
+            var cleanInc = string.IsNullOrWhiteSpace(includedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(includedObjects));
+            var cleanExc = string.IsNullOrWhiteSpace(excludedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(excludedObjects, defaultToAll: false));
+            if (DbAccessManager.Security.ObjectScope.HasConflict(cleanInc, cleanExc, out var conflict))
+                return OpResult.Fail($"Conflict detected: '{conflict}' cannot be simultaneously included and excluded.");
 
-        database.IncludedObjects = cleanInc;
-        database.ExcludedObjects = cleanExc;
-        await db.SaveChangesAsync();
-        await tx.CommitAsync();
-        databaseCache?.Invalidate(databaseId);
-        permissions?.Invalidate(databaseId: databaseId);
-        await audit.TryWriteAsync(actor, "DatabaseAdmin", "DatabaseObjectRulesUpdated", "Success", $"db={database.Name}; inc={database.IncludedObjects}; exc={database.ExcludedObjects}", databaseId, database.Name);
-        return OpResult.Success();
+            database.IncludedObjects = cleanInc;
+            database.ExcludedObjects = cleanExc;
+            await db.SaveChangesAsync();
+            await tx.CommitAsync();
+            databaseCache?.Invalidate(databaseId);
+            permissions?.Invalidate(databaseId: databaseId);
+            await audit.TryWriteAsync(actor, "DatabaseAdmin", "DatabaseObjectRulesUpdated", "Success", $"db={database.Name}; inc={database.IncludedObjects}; exc={database.ExcludedObjects}", databaseId, database.Name);
+            return OpResult.Success();
+        });
     }
 }
 

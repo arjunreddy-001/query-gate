@@ -1204,6 +1204,7 @@ html[data-nav="compact"]
 .page-head .actions {
   margin-left: auto;
   display: flex;
+  align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
@@ -4284,6 +4285,43 @@ input[type="password"]::-ms-clear {
   margin-top: 6px;
   padding-top: 6px;
   border-top: 1px dashed color-mix(in srgb, #ef4444 50%, transparent);
+}
+
+/* Database Health dashboard */
+.health-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.health-stat {
+  padding: 16px 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+}
+.health-stat-num {
+  font-size: 1.8rem;
+  font-weight: 750;
+  line-height: 1;
+}
+.health-stat-label {
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  margin-top: 6px;
+  font-weight: 600;
+}
+.latency-ok {
+  color: var(--ok);
+  font-weight: 600;
+}
+.latency-warn {
+  color: var(--warn);
+  font-weight: 600;
+}
+.latency-bad {
+  color: var(--bad);
+  font-weight: 600;
 }
 
 

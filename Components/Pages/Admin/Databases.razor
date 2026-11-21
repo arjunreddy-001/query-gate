@@ -1,48 +1,212 @@
 @page "/admin/databases"
-@attribute [Authorize(Roles = Roles.Admin)]
+@attribute [Authorize]
 @inherits PageBase
+@implements IDisposable
 @inject DatabaseAdminService DbAdmin
+@inject HealthMonitorService HealthMonitor
+@inject SettingsService Cfg
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 
 <PageTitle>Databases · Query Gate</PageTitle>
 
-<div class="page-head">
-    <div><h1>Databases</h1><p>Register SQL Server, PostgreSQL, MySQL and MariaDB targets. Connection strings are encrypted at rest.</p></div>
-    <div class="actions">
-        <label class="check small"><input type="checkbox" @bind="showDisabled" @bind:after="Load" />Show disabled</label>
-        <button class="btn btn-primary" @onclick="New"><Icon Name="plus" />Register database</button>
+@if (!isAuthorized)
+{
+    <div class="card" style="padding:24px;text-align:center">
+        <p class="text-dim">Checking authorization...</p>
     </div>
-</div>
-
-<div class="card">
-    @if (list.Count == 0) { <div class="empty"><Icon Name="db" /><div>No databases registered.</div></div> }
-    else
-    {
-        <div class="table-wrap"><table>
-            <thead><tr><th>Name</th><th>Engine</th><th>Environment</th><th>Timeout</th><th>Max rows</th><th>Status</th><th></th></tr></thead>
-            <tbody>
-            @foreach (var d in list)
+}
+else
+{
+    <div class="page-head">
+        <div>
+            <h1>Databases</h1>
+            <p>Register SQL Server, PostgreSQL, MySQL and MariaDB targets with live connectivity and health monitoring.</p>
+        </div>
+        <div class="actions" style="display:flex;align-items:center;gap:10px">
+            <span class="faint small" style="display:inline-flex;align-items:center">Last checked: @Ago(lastRefreshed)</span>
+            <button class="btn btn-sm" disabled="@refreshingAll" @onclick="ProbeAllAsync" title="Probe connectivity across all active databases">
+                <Icon Name="refresh" /> @(refreshingAll ? "Probing..." : "Probe all")
+            </button>
+            <label class="check small" style="display:inline-flex;align-items:center;gap:6px;margin:0"><input type="checkbox" @bind="showDisabled" @bind:after="Load" />Show disabled</label>
+            @if (canManage)
             {
-                <tr>
-                    <td><b>@d.Name</b><div class="faint small">@d.Description</div></td>
-                    <td><span class="badge @DatabaseEngineInfo.GetBadgeClass(d.Engine)">@DatabaseEngineInfo.GetDisplayName(d.Engine)</span></td>
-                    <td><span class="badge @EnvClass(d.Environment)">@d.Environment</span></td>
-                    <td>@d.DefaultTimeoutSeconds s</td>
-                    <td>@d.MaxRows</td>
-                    <td>@if (d.IsActive) { <span class="badge ok">Enabled</span> } else { <span class="badge bad">Disabled</span> }</td>
-                    <td class="right" style="white-space:nowrap">
-                        <button class="btn btn-sm btn-ghost" @onclick="() => OpenObjectRules(d)" title="Configure database and role level object rules"><Icon Name="shield" />Rules</button>
-                        <button class="btn btn-sm" @onclick="() => TestRegistered(d.Id)">Test</button>
-                        <button class="btn btn-sm" @onclick="() => Edit(d)">Edit</button>
-                    </td>
-                </tr>
+                <button class="btn btn-sm btn-primary" @onclick="New"><Icon Name="plus" />Register database</button>
             }
-            </tbody>
-        </table></div>
-    }
-</div>
+        </div>
+    </div>
 
-@if (open)
+    <div class="health-stat-grid">
+        <div class="health-stat">
+            <div class="health-stat-num">@list.Count</div>
+            <div class="health-stat-label">Total Databases</div>
+        </div>
+        <div class="health-stat">
+            <div class="health-stat-num latency-ok">@onlineCount</div>
+            <div class="health-stat-label">Online Targets</div>
+        </div>
+        <div class="health-stat">
+            <div class="health-stat-num @(offlineCount > 0 ? "latency-bad" : "")">@offlineCount</div>
+            <div class="health-stat-label">Offline Targets</div>
+        </div>
+        <div class="health-stat">
+            <div class="health-stat-num @LatencyClass(avgLatency)">@(avgLatency > 0 ? $"{avgLatency} ms" : "-")</div>
+            <div class="health-stat-label">Average Latency</div>
+        </div>
+    </div>
+
+    <div class="card">
+        @if (!ready)
+        {
+            <div style="padding:24px;text-align:center;color:var(--text-dim)">Loading databases...</div>
+        }
+        else if (list.Count == 0)
+        {
+            <div class="empty"><Icon Name="db" /><div>No databases registered.</div></div>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Database</th>
+                            <th>Engine</th>
+                            <th>Environment</th>
+                            <th>Health</th>
+                            <th style="white-space:nowrap">Latency</th>
+                            <th style="white-space:nowrap">Last Probed</th>
+                            <th style="white-space:nowrap">Limits</th>
+                            <th class="right" style="white-space:nowrap">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var d in list)
+                        {
+                            var res = HealthMonitor.Get(d.Id);
+                            var isChecking = checkingIds.Contains(d.Id);
+                            <tr>
+                                <td>
+                                    <b>@d.Name</b>
+                                    @if (!string.IsNullOrWhiteSpace(d.Description))
+                                    {
+                                        <div class="faint small">@d.Description</div>
+                                    }
+                                    @if (d.IsActive && res?.Telemetry is not null)
+                                    {
+                                        var t = res.Telemetry;
+                                        <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">
+                                            @if (t.ActiveConnections.HasValue)
+                                            {
+                                                <span class="badge" style="font-size:10px;padding:1px 5px" title="Active connections / Maximum capacity">
+                                                    @(t.ActiveConnections)@(t.MaxConnections.HasValue ? $"/{t.MaxConnections}" : "") conn
+                                                </span>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(t.DatabaseSize))
+                                            {
+                                                <span class="badge" style="font-size:10px;padding:1px 5px" title="Database storage size">
+                                                    @t.DatabaseSize
+                                                </span>
+                                            }
+                                            @if (t.BlockedQueriesCount.HasValue && t.BlockedQueriesCount.Value > 0)
+                                            {
+                                                <span class="badge bad" style="font-size:10px;padding:1px 5px" title="Queries currently blocked by locks">
+                                                    @t.BlockedQueriesCount.Value blocked
+                                                </span>
+                                            }
+                                            @if (t.InFlightQueries.HasValue && t.InFlightQueries.Value > 0)
+                                            {
+                                                <span class="badge warn" style="font-size:10px;padding:1px 5px" title="Queries currently executing via Query Gate">
+                                                    @t.InFlightQueries.Value in-flight
+                                                </span>
+                                            }
+                                        </div>
+                                    }
+                                </td>
+                                <td><span class="badge @DatabaseEngineInfo.GetBadgeClass(d.Engine)">@DatabaseEngineInfo.GetDisplayName(d.Engine)</span></td>
+                                <td><span class="badge @EnvClass(d.Environment)">@d.Environment</span></td>
+                                <td>
+                                    @if (!d.IsActive)
+                                    {
+                                        <span class="badge">Disabled</span>
+                                    }
+                                    else if (isChecking)
+                                    {
+                                        <span class="badge warn">Checking...</span>
+                                    }
+                                    else if (res is null)
+                                    {
+                                        <span class="badge warn">Pending</span>
+                                    }
+                                    else if (res.IsOnline)
+                                    {
+                                        <span class="badge ok">Online</span>
+                                    }
+                                    else
+                                    {
+                                        <button type="button"
+                                                class="badge bad"
+                                                style="cursor:pointer;border:none;display:inline-flex;align-items:center;gap:4px"
+                                                @onclick="() => OpenDiagnostics(d, res)"
+                                                title="Connection failed. Click to view failure diagnostics.">
+                                            Offline <Icon Name="alert-triangle" />
+                                        </button>
+                                    }
+                                </td>
+                                <td style="white-space:nowrap">
+                                    @if (d.IsActive && res is not null && res.IsOnline)
+                                    {
+                                        <span class="@LatencyClass(res.LatencyMs)">@res.LatencyMs ms</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="muted">-</span>
+                                    }
+                                </td>
+                                <td style="white-space:nowrap">
+                                    @if (d.IsActive && res is not null)
+                                    {
+                                        <span title="@res.CheckedAt.ToLocalTime().ToString("u")">@Ago(res.CheckedAt)</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="muted">-</span>
+                                    }
+                                </td>
+                                <td style="white-space:nowrap">
+                                    <span class="small faint">@d.DefaultTimeoutSeconds s · @d.MaxRows rows</span>
+                                </td>
+                                <td class="right" style="white-space:nowrap">
+                                    <div style="display:inline-flex;align-items:center;justify-content:flex-end;gap:6px">
+                                        <button class="btn btn-sm btn-ghost" @onclick="() => OpenDiagnostics(d, res)" title="View live database telemetry, connections, storage and performance metrics">
+                                            <Icon Name="activity" /> Health
+                                        </button>
+                                        @if (canManage)
+                                        {
+                                            <button class="btn btn-sm btn-ghost" @onclick="() => OpenObjectRules(d)" title="Configure database and role level object rules">
+                                                <Icon Name="shield" /> Rules
+                                            </button>
+                                        }
+                                        <button class="btn btn-sm btn-ghost" disabled="@isChecking" @onclick="() => ProbeOneAsync(d.Id)" title="Probe connection and measure latency">
+                                            <Icon Name="refresh" /> @(isChecking ? "Checking..." : "Check")
+                                        </button>
+                                        @if (canManage)
+                                        {
+                                            <button class="btn btn-sm btn-ghost" @onclick="() => Edit(d)" title="Edit database target">
+                                                <Icon Name="edit" /> Edit
+                                            </button>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+}
+
+@if (open && canManage)
 {
     <div class="modal-back"><div class="modal" style="max-width:680px">
         <div class="modal-head"><h2>@(editId is null ? "Register database" : "Edit " + name)</h2></div>
@@ -89,7 +253,7 @@
     </div></div>
 }
 
-@if (managingRulesDb is not null)
+@if (managingRulesDb is not null && canManage)
 {
     var hasDbConflict = ObjectScope.HasConflict(dbIncludedObjects, dbExcludedObjects, out var dbConflict);
     var hasDbExclusions = !string.IsNullOrWhiteSpace(dbExcludedObjects);
@@ -375,10 +539,156 @@
     </div>
 }
 
+@if (diagnosticDb is not null)
+{
+    var res = diagnosticResult ?? HealthMonitor.Get(diagnosticDb.Id);
+    var telem = res?.Telemetry;
+    <div class="modal-back">
+        <div class="modal" style="max-width:720px">
+            <div class="modal-head" style="display:flex;align-items:center;justify-content:space-between">
+                <div style="display:flex;align-items:center;gap:10px">
+                    <Icon Name="@(res?.IsOnline == false ? "alert-triangle" : "activity")" Style="@(res?.IsOnline == false ? "color:var(--bad);width:20px;height:20px" : "color:var(--brand);width:20px;height:20px")" />
+                    <h2 style="margin:0;font-size:1.15rem">Health & Telemetry: <b>@diagnosticDb.Name</b></h2>
+                </div>
+                <button type="button" class="btn btn-ghost btn-sm" @onclick="CloseDiagnostics">✕</button>
+            </div>
+            <div class="modal-body stack" style="gap:14px;padding:20px">
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                    <span class="badge @DatabaseEngineInfo.GetBadgeClass(diagnosticDb.Engine)">@DatabaseEngineInfo.GetDisplayName(diagnosticDb.Engine)</span>
+                    <span class="badge @EnvClass(diagnosticDb.Environment)">@diagnosticDb.Environment</span>
+                    @if (res is null)
+                    {
+                        <span class="badge warn">Pending Probe</span>
+                    }
+                    else if (res.IsOnline)
+                    {
+                        <span class="badge ok">Online</span>
+                        <span class="badge @LatencyClass(res.LatencyMs)">@res.LatencyMs ms</span>
+                    }
+                    else
+                    {
+                        <span class="badge bad">Connection Failed</span>
+                    }
+                </div>
+
+                @if (telem is not null)
+                {
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:10px;margin-top:6px">
+                        <div class="card" style="padding:12px;background:var(--bg-elev);border:1px solid var(--line);border-radius:8px">
+                            <div class="small faint">Active Connections</div>
+                            <div style="font-size:1.25rem;font-weight:700;margin-top:2px">
+                                @(telem.ActiveConnections.HasValue ? (telem.MaxConnections.HasValue ? $"{telem.ActiveConnections} / {telem.MaxConnections}" : $"{telem.ActiveConnections}") : "-")
+                            </div>
+                            <div class="faint small" style="font-size:11px">
+                                @(telem.ActiveConnections.HasValue && telem.MaxConnections.HasValue && telem.MaxConnections.Value > 0
+                                    ? $"{Math.Round((double)telem.ActiveConnections.Value / telem.MaxConnections.Value * 100, 1)}% capacity"
+                                    : "Active sessions")
+                            </div>
+                        </div>
+
+                        <div class="card" style="padding:12px;background:var(--bg-elev);border:1px solid var(--line);border-radius:8px">
+                            <div class="small faint">Database Size</div>
+                            <div style="font-size:1.25rem;font-weight:700;margin-top:2px">
+                                @(telem.DatabaseSize ?? "-")
+                            </div>
+                            <div class="faint small" style="font-size:11px">Total storage footprint</div>
+                        </div>
+
+                        <div class="card" style="padding:12px;background:var(--bg-elev);border:1px solid var(--line);border-radius:8px">
+                            <div class="small faint">Cache Hit Ratio</div>
+                            <div style="font-size:1.25rem;font-weight:700;margin-top:2px" class="@(telem.CacheHitRatio >= 95 ? "latency-ok" : (telem.CacheHitRatio >= 85 ? "latency-warn" : "latency-bad"))">
+                                @(telem.CacheHitRatio.HasValue ? $"{telem.CacheHitRatio:F1}%" : "-")
+                            </div>
+                            <div class="faint small" style="font-size:11px">RAM vs disk I/O</div>
+                        </div>
+
+                        <div class="card" style="padding:12px;background:var(--bg-elev);border:1px solid var(--line);border-radius:8px">
+                            <div class="small faint">Blocked Queries / Locks</div>
+                            <div style="font-size:1.25rem;font-weight:700;margin-top:2px" class="@(telem.BlockedQueriesCount > 0 ? "latency-bad" : "latency-ok")">
+                                @(telem.BlockedQueriesCount.HasValue ? (telem.BlockedQueriesCount.Value > 0 ? $"{telem.BlockedQueriesCount.Value} blocked" : "0") : "-")
+                            </div>
+                            <div class="faint small" style="font-size:11px">Contention on locks</div>
+                        </div>
+
+                        <div class="card" style="padding:12px;background:var(--bg-elev);border:1px solid var(--line);border-radius:8px">
+                            <div class="small faint">Query Gate 24h Activity</div>
+                            <div style="font-size:1.25rem;font-weight:700;margin-top:2px">
+                                @(telem.AuditTotal24h.HasValue && telem.AuditTotal24h > 0 ? $"{telem.AuditTotal24h} queries" : "0 queries")
+                            </div>
+                            <div class="faint small" style="font-size:11px">
+                                @(telem.AuditTotal24h.HasValue && telem.AuditTotal24h > 0 ? $"{telem.AuditErrorRate24h:F1}% error rate" : "No executions in 24h")
+                            </div>
+                        </div>
+
+                        <div class="card" style="padding:12px;background:var(--bg-elev);border:1px solid var(--line);border-radius:8px">
+                            <div class="small faint">Query Gate Latency (P95)</div>
+                            <div style="font-size:1.25rem;font-weight:700;margin-top:2px">
+                                @(telem.AuditP95Ms24h.HasValue && telem.AuditTotal24h > 0 ? $"{telem.AuditP95Ms24h} ms" : "-")
+                            </div>
+                            <div class="faint small" style="font-size:11px">
+                                @(telem.InFlightQueries.HasValue && telem.InFlightQueries.Value > 0 ? $"{telem.InFlightQueries.Value} in-flight right now" : "0 in-flight now")
+                            </div>
+                        </div>
+                    </div>
+                }
+
+                @if (res is not null && !res.IsOnline)
+                {
+                    <div class="field">
+                        <label>Failure Details</label>
+                        <div style="background:var(--bg-card);border:1px solid var(--line);border-radius:8px;padding:12px;font-family:monospace;font-size:0.82rem;max-height:160px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;color:var(--bad)">
+                            @res.Message
+                        </div>
+                    </div>
+
+                    <div class="card" style="padding:14px;background:var(--bg-elev);border:1px solid var(--line);border-radius:8px">
+                        <div style="font-weight:650;font-size:0.88rem;margin-bottom:6px">Troubleshooting Guidance</div>
+                        <ul class="small faint" style="margin:0;padding-left:18px;line-height:1.6">
+                            <li>Verify that the database server is running and listening on port <b>@DatabaseEngineInfo.GetDefaultPort(diagnosticDb.Engine)</b>.</li>
+                            <li>Check network security groups, firewalls, or container port mappings between Query Gate and the host.</li>
+                            <li>Ensure credentials, username, and password configured in the connection string are valid.</li>
+                            <li>Verify SSL/TLS certificate requirements (e.g. <code>TrustServerCertificate=True</code> for SQL Server or <code>SslMode=Prefer</code> for PostgreSQL).</li>
+                        </ul>
+                    </div>
+                }
+
+                <div class="faint small" style="display:flex;justify-content:space-between;margin-top:4px">
+                    <span>Last probed: <b>@(res is not null ? res.CheckedAt.ToLocalTime().ToString("g") : "Never")</b></span>
+                    <span>Response: <b>@(res is not null ? $"{res.LatencyMs} ms" : "-")</b></span>
+                </div>
+            </div>
+            <div class="modal-foot" style="display:flex;justify-content:space-between">
+                <div>
+                    @if (canManage)
+                    {
+                        <button type="button" class="btn btn-ghost" @onclick="() => { var dbToEdit = diagnosticDb; CloseDiagnostics(); Edit(dbToEdit); }">
+                            <Icon Name="edit" /> Edit target
+                        </button>
+                    }
+                </div>
+                <div style="display:flex;gap:8px">
+                    <button type="button" class="btn" disabled="@checkingIds.Contains(diagnosticDb.Id)" @onclick="() => RecheckFromDiagnostics(diagnosticDb.Id)">
+                        <Icon Name="refresh" /> Re-check connection
+                    </button>
+                    <button type="button" class="btn btn-primary" @onclick="CloseDiagnostics">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private List<ManagedDatabase> list = [];
     private List<DatabaseEnvironment> environments = [];
+    private readonly HashSet<Guid> checkingIds = [];
     private bool open, active = true, testOk, showDisabled;
+    private bool isAuthorized, canManage, ready, refreshingAll;
+    private DateTimeOffset lastRefreshed = DateTimeOffset.UtcNow;
+    private Timer? timer;
+
+    private ManagedDatabase? diagnosticDb;
+    private HealthResult? diagnosticResult;
+
     private Guid? editId;
     private string name = "", env = "Development", description = "", connection = "";
     private DatabaseEngine engine = DatabaseEngine.SqlServer;
@@ -395,7 +705,61 @@
     private Microsoft.AspNetCore.Identity.IdentityRole? activeRole => roles.FirstOrDefault(r => r.Id == selectedRuleRoleId);
     private string roleIncludedObjects = "*", roleExcludedObjects = "";
 
-    protected override async Task OnLoadAsync() => await Load();
+    private int onlineCount => list.Count(d => d.IsActive && HealthMonitor.Get(d.Id)?.IsOnline == true);
+    private int offlineCount => list.Count(d => d.IsActive && HealthMonitor.Get(d.Id) is { IsOnline: false });
+    private long avgLatency
+    {
+        get
+        {
+            var latencies = list
+                .Where(d => d.IsActive)
+                .Select(d => HealthMonitor.Get(d.Id))
+                .Where(r => r is not null && r.IsOnline && r.LatencyMs >= 0)
+                .Select(r => r!.LatencyMs)
+                .ToList();
+            return latencies.Count > 0 ? (long)latencies.Average() : 0;
+        }
+    }
+
+    protected override async Task OnLoadAsync()
+    {
+        var authState = await Auth.GetAuthenticationStateAsync();
+        var user = authState.User;
+        canManage = user.IsInRole(Roles.Admin) || user.IsInRole(Roles.SuperAdmin);
+
+        if (!canManage)
+        {
+            var extraRolesSetting = await Cfg.GetAsync("HealthVisibleRoles");
+            var allowedRoles = extraRolesSetting.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var userRoles = user.Claims.Where(c => c.Type == System.Security.Claims.ClaimTypes.Role).Select(c => c.Value).ToList();
+            var isAllowed = userRoles.Any(r => allowedRoles.Contains(r, StringComparer.OrdinalIgnoreCase));
+
+            if (!isAllowed)
+            {
+                Nav.NavigateTo("dashboard");
+                return;
+            }
+        }
+
+        isAuthorized = true;
+        await Load();
+        ready = true;
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender && RendererInfo.IsInteractive)
+        {
+            timer = new Timer(async _ =>
+            {
+                try
+                {
+                    await InvokeAsync(StateHasChanged);
+                }
+                catch { }
+            }, null, TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15));
+        }
+    }
 
     private async Task Load()
     {
@@ -405,10 +769,12 @@
         var query = db.ManagedDatabases.AsNoTracking().AsQueryable();
         if (!showDisabled) query = query.Where(d => d.IsActive);
         list = await query.OrderBy(d => d.Environment).ThenBy(d => d.Name).ToListAsync();
+        lastRefreshed = DateTimeOffset.UtcNow;
     }
 
     private void New()
     {
+        if (!canManage) return;
         editId = null;
         name = description = connection = "";
         engine = DatabaseEngine.SqlServer;
@@ -424,6 +790,7 @@
 
     private void Edit(ManagedDatabase d)
     {
+        if (!canManage) return;
         editId = d.Id;
         name = d.Name;
         engine = d.Engine;
@@ -454,24 +821,116 @@
         (testOk, testMsg) = await DbAdmin.TestAsync(connection, engine);
     }
 
-    private async Task TestRegistered(Guid id)
+    private async Task ProbeOneAsync(Guid id)
     {
-        var (ok, message) = await DbAdmin.TestRegisteredAsync(id);
-        Say(message, !ok);
+        checkingIds.Add(id);
+        StateHasChanged();
+        try
+        {
+            var res = await HealthMonitor.CheckNowAsync(id);
+            lastRefreshed = DateTimeOffset.UtcNow;
+            if (res is not null)
+            {
+                if (!res.IsOnline)
+                {
+                    var d = list.FirstOrDefault(x => x.Id == id);
+                    if (d is not null)
+                    {
+                        OpenDiagnostics(d, res);
+                    }
+                    Say($"Connection failed for {res.DatabaseName}: {res.Message}", true);
+                }
+                else
+                {
+                    Say($"Connection to {res.DatabaseName} succeeded ({res.LatencyMs} ms).", false);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Say($"Health probe failed: {ex.Message}", true);
+        }
+        finally
+        {
+            checkingIds.Remove(id);
+            StateHasChanged();
+        }
+    }
+
+    private async Task ProbeAllAsync()
+    {
+        refreshingAll = true;
+        StateHasChanged();
+        try
+        {
+            await HealthMonitor.CheckAllAsync(TenantCtx?.TenantId);
+            await Load();
+            Say("Health probe completed for all active targets.", false);
+        }
+        catch (Exception ex)
+        {
+            Say($"Health probe failed: {ex.Message}", true);
+        }
+        finally
+        {
+            refreshingAll = false;
+            lastRefreshed = DateTimeOffset.UtcNow;
+            StateHasChanged();
+        }
+    }
+
+    private void OpenDiagnostics(ManagedDatabase d, HealthResult? res = null)
+    {
+        diagnosticDb = d;
+        diagnosticResult = res ?? HealthMonitor.Get(d.Id);
+    }
+
+    private void CloseDiagnostics()
+    {
+        diagnosticDb = null;
+        diagnosticResult = null;
+    }
+
+    private async Task RecheckFromDiagnostics(Guid id)
+    {
+        await ProbeOneAsync(id);
+        var updated = HealthMonitor.Get(id);
+        if (updated is not null)
+        {
+            diagnosticResult = updated;
+        }
     }
 
     private async Task Save()
     {
+        if (!canManage) return;
         var result = editId is null
             ? await DbAdmin.RegisterAsync(Me, name.Trim(), env, description, connection, timeout, maxRows, engine, includedObjects, excludedObjects)
             : await DbAdmin.UpdateAsync(Me, editId.Value, name.Trim(), env, description, string.IsNullOrWhiteSpace(connection) ? null : connection, timeout, maxRows, active, engine, includedObjects, excludedObjects);
         Say(result, "Saved.");
-        if (result.Ok) { open = false; await Load(); }
+        if (result.Ok)
+        {
+            open = false;
+            await Load();
+            if (editId.HasValue)
+            {
+                _ = Task.Run(async () => await HealthMonitor.CheckNowAsync(editId.Value));
+            }
+            else
+            {
+                var created = list.FirstOrDefault(d => d.Name == name.Trim() && d.Environment == env);
+                if (created is not null)
+                {
+                    _ = Task.Run(async () => await HealthMonitor.CheckNowAsync(created.Id));
+                }
+            }
+        }
         else { testOk = false; testMsg = result.Error; }
     }
 
     private async Task OpenObjectRules(ManagedDatabase d)
     {
+        if (!canManage) return;
         managingRulesDb = d;
         rulesTab = "database";
         dbIncludedObjects = string.IsNullOrWhiteSpace(d.IncludedObjects) ? "*" : d.IncludedObjects;
@@ -498,7 +957,7 @@
 
     private async Task SaveDbRules()
     {
-        if (managingRulesDb is null) return;
+        if (managingRulesDb is null || !canManage) return;
         var res = await DbAdmin.UpdateDatabaseObjectRulesAsync(Me, managingRulesDb.Id, dbIncludedObjects, dbExcludedObjects);
         Say(res, "Database object rules updated.");
         if (res.Ok)
@@ -511,13 +970,14 @@
 
     private async Task RemoveAllDbExclusions()
     {
+        if (!canManage) return;
         dbExcludedObjects = "";
         await SaveDbRules();
     }
 
     private async Task SaveCurrentRoleRule()
     {
-        if (managingRulesDb is null || activeRole is null) return;
+        if (managingRulesDb is null || activeRole is null || !canManage) return;
         var res = await DbAdmin.SaveRoleScopeRuleAsync(Me, managingRulesDb.Id, activeRole.Id, roleIncludedObjects, roleExcludedObjects);
         Say(res, $"Role scope rules saved for {activeRole.Name}.");
         if (res.Ok)
@@ -528,13 +988,14 @@
 
     private async Task RemoveAllRoleExclusions()
     {
+        if (!canManage) return;
         roleExcludedObjects = "";
         await SaveCurrentRoleRule();
     }
 
     private async Task ResetActiveRoleRuleToDefault()
     {
-        if (managingRulesDb is null || activeRole is null) return;
+        if (managingRulesDb is null || activeRole is null || !canManage) return;
         var res = await DbAdmin.DeleteRoleScopeRuleAsync(Me, managingRulesDb.Id, activeRole.Id);
         Say(res, $"Reset rules for {activeRole.Name} to default.");
         if (res.Ok)
@@ -543,5 +1004,18 @@
             roleIncludedObjects = "*";
             roleExcludedObjects = "";
         }
+    }
+
+    private static string LatencyClass(long ms) => ms switch
+    {
+        <= 0 => "",
+        < 100 => "latency-ok",
+        <= 500 => "latency-warn",
+        _ => "latency-bad"
+    };
+
+    public void Dispose()
+    {
+        timer?.Dispose();
     }
 }

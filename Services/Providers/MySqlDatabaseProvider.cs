@@ -41,6 +41,99 @@ public class MySqlDatabaseProvider : IDatabaseProvider
         }
     }
 
+    public async Task<TargetTelemetry> CollectTelemetryAsync(string connectionString, CancellationToken ct = default)
+    {
+        int? activeConn = null;
+        int? maxConn = null;
+        string? dbSize = null;
+        double? cacheHit = null;
+        int? blockedCount = null;
+
+        try
+        {
+            var builder = new MySqlConnectionStringBuilder(connectionString) { ConnectionTimeout = 5 };
+            await using var conn = new MySqlConnection(builder.ConnectionString);
+            await conn.OpenAsync(ct);
+
+            // 1. Active & Max connections
+            try
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandTimeout = 5;
+                cmd.CommandText = "SHOW STATUS LIKE 'Threads_connected';";
+                await using var r1 = await cmd.ExecuteReaderAsync(ct);
+                if (await r1.ReadAsync(ct) && int.TryParse(r1.GetString(1), out var ac))
+                {
+                    activeConn = ac;
+                }
+            }
+            catch { }
+
+            try
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandTimeout = 5;
+                cmd.CommandText = "SHOW VARIABLES LIKE 'max_connections';";
+                await using var r2 = await cmd.ExecuteReaderAsync(ct);
+                if (await r2.ReadAsync(ct) && int.TryParse(r2.GetString(1), out var mc))
+                {
+                    maxConn = mc;
+                }
+            }
+            catch { }
+
+            // 3. Database Size
+            try
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandTimeout = 5;
+                cmd.CommandText = "SELECT CONCAT(ROUND(SUM(data_length + index_length) / (1024 * 1024), 1), ' MB') FROM information_schema.tables WHERE table_schema = DATABASE();";
+                var res = await cmd.ExecuteScalarAsync(ct);
+                if (res is not null && res != DBNull.Value) dbSize = res.ToString();
+            }
+            catch { }
+
+            // 4. Cache Hit Ratio (InnoDB Buffer Pool Hit Ratio)
+            try
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandTimeout = 5;
+                cmd.CommandText = "SHOW STATUS WHERE Variable_name IN ('Innodb_buffer_pool_read_requests', 'Innodb_buffer_pool_reads');";
+                await using var r3 = await cmd.ExecuteReaderAsync(ct);
+                long readRequests = 0;
+                long reads = 0;
+                while (await r3.ReadAsync(ct))
+                {
+                    var name = r3.GetString(0);
+                    if (name.Equals("Innodb_buffer_pool_read_requests", StringComparison.OrdinalIgnoreCase) && long.TryParse(r3.GetString(1), out var rr))
+                        readRequests = rr;
+                    else if (name.Equals("Innodb_buffer_pool_reads", StringComparison.OrdinalIgnoreCase) && long.TryParse(r3.GetString(1), out var rd))
+                        reads = rd;
+                }
+                if (readRequests > 0)
+                {
+                    var hit = (readRequests - reads) * 100.0 / readRequests;
+                    cacheHit = Math.Round(Math.Clamp(hit, 0.0, 100.0), 1);
+                }
+            }
+            catch { }
+
+            // 5. Blocked Queries Count
+            try
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandTimeout = 5;
+                cmd.CommandText = "SELECT count(*) FROM information_schema.processlist WHERE state LIKE '%lock%' OR state LIKE '%Waiting for%';";
+                var res = await cmd.ExecuteScalarAsync(ct);
+                if (res is not null && res != DBNull.Value) blockedCount = Convert.ToInt32(res);
+            }
+            catch { }
+        }
+        catch { }
+
+        return new TargetTelemetry(activeConn, maxConn, dbSize, cacheHit, blockedCount);
+    }
+
     public void RegisterMessageListener(DbConnection connection, Action<string> onMessage)
     {
         if (connection is MySqlConnection mysqlConn)

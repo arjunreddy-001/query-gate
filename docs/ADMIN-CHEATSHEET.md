@@ -52,7 +52,8 @@ Initial default grants added at registration (configurable under Permissions):
 | Rename a database / change environment | Databases → Edit        | Update Name and Environment, then Save                                                                        |
 | Include disabled databases in list     | Databases               | Tick **Show disabled**                                                                                        |
 | Disable a database                     | Databases → Edit        | Untick _Enabled_                                                                                              |
-| Test a registered database quickly     | Databases               | Click **Test** on the database row                                                                            |
+| Test a registered database quickly     | Databases               | Click **Check** on the database row to probe connection and latency                                           |
+| Monitor database health and latency    | Databases               | Live connectivity, latency, KPI summary cards, and diagnostics are integrated directly on the Databases page  |
 | Time-boxed access                      | Permissions → Add grant | Set start and end times                                                                                       |
 | Review who can do what                 | Access matrix           | Pick a database, then **Export CSV**                                                                          |
 | Investigate activity                   | Audit log               | Filter by user, outcome or date, expand **SQL**, **Export CSV**                                               |
@@ -73,12 +74,13 @@ The Settings page is organized into five tabs: **General & Limits**, **Email & S
 | Object metadata cache (on/off) / TTL       | On / 10 min  |
 | Temporary password length                  | 16           |
 | Dynamic Data Masking (on/off)              | On           |
+| Additional roles for DB health             | (blank, Admin only) |
 
 **Metadata cache:** the _Object metadata cache_ card on the Settings page shows what is cached per database, with the environment in a separate column. Use _Enable/Disable_, per-database _Reload_ / _Clear_, or _Reload all_ / _Clear all_. All actions are audited.
 
 **Email & SMTP:** configure outgoing SMTP server (host, port, SSL/TLS, username, encrypted password, sender address) directly in the UI. Use _Send test email_ to verify delivery immediately. Falls back to environment/appsettings if unconfigured in the UI.
 
-**Collaboration Webhooks:** add webhooks for Slack, Microsoft Teams, Zoho Cliq, Discord, or generic endpoints. Supports event filters (all, access/script requests only, script executions only) and instant _Test_ dispatch.
+**Collaboration Webhooks:** add webhooks for Slack, Microsoft Teams, Zoho Cliq, Discord, or generic endpoints. Supports event filters (all, access/script requests only, script executions only, or database health alerts only) and instant _Test_ dispatch.
 
 **Data Masking:** manage dynamic data masking rules directly in the UI with HIPAA Safe Harbor, GDPR, PCI-DSS, SOC 2, and CCPA compliance. Filter rules by Origin (All, Built-in, Custom) and regulatory standards. Configure column patterns, select masking strategies (`Name`, `MedicalRecord`, `DateOfBirth`, `Address`, `ZipCode`, `Email`, `CreditCard`, `Ssn`, `Phone`, `IpAddress`, `Salary`, `Secret`, or `CustomText` with custom strings like `[CONFIDENTIAL]`), enable/disable rules or global masking, add/edit rules, test pattern matching with instant live preview, or reset to defaults. Includes security confirmation modals before destructive actions (deleting rules, disabling global masking, resetting to defaults). All administrative actions across the app (grants, approvals, user lifecycle, settings) report instant feedback through highlighted top-center floating toast notifications with animated drain timers. All rule updates are audited.
 
@@ -86,11 +88,12 @@ The Settings page is organized into five tabs: **General & Limits**, **Email & S
 
 | Page                                                       | Admin | Auditor | Developer / Tester |
 | ---------------------------------------------------------- | :---: | :-----: | :----------------: |
-| Approvals, Users, Databases, Permissions, Logs, Settings   |   ✔   |         |                    |
+| Approvals, Users, Permissions, Logs, Settings              |   ✔   |         |                    |
+| Databases (management / health monitoring)                 |   ✔   | Config  |       Config       |
 | Audit log, Access matrix                                   |   ✔   |    ✔    |                    |
 | Query workspace, My access, Script requests, Notifications |   ✔   |    ✔    |         ✔          |
 
-Audit and Access matrix access is configurable per role; the Auditor column describes the initial configuration.
+Audit and Access matrix access is configurable per role; Databases access defaults to Admin and SuperAdmin and can be extended to additional roles in read-only monitoring mode via the HealthVisibleRoles setting; the Auditor column describes the initial configuration.
 
 ## 6. Rules of thumb
 

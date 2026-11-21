@@ -154,6 +154,8 @@ builder.Services.AddScoped<ClientInfo>();
 builder.Services.AddScoped<CircuitHandler, ClientInfoCircuitHandler>();
 builder.Services.AddScoped<ToastService>();
 builder.Services.AddHostedService<MaintenanceWorker>();
+builder.Services.AddSingleton<HealthMonitorService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<HealthMonitorService>());
 
 var app = builder.Build();
 
