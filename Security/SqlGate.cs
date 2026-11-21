@@ -1,6 +1,9 @@
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.RegularExpressions;
 using DbAccessManager.Data;
+using DbAccessManager.Services;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 
 namespace DbAccessManager.Security;
@@ -44,10 +47,26 @@ public sealed class GateAnalysis
             ObjectRequirements.Add(new ObjectRequirement(permission, s, obj));
         }
     }
+
+    public GateAnalysis Clone()
+    {
+        var clone = new GateAnalysis { Parsed = Parsed };
+        clone.Batches.AddRange(Batches);
+        clone.BatchOffsets.AddRange(BatchOffsets);
+        clone.Statements.AddRange(Statements);
+        foreach (var req in Requirements) clone.Requirements.Add(req);
+        clone.ObjectRequirements.AddRange(ObjectRequirements);
+        clone.HardDenials.AddRange(HardDenials);
+        clone.ParseErrors.AddRange(ParseErrors);
+        clone.UnfilteredWrites.AddRange(UnfilteredWrites);
+        return clone;
+    }
 }
 
-public sealed partial class SqlGate
+public sealed partial class SqlGate(IMemoryCache? cache = null)
 {
+    private readonly ConcurrentDictionary<string, GateAnalysis> _localCache = new();
+
     private static readonly HashSet<string> HarmlessTypes = new(StringComparer.Ordinal)
     {
         nameof(DeclareVariableStatement), nameof(SetVariableStatement), nameof(PrintStatement),
@@ -69,19 +88,49 @@ public sealed partial class SqlGate
 
     public GateAnalysis Analyze(string sql, DatabaseEngine engine)
     {
-        var analysis = new GateAnalysis { Parsed = true };
         if (string.IsNullOrWhiteSpace(sql))
         {
-            analysis.ParseErrors.Add("The script is empty.");
-            return analysis;
+            var empty = new GateAnalysis { Parsed = true };
+            empty.ParseErrors.Add("The script is empty.");
+            return empty;
         }
 
+        var cacheKey = $"sqlgate:{engine}:{CryptoService.Sha256(sql)}";
+        if (cache != null && cache.TryGetValue(cacheKey, out GateAnalysis? cached) && cached != null)
+        {
+            return cached.Clone();
+        }
+        if (cache == null && _localCache.TryGetValue(cacheKey, out var localCached))
+        {
+            return localCached.Clone();
+        }
+
+        var analysis = new GateAnalysis { Parsed = true };
+        GateAnalysis result;
         if (engine == DatabaseEngine.SqlServer)
         {
-            return AnalyzeSqlServer(sql, analysis);
+            result = AnalyzeSqlServer(sql, analysis);
+        }
+        else
+        {
+            result = AnalyzeStandardSql(sql, engine, analysis);
         }
 
-        return AnalyzeStandardSql(sql, engine, analysis);
+        if (cache != null)
+        {
+            cache.Set(cacheKey, result, TimeSpan.FromMinutes(30));
+        }
+        else if (_localCache.Count < 5000)
+        {
+            _localCache[cacheKey] = result;
+        }
+
+        return result.Clone();
+    }
+
+    public void ClearCache()
+    {
+        _localCache.Clear();
     }
 
     private GateAnalysis AnalyzeSqlServer(string sql, GateAnalysis analysis)

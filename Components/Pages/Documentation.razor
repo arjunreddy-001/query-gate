@@ -1,37 +1,105 @@
 @page "/documentation"
 @layout PublicLayout
+@inject IJSRuntime JS
 
 <PageTitle>Documentation · Query Gate</PageTitle>
 
-<div class="docs-page">
+<div class="docs-page" id="top">
     <div class="docs-heading">
         <span class="landing-kicker">QUERY GATE DOCUMENTATION</span>
         <h1>Documentation</h1>
         <p>Deploy, configure and use Query Gate to give your team governed access to SQL Server, PostgreSQL, MySQL and MariaDB.</p>
     </div>
+
+    <!-- Mobile Navigation Bar (Sticky on mobile, hidden on desktop) -->
+    <div class="docs-mobile-nav">
+        <div class="docs-mobile-toc" id="docsMobileToc">
+            <button type="button" class="docs-mobile-toc-trigger" id="docsMobileTocTrigger" aria-expanded="false" aria-controls="docsMobileDropdown">
+                <span class="docs-mobile-toc-icon"><Icon Name="list" /></span>
+                <span class="docs-mobile-toc-label">
+                    <span class="docs-mobile-toc-kicker">ON THIS PAGE</span>
+                    <strong class="docs-mobile-current-title">Overview</strong>
+                </span>
+                <span class="docs-mobile-toc-arrow"><Icon Name="chevron" /></span>
+            </button>
+            <div class="docs-mobile-dropdown" id="docsMobileDropdown">
+                <div class="docs-nav-group">
+                    <span class="docs-nav-group-title">Getting Started</span>
+                    <a href="/documentation#overview">Overview</a>
+                    <a href="/documentation#first-steps">First steps</a>
+                </div>
+                <div class="docs-nav-group">
+                    <span class="docs-nav-group-title">Features &amp; Security</span>
+                    <a href="/documentation#user-guide">User guide</a>
+                    <a href="/documentation#object-rules">Object scoping</a>
+                    <a href="/documentation#data-masking">Data masking</a>
+                    <a href="/documentation#exports-and-plans">Exports &amp; Explain</a>
+                    <a href="/documentation#multi-tenancy">Multi-tenancy &amp; Workspaces</a>
+                </div>
+                <div class="docs-nav-group">
+                    <span class="docs-nav-group-title">Deployment</span>
+                    <a href="/documentation#deployment" class="docs-nav-parent">Deployment options</a>
+                    <a href="/documentation#docker" class="docs-nav-sub">Docker Compose <span class="docs-nav-pill">Fast</span></a>
+                    <a href="/documentation#reverse-proxies" class="docs-nav-sub">Reverse proxies &amp; Coolify</a>
+                    <a href="/documentation#iis" class="docs-nav-sub">IIS on Windows</a>
+                    <a href="/documentation#azure" class="docs-nav-sub">Azure App Service</a>
+                    <a href="/documentation#linux" class="docs-nav-sub">Linux server</a>
+                    <a href="/documentation#configuration">Configuration &amp; environment</a>
+                </div>
+                <div class="docs-nav-group">
+                    <span class="docs-nav-group-title">Help &amp; Support</span>
+                    <a href="/documentation#troubleshooting">Troubleshooting</a>
+                    <a href="/documentation#resources">More resources</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="docs-layout">
-        <nav class="docs-nav" aria-label="Documentation sections">
-            <a href="/documentation#overview">Overview</a>
-            <a href="/documentation#user-guide">User guide</a>
-            <a href="/documentation#object-rules">Object scoping</a>
-            <a href="/documentation#data-masking">Data masking</a>
-            <a href="/documentation#exports-and-plans">Exports &amp; Explain</a>
-            <a href="/documentation#iis">IIS</a>
-            <a href="/documentation#azure">Azure App Service</a>
-            <a href="/documentation#linux">Linux server</a>
-            <a href="/documentation#docker">Docker</a>
-            <a href="/documentation#reverse-proxies">Reverse proxies &amp; Coolify</a>
-            <a href="/documentation#configuration">Configuration</a>
-            <a href="/documentation#first-steps">First steps</a>
-            <a href="/documentation#troubleshooting">Troubleshooting</a>
-            <a href="/documentation#resources">More resources</a>
-        </nav>
+        <!-- Desktop Sidebar Navigation -->
+        <aside class="docs-sidebar">
+            <nav class="docs-nav" aria-label="Documentation sections">
+                <div class="docs-nav-group">
+                    <span class="docs-nav-group-title">Getting Started</span>
+                    <a href="/documentation#overview">Overview</a>
+                    <a href="/documentation#first-steps">First steps</a>
+                </div>
+
+                <div class="docs-nav-group">
+                    <span class="docs-nav-group-title">Features &amp; Security</span>
+                    <a href="/documentation#user-guide">User guide</a>
+                    <a href="/documentation#object-rules">Object scoping</a>
+                    <a href="/documentation#data-masking">Data masking</a>
+                    <a href="/documentation#exports-and-plans">Exports &amp; Explain</a>
+                    <a href="/documentation#multi-tenancy">Multi-tenancy &amp; Workspaces</a>
+                </div>
+
+                <div class="docs-nav-group">
+                    <span class="docs-nav-group-title">Deployment</span>
+                    <a href="/documentation#deployment" class="docs-nav-parent">Deployment options</a>
+                    <a href="/documentation#docker" class="docs-nav-sub">Docker Compose <span class="docs-nav-pill">Fast</span></a>
+                    <a href="/documentation#reverse-proxies" class="docs-nav-sub">Reverse proxies &amp; Coolify</a>
+                    <a href="/documentation#iis" class="docs-nav-sub">IIS on Windows</a>
+                    <a href="/documentation#azure" class="docs-nav-sub">Azure App Service</a>
+                    <a href="/documentation#linux" class="docs-nav-sub">Linux server</a>
+                    <a href="/documentation#configuration">Configuration &amp; environment</a>
+                </div>
+
+                <div class="docs-nav-group">
+                    <span class="docs-nav-group-title">Help &amp; Support</span>
+                    <a href="/documentation#troubleshooting">Troubleshooting</a>
+                    <a href="/documentation#resources">More resources</a>
+                </div>
+            </nav>
+        </aside>
+
         <div class="docs-content">
             <section id="overview">
                 <h2>Overview</h2>
-                <p>Query Gate is a .NET 10 Blazor Server application for governed database access across SQL Server, PostgreSQL, MySQL and MariaDB. Users work in a query workspace without seeing database credentials. Permissions, approvals and audit records control and document every execution.</p>
+                <p>Query Gate is a .NET 10 Blazor Server application backed by PostgreSQL for governed database access across PostgreSQL, SQL Server, MySQL and MariaDB. Users work in a query workspace without seeing database credentials. Permissions, approvals and audit records control and document every execution.</p>
                 <p>Key capabilities: permission-gated SQL with ScriptDom AST parsing, multi-engine support, granular object-level scoping and role boundaries, dynamic PII data masking (HIPAA, GDPR, PCI-DSS, SOC 2), visual query execution plans, time-boxed access grants, audit-first execution, passkey / TOTP authentication, an access-request workflow, and multi-format exports (CSV, Excel XLSX/XLSB, JSON, Markdown, and SQL INSERT scripts).</p>
             </section>
+
             <section id="user-guide">
                 <h2>User guide</h2>
                 <p>Query Gate provides engineers and auditors with controlled database access while eliminating credential sprawl.</p>
@@ -62,6 +130,7 @@
                     </div>
                 </div>
             </section>
+
             <section id="object-rules">
                 <h2>Object-level scoping and boundaries</h2>
                 <p>Query Gate allows administrators to restrict access not just per database, but down to specific schemas and tables:</p>
@@ -72,6 +141,7 @@
                     <li><b>Conflict prevention:</b> Query Gate automatically detects if an object is simultaneously included and excluded, preventing accidental misconfigurations.</li>
                 </ul>
             </section>
+
             <section id="data-masking">
                 <h2>Dynamic data masking and compliance</h2>
                 <p>Query Gate includes built-in compliance presets aligned with major regulatory standards:</p>
@@ -83,6 +153,7 @@
                     <li><b>The UNMASK permission:</b> Marked as High Risk in the access matrix; required to view unredacted data. All unmasked queries are recorded in the audit trail.</li>
                 </ul>
             </section>
+
             <section id="exports-and-plans">
                 <h2>Exports and query explain plans</h2>
                 <p>Query results can be exported into multiple formats depending on your workflow:</p>
@@ -95,74 +166,236 @@
                     <li><b>Explain Plan:</b> Click <b>Explain</b> in the query workspace to generate and visualize estimated subtree costs, operator hierarchies, and execution steps.</li>
                 </ul>
             </section>
-            <section id="iis">
-                <h2>Deploy to IIS on Windows</h2>
-                <p>Install IIS, the WebSocket Protocol feature and the .NET 10 Hosting Bundle. Publish the project:</p>
-                <pre><code>dotnet publish DbAccessManager.csproj -c Release -r win-x64 --self-contained false -o ./publish</code></pre>
-                <p>Deploy the published files, including <code>web.config</code>, to an IIS site at the domain root. Configure a dedicated application pool with No Managed Code, bind a trusted HTTPS certificate, and give the pool identity access to a persistent data protection key directory. Set the application configuration and run the first migration with one instance, as described in the <a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/DEPLOYMENT.md#iis-on-windows">IIS guide</a>.</p>
-            </section>
-            <section id="azure">
-                <h2>Deploy to Azure App Service</h2>
-                <p>Create a Windows App Service with a .NET 10 runtime and connectivity to your SQL Server. Enable HTTPS Only and WebSockets, and use one instance. Publish the application and deploy the contents of the publish directory.</p>
-                <p>Set the SQL connection, encryption and JWT keys, bootstrap credentials and a persistent data protection key path in App Service configuration. Apply migrations on the first start, then remove bootstrap credentials. See the <a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/DEPLOYMENT.md#azure-app-service-windows">Azure guide</a> for settings and upgrade steps.</p>
-            </section>
-            <section id="linux">
-                <h2>Deploy to a Linux server</h2>
-                <p>Install the .NET 10 ASP.NET Core runtime, publish the application, and run it under a dedicated service account with systemd. The example uses Kestrel HTTPS directly with a trusted PFX certificate and a persistent key directory.</p>
-                <p>Configure SQL Server access, secrets and migrations before starting the service. See the <a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/DEPLOYMENT.md#linux-server-with-systemd">Linux guide</a> for a systemd unit and environment settings.</p>
-            </section>
-            <section id="docker">
-                <h2>Deploy with Docker</h2>
-                <p>Run Query Gate with Docker Compose. The setup includes a bundled SQL Server 2022 container, automatic database migrations, auto-generated persistent encryption keys, and a web setup wizard for creating the initial root administrator.</p>
+
+            <section id="multi-tenancy">
+                <h2>Multi-tenancy and workspaces</h2>
+                <p>Query Gate supports multi-tenant workspaces with complete data isolation, allowing multiple independent organizations or departments to share a single platform deployment.</p>
+                <ul>
+                    <li><b>Path-prefix routing (/t/[slug]/):</b> Workspaces are accessed using a clean path prefix such as <code>/t/acme/dashboard</code> or <code>/t/marketing/query</code>. All navigation, query tabs, and administrative tools operate within that workspace context.</li>
+                    <li><b>Custom domain mapping:</b> Map dedicated hostnames (such as <code>data.acme.com</code>) directly to a workspace. Query Gate resolves the tenant directly from the Host header with no path prefix required.</li>
+                    <li><b>Row-level data isolation:</b> All tenant entities (databases, permission grants, audit logs, saved queries, query history, access requests, script requests, and environments) are strictly partitioned by <code>TenantId</code> using Entity Framework Core global query filters. Queries cannot read or write data across tenant boundaries.</li>
+                    <li><b>Multi-tenant user memberships:</b> A single user account can belong to multiple workspaces with different roles in each (for example, Administrator in one workspace and Developer in another). Users can switch between workspaces using the topbar dropdown or the <code>/select-tenant</code> hub.</li>
+                    <li><b>Tenant-isolated settings:</b> Each workspace maintains its own SMTP email server configuration, outgoing team notification webhooks (Slack, Teams, Discord, Zoho Cliq), and branding preferences.</li>
+                    <li><b>Platform administration:</b> Users in the <code>SuperAdmin</code> role have access to <code>/platform/tenants</code> to provision workspaces, configure custom domains, toggle tenant access, and inspect global health. Platform administrators exist outside tenant data boundaries to preserve tenant privacy.</li>
+                </ul>
+
+                <h3>Setting up the SuperAdmin role</h3>
+                <p>The <code>SuperAdmin</code> role unlocks platform-level management at <code>/platform/tenants</code>. There are two ways to assign this role:</p>
                 <ol>
-                    <li>Clone the <a href="https://github.com/arjunreddy-001/query-gate">GitHub repository</a>.</li>
-                    <li>(Optional) Copy <code>.env.example</code> to <code>.env</code> to customize optional settings like database password or port. All variables are optional.</li>
-                    <li>Start the stack:</li>
+                    <li>
+                        <b>Bootstrap configuration (Recommended):</b> Set <code>BOOTSTRAP_ADMIN_EMAIL</code> and <code>BOOTSTRAP_ADMIN_PASSWORD</code> (or <code>BootstrapAdmin__Email</code> and <code>BootstrapAdmin__Password</code>). During startup, Query Gate automatically creates the user account (or finds the existing user) and assigns both <code>Admin</code> and <code>SuperAdmin</code> roles.
+                    </li>
+                    <li>
+                        <b>Direct PostgreSQL SQL assignment:</b> If Query Gate is already running and you need to elevate an account immediately without restarting:
+                        <div class="code-block-wrap" style="margin:12px 0">
+                            <pre><code>-- Ensure the SuperAdmin role exists
+INSERT INTO "AspNetRoles" ("Id", "Name", "NormalizedName", "ConcurrencyStamp")
+VALUES (gen_random_uuid()::text, 'SuperAdmin', 'SUPERADMIN', gen_random_uuid()::text)
+ON CONFLICT ("NormalizedName") DO NOTHING;
+
+-- Assign SuperAdmin role to the user
+INSERT INTO "AspNetUserRoles" ("UserId", "RoleId")
+SELECT u."Id", r."Id"
+FROM "AspNetUsers" u
+JOIN "AspNetRoles" r ON r."NormalizedName" = 'SUPERADMIN'
+WHERE u."NormalizedEmail" = UPPER('admin@company.com')
+ON CONFLICT DO NOTHING;</code></pre>
+                        </div>
+                        <p class="muted small">Sign out and sign back in after running the query to refresh authentication session claims.</p>
+                    </li>
                 </ol>
-                <pre><code>docker compose up -d
+
+                <h3>Workspace provisioning and user onboarding</h3>
+                <p>To preserve tight security controls over internal database infrastructure, Query Gate disables public self-service signup. Workspaces and users follow an administrative workflow:</p>
+                <ul>
+                    <li><b>Provisioning a workspace:</b> A SuperAdmin navigates to <code>/platform/tenants</code>, clicks <b>Create Workspace</b>, and specifies the name, slug, contact email, plan, and initial administrator email.</li>
+                    <li><b>Connecting custom domains:</b> Click <b>Domains</b> on any workspace row in <code>/platform/tenants</code> to bind a custom hostname (for example, <code>sql.acme.com</code>). Point your DNS CNAME or A record to the Query Gate host for direct host-based routing.</li>
+                    <li><b>Adding users to a workspace:</b> Workspace administrators navigate to <b>Admin &rarr; Users</b> (<code>/admin/users</code>) and click <b>New user</b>. Existing platform accounts are associated with the workspace immediately, while new users receive a generated temporary password and must set their password upon initial sign in.</li>
+                </ul>
+            </section>
+
+            <!-- Grouped Deployment Section -->
+            <section id="deployment" class="docs-section-group">
+                <h2>Deployment options</h2>
+                <p>Query Gate is a .NET 10 interactive server application backed by PostgreSQL. Interactive sessions use SignalR, which requires WebSocket support and HTTPS on remote hosts. Deploy Query Gate at the root of a domain name rather than a subpath. Choose the deployment option that fits your team's workflow and infrastructure:</p>
+
+                <!-- Quick Deployment Chooser Grid -->
+                <div class="docs-deploy-cards">
+                    <a href="/documentation#docker" class="docs-deploy-card featured">
+                        <div class="docs-deploy-card-top">
+                            <span class="docs-deploy-icon"><Icon Name="terminal" /></span>
+                            <span class="docs-deploy-badge">Recommended</span>
+                        </div>
+                        <div class="docs-deploy-card-body">
+                            <strong class="docs-deploy-card-title">Docker Compose</strong>
+                            <p>One-command setup with bundled PostgreSQL 17, automated migrations, persistent keys, and setup wizard.</p>
+                        </div>
+                        <span class="docs-deploy-action">View setup <Icon Name="chevron" /></span>
+                    </a>
+                    <a href="/documentation#reverse-proxies" class="docs-deploy-card">
+                        <div class="docs-deploy-card-top">
+                            <span class="docs-deploy-icon"><Icon Name="shield" /></span>
+                        </div>
+                        <div class="docs-deploy-card-body">
+                            <strong class="docs-deploy-card-title">Reverse Proxies &amp; Coolify</strong>
+                            <p>Production TLS termination with Caddy, Nginx, Traefik, Cloudflare Tunnel, or Coolify PaaS.</p>
+                        </div>
+                        <span class="docs-deploy-action">View setup <Icon Name="chevron" /></span>
+                    </a>
+                    <a href="/documentation#iis" class="docs-deploy-card">
+                        <div class="docs-deploy-card-top">
+                            <span class="docs-deploy-icon"><Icon Name="db" /></span>
+                        </div>
+                        <div class="docs-deploy-card-body">
+                            <strong class="docs-deploy-card-title">IIS on Windows</strong>
+                            <p>Dedicated application pool with No Managed Code, WebSockets, and .NET 10 Hosting Bundle.</p>
+                        </div>
+                        <span class="docs-deploy-action">View setup <Icon Name="chevron" /></span>
+                    </a>
+                    <a href="/documentation#azure" class="docs-deploy-card">
+                        <div class="docs-deploy-card-top">
+                            <span class="docs-deploy-icon"><Icon Name="activity" /></span>
+                        </div>
+                        <div class="docs-deploy-card-body">
+                            <strong class="docs-deploy-card-title">Azure App Service</strong>
+                            <p>Managed cloud hosting with HTTPS Only, WebSockets, persistent keys, and Key Vault integration.</p>
+                        </div>
+                        <span class="docs-deploy-action">View setup <Icon Name="chevron" /></span>
+                    </a>
+                    <a href="/documentation#linux" class="docs-deploy-card">
+                        <div class="docs-deploy-card-top">
+                            <span class="docs-deploy-icon"><Icon Name="code" /></span>
+                        </div>
+                        <div class="docs-deploy-card-body">
+                            <strong class="docs-deploy-card-title">Linux Server (systemd)</strong>
+                            <p>Direct Kestrel HTTPS service under a dedicated unprivileged user managed with systemd.</p>
+                        </div>
+                        <span class="docs-deploy-action">View setup <Icon Name="chevron" /></span>
+                    </a>
+                </div>
+
+                <!-- Grouped Detailed Deployment Subsections -->
+                <div class="docs-subsections">
+                    <div id="docker" class="docs-subsection">
+                        <div class="docs-subsection-header">
+                            <span class="docs-subsection-pill recommended">Recommended</span>
+                            <h3>Deploy with Docker</h3>
+                        </div>
+                        <p>Run Query Gate with Docker Compose. The setup includes a bundled PostgreSQL 17 container, automatic database migrations, auto-generated persistent encryption keys, and a web setup wizard for creating the initial root administrator.</p>
+                        <ol>
+                            <li>Clone the <a href="https://github.com/arjunreddy-001/query-gate">GitHub repository</a>.</li>
+                            <li>(Optional) Copy <code>.env.example</code> to <code>.env</code> to customize optional settings like database password or port. All variables are optional.</li>
+                            <li>Start the stack:</li>
+                        </ol>
+                        <div class="docs-code-block">
+                            <pre><code>docker compose up -d
 docker compose logs -f query-gate</code></pre>
-                <ol start="4">
-                    <li>Open <code>http://localhost:5176</code> in your browser. (For remote hosts or production, see the HTTPS requirement below).</li>
-                    <li>On first visit, Query Gate launches the setup wizard to create your root administrator account directly in the browser.</li>
-                    <li>Sign in and explore your new governed workspace.</li>
-                </ol>
-                <p><strong>HTTPS requirement on remote hosts:</strong> Browsers treat <code>localhost</code> as a secure context, so plain HTTP works locally. When deploying to a remote server or domain, HTTPS is mandatory. Modern browsers block Blazor Server interactive circuits and antiforgery tokens on unencrypted HTTP, which prevents database registration and query execution from functioning.</p>
-                <p><strong>External SQL Server:</strong> To connect to an existing database instead of the bundled container, set <code>DB_CONNECTION_STRING</code> in <code>.env</code>. Inside containers, <code>localhost</code> resolves to the container itself; on Docker Desktop use <code>host.docker.internal</code>.</p>
-                <p>For detailed setup, upgrades, backups, and security notes, see the <a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/DOCKER.md">Docker deployment guide</a>.</p>
+                            <button type="button" class="btn-code-copy" data-copy="docker compose up -d&#10;docker compose logs -f query-gate" title="Copy command" aria-label="Copy command">
+                                <Icon Name="copy" />
+                                <span>Copy</span>
+                            </button>
+                        </div>
+                        <ol start="4">
+                            <li>Open <code>http://localhost:5176</code> in your browser. (For remote hosts or production, see the HTTPS requirement below).</li>
+                            <li>On first visit, Query Gate launches the setup wizard to create your root administrator account directly in the browser.</li>
+                            <li>Sign in and explore your new governed workspace.</li>
+                        </ol>
+                        <p><strong>HTTPS requirement on remote hosts:</strong> Browsers treat <code>localhost</code> as a secure context, so plain HTTP works locally. When deploying to a remote server or domain, HTTPS is mandatory. Modern browsers block Blazor Server interactive circuits and antiforgery tokens on unencrypted HTTP, which prevents database registration and query execution from functioning.</p>
+                        <p><strong>External PostgreSQL database:</strong> To connect to an existing database instead of the bundled container, set <code>DB_CONNECTION_STRING</code> in <code>.env</code>. Inside containers, <code>localhost</code> resolves to the container itself; on Docker Desktop use <code>host.docker.internal</code>.</p>
+                        <p>For detailed setup, upgrades, backups, and security notes, see the <a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/DOCKER.md">Docker deployment guide</a>.</p>
+                    </div>
+
+                    <div id="reverse-proxies" class="docs-subsection">
+                        <div class="docs-subsection-header">
+                            <span class="docs-subsection-pill">Production Architecture</span>
+                            <h3>Reverse proxies and Coolify</h3>
+                        </div>
+                        <p>When deploying in production, it is common to place Query Gate behind a reverse proxy such as Caddy, Nginx, Traefik, Cloudflare Tunnel, or a self-hosting platform like Coolify.</p>
+                        <p>Query Gate listens on plain HTTP port 5176 inside the container. The reverse proxy handles public HTTPS traffic, manages Let's Encrypt certificates, and forwards requests internally to port 5176.</p>
+                        <h4>Deploying on Coolify</h4>
+                        <ol>
+                            <li>In Coolify, create a new Project and choose <strong>Docker Compose</strong>.</li>
+                            <li>Connect your Git repository or paste the repository Compose configuration.</li>
+                            <li>Set your domain name (for example, <code>querygate.yourdomain.com</code>). Coolify will automatically provision SSL certificates and route traffic to port 5176.</li>
+                            <li>Deploy the stack and visit your domain to complete the initial setup wizard.</li>
+                        </ol>
+                        <h4>Forwarded headers</h4>
+                        <p>Configure your reverse proxy to forward client headers (<code>X-Forwarded-For</code> and <code>X-Forwarded-Proto</code>) so that client IP addresses and protocol schemes are preserved accurately in the audit log.</p>
+                    </div>
+
+                    <div id="iis" class="docs-subsection">
+                        <div class="docs-subsection-header">
+                            <span class="docs-subsection-pill">Windows Server</span>
+                            <h3>Deploy to IIS on Windows</h3>
+                        </div>
+                        <p>Install IIS, the WebSocket Protocol feature and the .NET 10 Hosting Bundle. Publish the project:</p>
+                        <div class="docs-code-block">
+                            <pre><code>dotnet publish DbAccessManager.csproj -c Release -r win-x64 --self-contained false -o ./publish</code></pre>
+                            <button type="button" class="btn-code-copy" data-copy="dotnet publish DbAccessManager.csproj -c Release -r win-x64 --self-contained false -o ./publish" title="Copy command" aria-label="Copy command">
+                                <Icon Name="copy" />
+                                <span>Copy</span>
+                            </button>
+                        </div>
+                        <p>Deploy the published files, including <code>web.config</code>, to an IIS site at the domain root. Configure a dedicated application pool with No Managed Code, bind a trusted HTTPS certificate, and give the pool identity access to a persistent data protection key directory. Set the application configuration and run the first migration with one instance, as described in the <a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/DEPLOYMENT.md#iis-on-windows">IIS guide</a>.</p>
+                    </div>
+
+                    <div id="azure" class="docs-subsection">
+                        <div class="docs-subsection-header">
+                            <span class="docs-subsection-pill">Cloud PaaS</span>
+                            <h3>Deploy to Azure App Service</h3>
+                        </div>
+                        <p>Create an App Service with a .NET 10 runtime and connectivity to your PostgreSQL database. Enable HTTPS Only and WebSockets, and use one instance. Publish the application and deploy the contents of the publish directory:</p>
+                        <div class="docs-code-block">
+                            <pre><code>dotnet publish DbAccessManager.csproj -c Release -o ./publish</code></pre>
+                            <button type="button" class="btn-code-copy" data-copy="dotnet publish DbAccessManager.csproj -c Release -o ./publish" title="Copy command" aria-label="Copy command">
+                                <Icon Name="copy" />
+                                <span>Copy</span>
+                            </button>
+                        </div>
+                        <p>Set the PostgreSQL connection, encryption and JWT keys, bootstrap credentials and a persistent data protection key path in App Service configuration. Apply migrations on the first start, then remove bootstrap credentials. See the <a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/DEPLOYMENT.md#azure-app-service-windows">Azure guide</a> for settings and upgrade steps.</p>
+                    </div>
+
+                    <div id="linux" class="docs-subsection">
+                        <div class="docs-subsection-header">
+                            <span class="docs-subsection-pill">Linux VM</span>
+                            <h3>Deploy to a Linux server</h3>
+                        </div>
+                        <p>Install the .NET 10 ASP.NET Core runtime, publish the application, and run it under a dedicated service account with systemd:</p>
+                        <div class="docs-code-block">
+                            <pre><code>dotnet publish DbAccessManager.csproj -c Release -r linux-x64 --self-contained false -o ./publish</code></pre>
+                            <button type="button" class="btn-code-copy" data-copy="dotnet publish DbAccessManager.csproj -c Release -r linux-x64 --self-contained false -o ./publish" title="Copy command" aria-label="Copy command">
+                                <Icon Name="copy" />
+                                <span>Copy</span>
+                            </button>
+                        </div>
+                        <p>Configure PostgreSQL access, secrets and migrations before starting the service. See the <a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/DEPLOYMENT.md#linux-server-with-systemd">Linux guide</a> for a systemd unit and environment settings.</p>
+                    </div>
+                </div>
             </section>
-            <section id="reverse-proxies">
-                <h2>Reverse proxies and Coolify</h2>
-                <p>When deploying in production, it is common to place Query Gate behind a reverse proxy such as Caddy, Nginx, Traefik, Cloudflare Tunnel, or a self-hosting platform like Coolify.</p>
-                <p>Query Gate listens on plain HTTP port 5176 inside the container. The reverse proxy handles public HTTPS traffic, manages Let's Encrypt certificates, and forwards requests internally to port 5176.</p>
-                <h3>Deploying on Coolify</h3>
-                <ol>
-                    <li>In Coolify, create a new Project and choose <strong>Docker Compose</strong>.</li>
-                    <li>Connect your Git repository or paste the repository Compose configuration.</li>
-                    <li>Set your domain name (for example, <code>querygate.yourdomain.com</code>). Coolify will automatically provision SSL certificates and route traffic to port 5176.</li>
-                    <li>Deploy the stack and visit your domain to complete the initial setup wizard.</li>
-                </ol>
-                <h3>Forwarded headers</h3>
-                <p>Configure your reverse proxy to forward client headers (<code>X-Forwarded-For</code> and <code>X-Forwarded-Proto</code>) so that client IP addresses and protocol schemes are preserved accurately in the audit log.</p>
-            </section>
+
             <section id="configuration">
                 <h2>Configuration and operations</h2>
                 <p>All secrets must be kept private and backed up securely. Data protection and encryption keys are stored on the persistent <code>data-protection-keys</code> volume.</p>
-                <table class="docs-table">
-                    <thead><tr><th>Variable</th><th>Description</th><th>Default / Example</th></tr></thead>
-                    <tbody>
-                        <tr><td><code>PORT</code></td><td>Host port mapped to Query Gate. (Optional)</td><td><code>5176</code></td></tr>
-                        <tr><td><code>DB_PASSWORD</code></td><td>SA password for the bundled SQL Server 2022 container. (Optional)</td><td><code>QueryGateDefault!2026</code></td></tr>
-                        <tr><td><code>DB_CONNECTION_STRING</code></td><td>SQL Server connection string overriding the bundled container. (Optional)</td><td><code>Server=mssql;Database=QueryGate;...</code></td></tr>
-                        <tr><td><code>Encryption__Key</code></td><td>Base-64 key used to encrypt stored database connection strings. Auto-generated and persisted in volume if unset. (Optional)</td><td><code>openssl rand -base64 32</code></td></tr>
-                        <tr><td><code>Jwt__Key</code></td><td>Base-64 key used to sign session tokens. Auto-generated and persisted in volume if unset. (Optional)</td><td><code>openssl rand -base64 64</code></td></tr>
-                        <tr><td><code>BootstrapAdmin__Email</code></td><td>Optional email for headless administrator creation. If omitted, the web setup wizard is used.</td><td><code>admin@company.com</code></td></tr>
-                        <tr><td><code>BootstrapAdmin__Password</code></td><td>Optional password for headless administrator creation.</td><td>Min 12 chars, mixed case + digit</td></tr>
-                        <tr><td><code>Database__ApplyMigrationsOnStartup</code></td><td>Automatically apply EF Core migrations on startup. (Optional)</td><td><code>true</code></td></tr>
-                        <tr><td><code>DataProtection__KeyPath</code></td><td>Persistent volume path for key files.</td><td><code>/var/query-gate/keys</code></td></tr>
-                    </tbody>
-                </table>
+                <div class="docs-table-wrap" tabindex="0" role="region" aria-label="Configuration environment variables">
+                    <div class="docs-table-scroll-hint"><Icon Name="chevron" /> Scroll table horizontally to view all columns</div>
+                    <table class="docs-table">
+                        <thead><tr><th>Variable</th><th>Description</th><th>Default / Example</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>PORT</code></td><td>Host port mapped to Query Gate. (Optional)</td><td><code>5176</code></td></tr>
+                            <tr><td><code>DB_PASSWORD</code></td><td>Password for the bundled PostgreSQL container (user <code>querygate</code>). (Optional)</td><td><code>QueryGateDefault!2026</code></td></tr>
+                            <tr><td><code>DB_CONNECTION_STRING</code></td><td>PostgreSQL connection string overriding the bundled container. (Optional)</td><td><code>Host=querygate-postgres;Port=5432;Database=QueryGate;Username=querygate;Password=...</code></td></tr>
+                            <tr><td><code>Encryption__Key</code></td><td>Base-64 key used to encrypt stored database connection strings. Auto-generated and persisted in volume if unset. (Optional)</td><td><span class="inline-code-copy"><code>openssl rand -base64 32</code><button type="button" class="btn-inline-copy" data-copy="openssl rand -base64 32" title="Copy command" aria-label="Copy command"><Icon Name="copy" /></button></span></td></tr>
+                            <tr><td><code>Jwt__Key</code></td><td>Base-64 key used to sign session tokens. Auto-generated and persisted in volume if unset. (Optional)</td><td><span class="inline-code-copy"><code>openssl rand -base64 64</code><button type="button" class="btn-inline-copy" data-copy="openssl rand -base64 64" title="Copy command" aria-label="Copy command"><Icon Name="copy" /></button></span></td></tr>
+                            <tr><td><code>BootstrapAdmin__Email</code></td><td>Optional email for administrator creation or SuperAdmin role promotion (enables <code>/platform/tenants</code>). If omitted, the web setup wizard is used.</td><td><code>admin@company.com</code></td></tr>
+                            <tr><td><code>BootstrapAdmin__Password</code></td><td>Optional password for headless administrator creation.</td><td>Min 12 chars, mixed case + digit</td></tr>
+                            <tr><td><code>Database__ApplyMigrationsOnStartup</code></td><td>Automatically apply EF Core migrations on startup. (Optional)</td><td><code>true</code></td></tr>
+                            <tr><td><code>DataProtection__KeyPath</code></td><td>Persistent volume path for key files.</td><td><code>/var/query-gate/keys</code></td></tr>
+                        </tbody>
+                    </table>
+                </div>
                 <p>Keys stored in the persistent volume remain consistent across container restarts. Apply migrations on one instance at a time after a database backup.</p>
             </section>
+
             <section id="first-steps">
                 <h2>First steps</h2>
                 <p>Once deployed, create your administrator account on the setup screen or via optional environment variables on first start.</p>
@@ -173,41 +406,80 @@ docker compose logs -f query-gate</code></pre>
                     <li>Open the query workspace to run permitted SQL and review activity in the audit log.</li>
                 </ol>
             </section>
+
             <section id="troubleshooting">
                 <h2>Troubleshooting</h2>
                 <dl class="docs-dl">
-                    <dt>Migrations fail on first start</dt>
-                    <dd>The SQL account must have <code>db_owner</code> or schema-create permissions on the application database during migration. The bundled SQL Server uses the <code>sa</code> account with full permissions automatically.</dd>
+                    <div class="docs-dl-item">
+                        <dt>Migrations fail on first start</dt>
+                        <dd>The PostgreSQL user must have schema and table creation permissions (e.g. database owner) on the application database during migration. The bundled PostgreSQL container uses the <code>querygate</code> user with full permissions automatically.</dd>
+                    </div>
 
-                    <dt>Certificate errors behind a reverse proxy</dt>
-                    <dd>When running behind a reverse proxy (such as Caddy, Traefik, or Nginx), terminate TLS at the reverse proxy and route plain HTTP to port 5176. Ensure your reverse proxy forwards headers correctly (X-Forwarded-For, X-Forwarded-Proto).</dd>
+                    <div class="docs-dl-item">
+                        <dt>Certificate errors behind a reverse proxy</dt>
+                        <dd>When running behind a reverse proxy (such as Caddy, Traefik, or Nginx), terminate TLS at the reverse proxy and route plain HTTP to port 5176. Ensure your reverse proxy forwards headers correctly (X-Forwarded-For, X-Forwarded-Proto).</dd>
+                    </div>
 
-                    <dt>Cannot register database or run queries in workspace (HTTP on remote host)</dt>
-                    <dd>Query Gate uses Blazor Server interactive circuits, antiforgery tokens, and secure cookies that require a secure context (HTTPS) on remote hosts. When accessed over plain HTTP on a remote domain or IP, browser security policies block circuit execution. Deploy behind an HTTPS reverse proxy (such as Cloudflare Tunnel, Coolify, Traefik, or Nginx).</dd>
+                    <div class="docs-dl-item">
+                        <dt>Cannot register database or run queries in workspace (HTTP on remote host)</dt>
+                        <dd>Query Gate uses Blazor Server interactive circuits, antiforgery tokens, and secure cookies that require a secure context (HTTPS) on remote hosts. When accessed over plain HTTP on a remote domain or IP, browser security policies block circuit execution. Deploy behind an HTTPS reverse proxy (such as Cloudflare Tunnel, Coolify, Traefik, or Nginx).</dd>
+                    </div>
 
-                    <dt>"localhost" cannot reach SQL Server in Docker</dt>
-                    <dd>Inside a container, <code>localhost</code> resolves to the container itself. Use the container service name <code>mssql</code> on the Docker network, or <code>host.docker.internal</code> (Docker Desktop) to reach a SQL Server running on the host machine.</dd>
+                    <div class="docs-dl-item">
+                        <dt>"localhost" cannot reach PostgreSQL in Docker</dt>
+                        <dd>Inside a container, <code>localhost</code> resolves to the container itself. Use the container service name <code>querygate-postgres</code> on the Docker network, or <code>host.docker.internal</code> (Docker Desktop) to reach a PostgreSQL database running on the host machine.</dd>
+                    </div>
 
-                    <dt>Data protection key errors after restart</dt>
-                    <dd>The key directory must be on a persistent volume. If the volume is deleted, authentication cookies and encrypted values become invalid. Mount the key directory as a named volume in your Compose file.</dd>
+                    <div class="docs-dl-item">
+                        <dt>Data protection key errors after restart</dt>
+                        <dd>The key directory must be on a persistent volume. If the volume is deleted, authentication cookies and encrypted values become invalid. Mount the key directory as a named volume in your Compose file.</dd>
+                    </div>
 
-                    <dt>Users see "Account inactive or expired"</dt>
-                    <dd>An administrator must activate the account and optionally set an expiry date. Check the Users admin page and ensure the account is active.</dd>
+                    <div class="docs-dl-item">
+                        <dt>Users see "Account inactive or expired"</dt>
+                        <dd>An administrator must activate the account and optionally set an expiry date. Check the Users admin page and ensure the account is active.</dd>
+                    </div>
 
-                    <dt>Five failed login attempts: account locked</dt>
-                    <dd>Accounts lock for 15 minutes after five consecutive failed password attempts. An administrator can unlock the account early from the Users admin page.</dd>
+                    <div class="docs-dl-item">
+                        <dt>Five failed login attempts: account locked</dt>
+                        <dd>Accounts lock for 15 minutes after five consecutive failed password attempts. An administrator can unlock the account early from the Users admin page.</dd>
+                    </div>
                 </dl>
             </section>
+
             <section id="resources">
                 <h2>More resources</h2>
                 <ul class="docs-resources">
-                    <li><a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/USER-GUIDE.md">User guide</a> — step-by-step usage for end users: requesting access, running queries, reading errors and exporting results.</li>
-                    <li><a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/ADMIN-CHEATSHEET.md">Admin cheat sheet</a> — quick reference for database registration, permission management and approvals.</li>
-                    <li><a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/DEPLOYMENT.md">Full deployment guide</a> — detailed steps for IIS, Azure, Linux and Docker including upgrades and backups.</li>
-                    <li><a href="https://github.com/arjunreddy-001/query-gate/blob/main/CONTRIBUTING.md">Contributing guide</a> — local setup, running tests and opening pull requests.</li>
-                    <li><a href="https://github.com/arjunreddy-001/query-gate">Source on GitHub</a> — browse the code, report issues or follow the project.</li>
+                    <li><a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/USER-GUIDE.md">User guide</a>: step-by-step usage for end users: requesting access, running queries, reading errors and exporting results.</li>
+                    <li><a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/ADMIN-CHEATSHEET.md">Admin cheat sheet</a>: quick reference for database registration, permission management and approvals.</li>
+                    <li><a href="https://github.com/arjunreddy-001/query-gate/blob/main/docs/DEPLOYMENT.md">Full deployment guide</a>: detailed steps for IIS, Azure, Linux and Docker including upgrades and backups.</li>
+                    <li><a href="https://github.com/arjunreddy-001/query-gate/blob/main/CONTRIBUTING.md">Contributing guide</a>: local setup, running tests and opening pull requests.</li>
+                    <li><a href="https://github.com/arjunreddy-001/query-gate">Source on GitHub</a>: browse the code, report issues or follow the project.</li>
                 </ul>
             </section>
         </div>
     </div>
+
+    <!-- Floating Back to Top Button -->
+    <a href="/documentation#top" class="docs-back-to-top" id="docsBackToTop" aria-label="Back to top" title="Back to top">
+        <Icon Name="chevron" />
+        <span>Top</span>
+    </a>
 </div>
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("initDocumentationPage");
+            }
+            catch
+            {
+                // Circuit may be disconnected
+            }
+        }
+    }
+}

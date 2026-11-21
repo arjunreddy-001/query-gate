@@ -9,7 +9,7 @@ For IIS, Azure App Service, Linux and Docker, see the [deployment guide](./docs/
 ### PowerShell (Windows)
 
 ```powershell
-dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=...;Database=DbAccessManager;User Id=...;Password=...;TrustServerCertificate=True"
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=localhost;Port=5432;Database=QueryGate;Username=postgres;Password=<password>"
 $env:BootstrapAdmin__Email = "admin@example.com"
 $env:BootstrapAdmin__Password = "<unique password, 12+ chars>"
 dotnet ef database update
@@ -19,7 +19,7 @@ dotnet run
 ### macOS / Linux (bash, zsh)
 
 ```bash
-dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=...;Database=DbAccessManager;User Id=...;Password=...;TrustServerCertificate=True"
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=localhost;Port=5432;Database=QueryGate;Username=postgres;Password=<password>"
 export BootstrapAdmin__Email="admin@example.com"
 export BootstrapAdmin__Password="<unique password, 12+ chars>"
 dotnet ef database update
@@ -34,16 +34,17 @@ Full usage documentation: [docs/USER-GUIDE.md](./docs/USER-GUIDE.md). Admin quic
 
 | Key                                    | Purpose                                                                                                                       |
 | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `ConnectionStrings:DefaultConnection`  | Application database                                                                                                          |
+| `ConnectionStrings:DefaultConnection`  | PostgreSQL application database                                                                                               |
 | `Encryption:Key`                       | Base64 32-byte key for managed connection strings (dev falls back to `App_Data/dev-encryption.key`; always set in production) |
 | `Jwt:Key`                              | JWT signing key (random per process if unset, which invalidates tokens on restart)                                            |
-| `BootstrapAdmin__Email` / `__Password` | One-time first admin                                                                                                          |
+| `BootstrapAdmin__Email` / `__Password` | Initial admin creation or SuperAdmin role promotion (platform workspace management at `/platform/tenants`)    |
 | `Smtp:*`                               | Optional email notifications                                                                                                  |
 | `Database:ApplyMigrationsOnStartup`    | Opt in to applying EF migrations at startup outside Development; use one instance at a time                                  |
 | `DataProtection:KeyPath`               | Optional persistent directory for ASP.NET Core data protection keys                                                           |
 
 ## What's included
 
+- Multi-tenancy & Workspaces: row-level isolation via EF Core global query filters, path-prefix routing (`/t/{slug}/`), custom domain mappings, multi-workspace user memberships, per-tenant settings (SMTP, webhooks, branding), and platform administration (`/platform/tenants`).
 - Custom-designed UI with light/dark themes, role-based navigation, idle timeout, notifications.
 - Multi-database support: connects natively to Microsoft SQL Server, PostgreSQL, MySQL, and MariaDB targets with engine-specific metadata extraction, statement splitting, dialect analysis, and execution plan estimation.
 - Query workspace: Monaco editor with schema-aware completion, tabs, saved queries, history, formatting, dry-run (rollback), timeout, cancel, results grid with column sorting, row filtering, double-click cell copy, and multi-format export: CSV, Excel (.xls), JSON, Markdown table, and SQL INSERT statements (needs `EXPORT`, audited).
@@ -58,13 +59,13 @@ Full usage documentation: [docs/USER-GUIDE.md](./docs/USER-GUIDE.md). Admin quic
 
 ## Limitations
 
-LocalDB is untested; use full SQL Server, Azure SQL, PostgreSQL, MySQL or MariaDB instances.
+The Query Gate application database requires PostgreSQL 14+ (or bundled PostgreSQL 17 in Docker). Managed database targets can be SQL Server, PostgreSQL, MySQL, or MariaDB.
 
 ## AI Agent Skills (Cross-Platform)
 
 This repository maintains all development workflows and runbooks centrally in [`.github/skills/`](./.github/skills/) following the Agent Skills specification.
 
-**There is no need to add skills specific to a platform or IDE** (such as `.claude/skills/`, `.cursor/skills/`, or `.agents/skills/`). The repository is pre-configured with cross-platform configuration files—avoiding symlinks for seamless compatibility across Windows, macOS, and Linux—so all AI coding assistants share `.github/skills/` as the single source of truth:
+**There is no need to add skills specific to a platform or IDE** (such as `.claude/skills/`, `.cursor/skills/`, or `.agents/skills/`). The repository is pre-configured with cross-platform configuration files (avoiding symlinks for seamless compatibility across Windows, macOS, and Linux) so all AI coding assistants share `.github/skills/` as the single source of truth:
 
 - **Google Antigravity**: Discovers and indexes skills via [`.agents/skills.json`](./.agents/skills.json).
 - **Claude Code**: Referenced via [`CLAUDE.md`](./CLAUDE.md).

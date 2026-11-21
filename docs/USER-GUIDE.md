@@ -1,6 +1,6 @@
 # Query Gate User Guide
 
-Query Gate lets people run SQL against registered SQL Server databases **without ever seeing the database credentials**. Every query passes a SQL gate, is permission-checked, and is written to an audit log _before_ it runs.
+Query Gate lets people run SQL against registered databases (SQL Server, PostgreSQL, MySQL, and MariaDB) **without ever seeing the database credentials**. Every query passes a SQL gate, is permission-checked, and is written to an audit log _before_ it runs.
 
 The public homepage links to sign-in, `/documentation`, deployment options and community resources, and introduces the workspace and access workflow. Signed-in users can open the query workspace directly from the homepage. After signing in, the dashboard is at `/dashboard`. On narrow screens, use the navigation button to open the menu. For hosting options, see the [deployment guide](./DEPLOYMENT.md).
 
@@ -32,8 +32,10 @@ Use **Defaults** beside an environment to configure allow grants for each role, 
 2. **Register a database**: _Admin → Databases → Register database_
    - **Name**: a friendly name (e.g. `Orders`).
    - **Environment**: select a configured environment. Development, QA and Production are provided initially; administrators can manage them under Permissions.
-   - **Connection string**: a SQL Server connection string for a **dedicated service account** with only the rights the tool should be able to use, e.g.
-     `Server=host;Database=Orders;User Id=svc_dbam;Password=...;TrustServerCertificate=True`
+   - **Connection string**: a database connection string for a **dedicated service account** with only the rights the tool should be able to use, e.g.
+     - PostgreSQL: `Host=host;Port=5432;Database=Orders;Username=svc_dbam;Password=...`
+     - SQL Server: `Server=host;Database=Orders;User Id=svc_dbam;Password=...;TrustServerCertificate=True`
+     - MySQL or MariaDB: `Server=host;Port=3306;Database=Orders;Uid=svc_dbam;Pwd=...`
    - **Default timeout** and **Max rows**: per-database limits.
    - Click **Test connection**, then **Save**. The connection string is encrypted at rest and never shown again (edit it by entering a new one; leave blank to keep the current).
    - Name uniqueness is checked by **Name + Environment**. The same name can be used across environments.
@@ -101,7 +103,7 @@ On narrow screens the Objects, Saved and History panel starts closed. Use the pa
    - Database dropdown shows enabled databases by default. Turn on **Show disabled** to include disabled entries.
 3. **Run** with `F5` or `Ctrl+Enter`. Select text first to run only the selection.
 4. Other actions:
-   - **Explain**: compiles the query and generates an estimated execution plan using SQL Server's `SET SHOWPLAN_XML ON`. It compiles without executing data modifications or reading data. The resulting **Execution Plan** tab displays:
+   - **Explain**: compiles the query and generates an estimated execution plan using the target engine's explain capability (SQL Server `SET SHOWPLAN_XML ON`, PostgreSQL `EXPLAIN (FORMAT JSON)`, MySQL/MariaDB `EXPLAIN FORMAT=JSON`). It compiles without executing data modifications or reading data. The resulting **Execution Plan** tab displays:
      - Estimated Subtree Cost, Optimization Level, Estimated Rows, and compile time metrics.
      - **Missing Index Recommendations**: identifies missing index groups from the query optimizer with estimated cost impact percentage, one-click **Copy Index Script**, and an **Add to Editor** shortcut that appends the DDL to the SQL editor.
      - **Operator Breakdown**: sorts operators by cost descending with percentage bars, estimated rows, target objects, and warnings for full index or table scans.
@@ -217,14 +219,62 @@ Authenticate with `POST /api/v1/auth/login` (returns a 15-minute JWT; a refresh 
 | `POST /query/execute`                               | Run SQL (same gate, permissions and audit as the UI) |
 | `POST /query/{runId}/cancel`                        | Cancel a run                                         |
 
-## 10. Operations notes
+## 10. Multi-Tenancy and Workspaces
+
+Query Gate supports multi-tenant workspaces with complete data isolation across organizations.
+
+### Architecture and Isolation
+- **Workspace URLs**: Each workspace is accessible via path prefix `/t/{slug}/` (for example, `/t/acme/dashboard` or `/t/acme/query`).
+- **Custom domains**: Connect custom hostnames (such as `data.acme.com`) to any workspace. Point your DNS record to the server, and Query Gate automatically routes requests by Host header without requiring a path prefix.
+- **Data isolation**: All database registrations, permission grants, audit logs, saved queries, query history, access requests, and notifications are isolated per workspace via row-level security with Entity Framework Core global query filters.
+- **Multiple memberships**: A single user identity can belong to multiple workspaces with different roles in each. Switch between workspaces using the topbar workspace dropdown or the `/select-tenant` page.
+- **Tenant-level settings**: SMTP email mailers, notification webhooks, and branding are configured independently per workspace under _Admin -> Settings_.
+
+### SuperAdmin Role and Platform Administration
+Users with the `SuperAdmin` role operate outside individual tenant data boundaries and manage all workspaces, domains, and global platform status at `/platform/tenants`.
+
+To grant or assume the `SuperAdmin` role:
+
+1. **Bootstrap Configuration (Recommended)**:
+   Configure the bootstrap administrator in your environment file or deployment settings:
+   ```env
+   BOOTSTRAP_ADMIN_EMAIL=admin@company.com
+   BOOTSTRAP_ADMIN_PASSWORD=YourPassword!1234
+   ```
+   On application startup, Query Gate creates the user (or locates an existing account with that email) and assigns both `Admin` and `SuperAdmin` roles.
+
+2. **Direct PostgreSQL Database Assignment**:
+   If the application is already running and you want to elevate an existing account without restarting:
+   ```sql
+   INSERT INTO "AspNetRoles" ("Id", "Name", "NormalizedName", "ConcurrencyStamp")
+   VALUES (gen_random_uuid()::text, 'SuperAdmin', 'SUPERADMIN', gen_random_uuid()::text)
+   ON CONFLICT ("NormalizedName") DO NOTHING;
+
+   INSERT INTO "AspNetUserRoles" ("UserId", "RoleId")
+   SELECT u."Id", r."Id"
+   FROM "AspNetUsers" u
+   JOIN "AspNetRoles" r ON r."NormalizedName" = 'SUPERADMIN'
+   WHERE u."NormalizedEmail" = UPPER('admin@company.com')
+   ON CONFLICT DO NOTHING;
+   ```
+   Log out and log back in to refresh the authentication session.
+
+### Provisioning Workspaces and Onboarding Users
+Query Gate uses an administrative onboarding model rather than public self-service signup to protect internal database infrastructure:
+
+1. **Create a Workspace**: Sign in as a `SuperAdmin`, open `/platform/tenants`, and click **Create Workspace**. Provide the organization name, slug, contact email, and an initial administrator email.
+2. **Configure Custom Domains (Optional)**: Click **Domains** on the workspace row, add your hostname (e.g., `sql.acme.com`), and point your DNS CNAME or A record to the Query Gate host.
+3. **Add Users to the Workspace**: A workspace administrator signs in to `/t/{slug}/dashboard`, opens **Admin -> Users** (`/admin/users`), and clicks **New user**. If the user already has an account, they are immediately granted access to the workspace; otherwise, a temporary password is generated for initial sign-in.
+4. **Switching Workspaces**: Users assigned to multiple workspaces can switch at any time using the workspace dropdown in the top header or by visiting `/select-tenant`.
+
+## 11. Operations notes
 
 - Set `Encryption:Key` (Base64, 32 bytes) and `Jwt:Key` in production; otherwise keys are not stable across restarts.
 - Apply migrations with `dotnet ef database update` during deployment.
 - Configure `Smtp:*` to enable email notifications.
 - A background worker runs every minute: sends expiry reminders, removes expired grants, expires stale requests, and runs approved auto-run scripts.
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 | Symptom                                    | Fix                                                                                  |
 | ------------------------------------------ | ------------------------------------------------------------------------------------ |

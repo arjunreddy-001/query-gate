@@ -112,3 +112,37 @@ Audit and Access matrix access is configurable per role; the Auditor column desc
 | Test connection fails with a certificate error     | Add `TrustServerCertificate=True`                                                                      |
 | Approved script didn't run                         | It was edited (auto-run is off) or lacks a dangerous permission. Use **Run now** or add the permission |
 | Lost the admin password                            | Use another admin's **Reset pwd**, or restart with new `BootstrapAdmin__*` values for a new admin      |
+
+## 8. Multi-Tenancy and Workspaces
+
+### Architecture Overview
+- **Path-Prefix**: Workspaces are reached at `/t/[slug]/` (for example, `/t/acme/dashboard`).
+- **Custom Domains**: Point customer CNAME or A records to the server, then add the domain in the platform UI to enable direct routing without path prefixes.
+- **Tenant Isolation**: Every database, audit entry, setting, and permission grant is isolated using row-level filters (`TenantId`).
+- **Workspace Switching**: Use the topbar workspace dropdown or visit `/select-tenant` to switch between organizations.
+
+### SuperAdmin Role Setup
+The `SuperAdmin` role enables platform-wide workspace management at `/platform/tenants`. Configure it using one of two methods:
+
+1. **Bootstrap Configuration (Recommended)**:
+   Set `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` (or `BootstrapAdmin__Email` and `BootstrapAdmin__Password`). On startup, `Program.cs` automatically creates the account or promotes an existing account to `SuperAdmin` and `Admin`.
+2. **Direct PostgreSQL SQL Assignment**:
+   When immediate elevation is required without restarting the server:
+   ```sql
+   INSERT INTO "AspNetRoles" ("Id", "Name", "NormalizedName", "ConcurrencyStamp")
+   VALUES (gen_random_uuid()::text, 'SuperAdmin', 'SUPERADMIN', gen_random_uuid()::text)
+   ON CONFLICT ("NormalizedName") DO NOTHING;
+
+   INSERT INTO "AspNetUserRoles" ("UserId", "RoleId")
+   SELECT u."Id", r."Id"
+   FROM "AspNetUsers" u
+   JOIN "AspNetRoles" r ON r."NormalizedName" = 'SUPERADMIN'
+   WHERE u."NormalizedEmail" = UPPER('admin@company.com')
+   ON CONFLICT DO NOTHING;
+   ```
+   (Log out and log back in to refresh claims).
+
+### Tenant Provisioning & Onboarding Workflow
+- **Creating a Workspace**: SuperAdmins open `/platform/tenants`, click **Create Workspace**, provide name, slug (lowercase alphanumeric and hyphens), contact email, plan, and an initial administrator email.
+- **Adding Custom Domains**: Click **Domains** on the tenant row in `/platform/tenants`, enter the hostname (e.g. `sql.acme.com`), and point DNS to the server.
+- **Adding Users to Workspaces**: Workspace admins open **Admin -> Users** (`/admin/users`), click **New user**, enter email and workspace role (`Admin`, `Developer`, `Auditor`, `Tester`). If the user already exists globally, they are joined to the workspace without email conflicts; new users receive a generated temporary password.

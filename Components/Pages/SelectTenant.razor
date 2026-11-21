@@ -1,0 +1,132 @@
+@page "/select-tenant"
+@attribute [Authorize]
+@using System.Security.Claims
+@using Microsoft.EntityFrameworkCore
+@using DbAccessManager.Data
+@using DbAccessManager.Security
+@inject AuthenticationStateProvider AuthProvider
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Nav
+
+<PageTitle>Select Workspace - Query Gate</PageTitle>
+
+<div class="auth-wrap" style="max-width:560px;margin:40px auto;padding:24px">
+    <div style="text-align:center;margin-bottom:32px">
+        <span class="brand-mark" style="display:inline-flex;width:48px;height:48px;align-items:center;justify-content:center;background:rgba(99,102,241,0.15);color:#818cf8;border-radius:12px;font-size:24px;margin-bottom:12px">
+            <Icon Name="db" />
+        </span>
+        <h1 style="font-size:26px;font-weight:700;margin:0 0 8px 0">Select a Workspace</h1>
+        <p style="color:var(--text-muted);font-size:14px;margin:0">Choose which organization workspace you want to access.</p>
+    </div>
+
+    @if (loading)
+    {
+        <div class="card" style="padding:32px;text-align:center;color:var(--text-muted)">Loading your workspaces...</div>
+    }
+    else if (workspaces.Count == 0 && !isSuperAdmin)
+    {
+        <div class="card" style="padding:36px;text-align:center">
+            <div style="font-size:16px;font-weight:600;margin-bottom:8px">No Workspace Memberships Found</div>
+            <p style="color:var(--text-muted);font-size:13px;margin:0 0 20px 0">Your account is not currently assigned to any workspace. Contact your administrator to receive an invitation.</p>
+            <form action="Account/Logout" method="post">
+                <AntiforgeryToken />
+                <button type="submit" class="btn btn-secondary">Sign out</button>
+            </form>
+        </div>
+    }
+    else
+    {
+        <div style="display:flex;flex-direction:column;gap:12px">
+            @foreach (var ws in workspaces)
+            {
+                <a href="/t/@ws.Slug/dashboard" class="card" style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;text-decoration:none;color:inherit;transition:border-color 0.2s, transform 0.1s;border:1px solid var(--border-color);border-radius:10px" onmouseover="this.style.borderColor='var(--accent-color, #6366f1)'" onmouseout="this.style.borderColor='var(--border-color)'">
+                    <div style="display:flex;align-items:center;gap:14px">
+                        <div style="display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:8px;background:rgba(99,102,241,0.12);color:#818cf8;font-size:18px">
+                            <Icon Name="db" />
+                        </div>
+                        <div>
+                            <div style="font-size:16px;font-weight:600">@ws.Name</div>
+                            <div style="font-size:12px;color:var(--text-muted)">Path: <code>/t/@ws.Slug</code> &bull; Role: <b>@ws.Role</b></div>
+                        </div>
+                    </div>
+                    <span class="btn btn-sm btn-primary" style="pointer-events:none">Launch &rarr;</span>
+                </a>
+            }
+
+            @if (isSuperAdmin)
+            {
+                <div style="margin-top:12px;border-top:1px solid var(--border-color);padding-top:16px">
+                    <a href="/platform/tenants" class="card" style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;text-decoration:none;color:inherit;border:1px dashed rgba(99,102,241,0.5);border-radius:10px;background:rgba(99,102,241,0.04)">
+                        <div style="display:flex;align-items:center;gap:14px">
+                            <div style="display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:8px;background:rgba(99,102,241,0.2);color:#818cf8;font-size:18px">
+                                <Icon Name="grid" />
+                            </div>
+                            <div>
+                                <div style="font-size:15px;font-weight:600">Platform Administration</div>
+                                <div style="font-size:12px;color:var(--text-muted)">Manage all tenants, domains, and global platform settings</div>
+                            </div>
+                        </div>
+                        <span class="btn btn-sm btn-secondary" style="pointer-events:none">Manage &rarr;</span>
+                    </a>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private sealed class WorkspaceItem
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = "";
+        public string Slug { get; set; } = "";
+        public string Role { get; set; } = "";
+    }
+
+    private bool loading = true;
+    private bool isSuperAdmin = false;
+    private List<WorkspaceItem> workspaces = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthProvider.GetAuthenticationStateAsync();
+        var user = state.User;
+        if (user.Identity?.IsAuthenticated != true)
+        {
+            Nav.NavigateTo("Account/Login");
+            return;
+        }
+
+        var userId = user.FindFirstValue(ClaimTypes.NameIdentifier);
+        isSuperAdmin = user.IsInRole(Roles.SuperAdmin);
+
+        if (userId is not null)
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var memberships = await db.UserTenantMemberships
+                .IgnoreQueryFilters()
+                .Where(m => m.UserId == userId)
+                .ToListAsync();
+
+            var tenantIds = memberships.Select(m => m.TenantId).ToList();
+            var tenants = await db.Tenants
+                .IgnoreQueryFilters()
+                .Where(t => tenantIds.Contains(t.Id) && t.IsActive)
+                .ToDictionaryAsync(t => t.Id, t => t);
+
+            workspaces = memberships
+                .Where(m => tenants.ContainsKey(m.TenantId))
+                .Select(m => new WorkspaceItem
+                {
+                    Id = m.TenantId,
+                    Name = tenants[m.TenantId].Name,
+                    Slug = tenants[m.TenantId].Slug,
+                    Role = m.Role
+                })
+                .OrderBy(w => w.Name)
+                .ToList();
+        }
+
+        loading = false;
+    }
+}

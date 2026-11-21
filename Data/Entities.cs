@@ -3,6 +3,7 @@ namespace DbAccessManager.Data;
 public sealed class AuditLog
 {
     public long Id { get; set; }
+    public Guid TenantId { get; set; }
     public DateTimeOffset Timestamp { get; set; } = DateTimeOffset.UtcNow;
     public string? UserId { get; set; }
     public string? UserName { get; set; }
@@ -28,6 +29,7 @@ public sealed class AuditLog
 public sealed class AppLog
 {
     public long Id { get; set; }
+    public Guid TenantId { get; set; }
     public DateTimeOffset Timestamp { get; set; } = DateTimeOffset.UtcNow;
     public required string Level { get; set; }
     public required string Message { get; set; }
@@ -40,6 +42,7 @@ public sealed class AppLog
 public sealed class RefreshToken
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
     public required string UserId { get; set; }
     public required string TokenHash { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
@@ -51,6 +54,7 @@ public sealed class RefreshToken
 public sealed class SavedQuery
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
     public required string UserId { get; set; }
     public Guid DatabaseId { get; set; }
     public required string Name { get; set; }
@@ -64,6 +68,7 @@ public sealed class SavedQuery
 public sealed class QueryHistory
 {
     public long Id { get; set; }
+    public Guid TenantId { get; set; }
     public required string UserId { get; set; }
     public Guid DatabaseId { get; set; }
     public required string SqlText { get; set; }
@@ -86,6 +91,7 @@ public static class RequestStatus
 public sealed class AccessRequest
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
     public required string RequesterId { get; set; }
     public Guid DatabaseId { get; set; }
     public required string Permissions { get; set; }
@@ -107,6 +113,7 @@ public sealed class AccessRequest
 public sealed class ScriptRequest
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
     public required string RequesterId { get; set; }
     public Guid DatabaseId { get; set; }
     public required string Title { get; set; }
@@ -130,6 +137,7 @@ public sealed class ScriptRequest
 public sealed class RequestStatusHistory
 {
     public long Id { get; set; }
+    public Guid TenantId { get; set; }
     public required string RequestType { get; set; }
     public Guid RequestId { get; set; }
     public required string Status { get; set; }
@@ -141,6 +149,7 @@ public sealed class RequestStatusHistory
 public sealed class Notification
 {
     public long Id { get; set; }
+    public Guid TenantId { get; set; }
     public required string UserId { get; set; }
     public required string Title { get; set; }
     public required string Message { get; set; }
@@ -151,6 +160,7 @@ public sealed class Notification
 
 public sealed class SettingEntry
 {
+    public Guid TenantId { get; set; }
     public required string Key { get; set; }
     public required string Value { get; set; }
 }

@@ -94,7 +94,7 @@
 ## 5. Proposed Architecture
 - **Frontend:** Blazor (Server or Interactive Server render mode, .NET 8+) with MudBlazor/Radzen components; BlazorMonaco for the editor; sql formatting via ScriptDom generator or a JS sql-formatter via JS interop.
 - **Backend:** ASP.NET Core Web API (C#; Microsoft.SqlServer.TransactSql.ScriptDom for parsing, native fit for MSSQL) Same solution as the Blazor app (single full-stack .NET project with a service layer; REST endpoints optional). Auth via JWT (also used for any API calls) with cookie-backed session for Blazor Server.
-- **Tool DB:** MS SQL Server (separate from managed DBs), EF Core migrations.
+- **Tool DB:** PostgreSQL (separate from managed DBs), EF Core migrations.
 - **Background jobs:** Hangfire/Quartz (hosted services) for expiry, email sending, cleanup.
 - **Logging:** Serilog → tool DB + file; optional sink to central logging.
 - **Components:** Auth service, Access/Permission engine, SQL gate/parser, Execution engine (pooling, timeout, cancel), Metadata service (schema cache), Request workflow service, Audit service, Notification service.
@@ -152,8 +152,8 @@ Login · Dashboard · Query Workspace (tabs, explorer, editor, results, saved/hi
 2. **Script requests:** auto-run option when approved unchanged; manual admin run if the script was modified during approval.
 3. **Notifications:** SMTP email plus in-app notifications shown on login.
 4. **Retention/compliance:** none required (internal, VPN-only).
-5. **Scale/scope:** ~50 users, 4–7 databases, Development and QA only (no Prod).
-6. **Stack/hosting:** .NET full-stack with Blazor, MS SQL Server tool DB, hosted on IIS.
+5. **Scale/scope:** ~50 users, 4-7 databases, Development and QA only (no Prod).
+6. **Stack/hosting:** .NET full-stack with Blazor, PostgreSQL tool DB, hosted on Docker, Linux, or Windows.
 
 ## 14. Additional Decisions
 1. **Blazor Server** (interactive server render mode) is the UI model.

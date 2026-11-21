@@ -3,6 +3,7 @@ namespace DbAccessManager.Data;
 public sealed class DatabaseRoleScopeRule
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
     public Guid DatabaseId { get; set; }
     public required string RoleId { get; set; }
     public string? IncludedObjects { get; set; }

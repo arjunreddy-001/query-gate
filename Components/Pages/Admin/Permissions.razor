@@ -3,8 +3,10 @@
 @inherits PageBase
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject AuditService AuditSvc
+@inject AppLogService AppLog
 @inject IServiceScopeFactory Scopes
 @inject AccessConfigurationService AccessConfig
+@inject PermissionService PermissionsSvc
 
 <PageTitle>Permissions · Query Gate</PageTitle>
 
@@ -579,17 +581,33 @@
     private void EditRole(Microsoft.AspNetCore.Identity.IdentityRole role) { editingRole = role; editRoleName = role.Name ?? ""; editRoleAudit = auditRoleIds.Contains(role.Id); roleError = null; }
     private async Task SaveRole()
     {
-        var result = await AccessConfig.SaveRoleAsync(Me, editingRole!.Id, editRoleName, editRoleAudit);
-        if (!result.Ok) { roleError = result.Error; return; }
-        editingRole = null; await RefreshConfiguration(); Say("Role updated.");
+        try
+        {
+            var result = await AccessConfig.SaveRoleAsync(Me, editingRole!.Id, editRoleName, editRoleAudit);
+            if (!result.Ok) { roleError = result.Error; return; }
+            editingRole = null; await RefreshConfiguration(); Say("Role updated.");
+        }
+        catch (Exception ex)
+        {
+            roleError = $"Failed to update role: {ex.Message}";
+            await AppLog.LogErrorAsync($"Error in SaveRole for '{editRoleName}'", ex, UserName, "/admin/permissions", Me.TenantId);
+        }
     }
     private void NewEnvironment() { editEnvironmentId = null; environmentName = ""; environmentError = null; environmentOpen = true; }
     private void EditEnvironment(DatabaseEnvironment e) { editEnvironmentId = e.Id; environmentName = e.Name; environmentError = null; environmentOpen = true; }
     private async Task SaveEnvironment()
     {
-        var result = await AccessConfig.SaveEnvironmentAsync(Me, editEnvironmentId, environmentName);
-        if (!result.Ok) { environmentError = result.Error; return; }
-        environmentOpen = false; await RefreshConfiguration(); Say("Environment saved.");
+        try
+        {
+            var result = await AccessConfig.SaveEnvironmentAsync(Me, editEnvironmentId, environmentName);
+            if (!result.Ok) { environmentError = result.Error; return; }
+            environmentOpen = false; await RefreshConfiguration(); Say("Environment saved.");
+        }
+        catch (Exception ex)
+        {
+            environmentError = $"Failed to save environment: {ex.Message}";
+            await AppLog.LogErrorAsync($"Error in SaveEnvironment for '{environmentName}'", ex, UserName, "/admin/permissions", Me.TenantId);
+        }
     }
     private async Task OpenDefaults(DatabaseEnvironment e) { defaultsEnvironment = e; defaultsRoleId = roles.FirstOrDefault()?.Id ?? ""; defaultsError = null; defaultProcedure = ""; await LoadDefaults(); }
     private async Task LoadDefaults()
@@ -611,18 +629,34 @@
     }
     private async Task SaveDefaults()
     {
-        var result = await AccessConfig.SaveDefaultsAsync(Me, defaultsEnvironment!.Id, defaultsRoleId, defaultCodes);
-        if (!result.Ok) { defaultsError = result.Error; return; }
-        defaultsEnvironment = null; Say("Defaults saved for future registrations.");
+        try
+        {
+            var result = await AccessConfig.SaveDefaultsAsync(Me, defaultsEnvironment!.Id, defaultsRoleId, defaultCodes);
+            if (!result.Ok) { defaultsError = result.Error; return; }
+            defaultsEnvironment = null; Say("Defaults saved for future registrations.");
+        }
+        catch (Exception ex)
+        {
+            defaultsError = $"Failed to save defaults: {ex.Message}";
+            await AppLog.LogErrorAsync($"Error in SaveDefaults for '{defaultsEnvironment?.Name}'", ex, UserName, "/admin/permissions", Me.TenantId);
+        }
     }
     private void ConfirmDeleteRole(Microsoft.AspNetCore.Identity.IdentityRole r) { deleteRole = r; deleteError = null; }
     private void ConfirmDeleteEnvironment(DatabaseEnvironment e) { deleteEnvironment = e; deleteError = null; }
     private void CancelDelete() { deleteRole = null; deleteEnvironment = null; deleteError = null; }
     private async Task DeleteSelected()
     {
-        var result = deleteRole is not null ? await AccessConfig.DeleteRoleAsync(Me, deleteRole.Id) : await AccessConfig.DeleteEnvironmentAsync(Me, deleteEnvironment!.Id);
-        if (!result.Ok) { deleteError = result.Error; return; }
-        CancelDelete(); await RefreshConfiguration(); Say("Deleted.");
+        try
+        {
+            var result = deleteRole is not null ? await AccessConfig.DeleteRoleAsync(Me, deleteRole.Id) : await AccessConfig.DeleteEnvironmentAsync(Me, deleteEnvironment!.Id);
+            if (!result.Ok) { deleteError = result.Error; return; }
+            CancelDelete(); await RefreshConfiguration(); Say("Deleted.");
+        }
+        catch (Exception ex)
+        {
+            deleteError = $"Failed to delete: {ex.Message}";
+            await AppLog.LogErrorAsync("Error in DeleteSelected", ex, UserName, "/admin/permissions", Me.TenantId);
+        }
     }
 
     private void StartCreateRole() { newRoleName = ""; roleError = null; creatingRole = true; }
@@ -630,16 +664,24 @@
 
     private async Task CreateRole()
     {
-        var name = newRoleName.Trim();
-        if (name.Length is 0 or > 256) { roleError = "Enter a role name of up to 256 characters."; return; }
-        using var scope = Scopes.CreateScope();
-        var manager = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.RoleManager<Microsoft.AspNetCore.Identity.IdentityRole>>();
-        var result = await manager.CreateAsync(new Microsoft.AspNetCore.Identity.IdentityRole(name));
-        if (!result.Succeeded) { roleError = string.Join(" ", result.Errors.Select(e => e.Description)); return; }
-        await AuditSvc.TryWriteAsync(Me, "Permission", "RoleCreated", "Success", name);
-        await RefreshConfiguration();
-        CancelRole();
-        Say("Role created. Add database grants before assigning access.");
+        try
+        {
+            var name = newRoleName.Trim();
+            if (name.Length is 0 or > 256) { roleError = "Enter a role name of up to 256 characters."; return; }
+            using var scope = Scopes.CreateScope();
+            var manager = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.RoleManager<Microsoft.AspNetCore.Identity.IdentityRole>>();
+            var result = await manager.CreateAsync(new Microsoft.AspNetCore.Identity.IdentityRole(name));
+            if (!result.Succeeded) { roleError = string.Join(" ", result.Errors.Select(e => e.Description)); return; }
+            await AuditSvc.TryWriteAsync(Me, "Permission", "RoleCreated", "Success", name);
+            await RefreshConfiguration();
+            CancelRole();
+            Say("Role created. Add database grants before assigning access.");
+        }
+        catch (Exception ex)
+        {
+            roleError = $"Failed to create role: {ex.Message}";
+            await AppLog.LogErrorAsync($"Error in CreateRole for '{newRoleName}'", ex, UserName, "/admin/permissions", Me.TenantId);
+        }
     }
 
     protected override async Task OnLoadAsync()
@@ -966,25 +1008,35 @@
         catch (Exception ex)
         {
             Say($"Failed to save grants: {ex.Message}", true);
+            await AppLog.LogErrorAsync("Failed to save grants", ex, UserName, "/admin/permissions", Me.TenantId);
         }
     }
 
     private async Task ConfirmRemoveGrant()
     {
-        if (removingRow is null) return;
-        var r = removingRow;
-        removingRow = null;
-        var ids = r.Grants.Select(x => x.Id).ToList();
-        if (ids.Count > 0)
+        try
         {
-            await using (var db = await DbFactory.CreateDbContextAsync())
+            if (removingRow is null) return;
+            var r = removingRow;
+            removingRow = null;
+            var ids = r.Grants.Select(x => x.Id).ToList();
+            if (ids.Count > 0)
             {
-                await db.PermissionGrants.Where(x => ids.Contains(x.Id)).ExecuteDeleteAsync();
+                await using (var db = await DbFactory.CreateDbContextAsync())
+                {
+                    await db.PermissionGrants.Where(x => ids.Contains(x.Id)).ExecuteDeleteAsync();
+                }
+                PermissionsSvc.Invalidate(databaseId: r.DatabaseId);
+                var subjectName = r.Grants.Count > 0 ? Subject(r.Grants[0]) : "Subject";
+                await AuditSvc.TryWriteAsync(Me, "Permission", "GrantRemoved", "Success", $"{r.Effect} {r.PermissionCode} ({r.Scopes.Count} scopes) from {subjectName}", r.DatabaseId, GetDbName(r.DatabaseId));
+                Say("Grant removed.");
+                await Load();
             }
-            var subjectName = r.Grants.Count > 0 ? Subject(r.Grants[0]) : "Subject";
-            await AuditSvc.TryWriteAsync(Me, "Permission", "GrantRemoved", "Success", $"{r.Effect} {r.PermissionCode} ({r.Scopes.Count} scopes) from {subjectName}", r.DatabaseId, GetDbName(r.DatabaseId));
-            Say("Grant removed.");
-            await Load();
+        }
+        catch (Exception ex)
+        {
+            Say($"Failed to remove grant: {ex.Message}", true);
+            await AppLog.LogErrorAsync("Failed to remove grant", ex, UserName, "/admin/permissions", Me.TenantId);
         }
     }
 }

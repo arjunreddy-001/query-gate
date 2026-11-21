@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using DbAccessManager.Security;
 using DbAccessManager.Services;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Authorization;
@@ -13,17 +14,23 @@ public abstract class PageBase : ComponentBase
     [Inject] protected IJSRuntime JS { get; set; } = default!;
     [Inject] protected NavigationManager Nav { get; set; } = default!;
     [Inject] protected ToastService Toast { get; set; } = default!;
+    [Inject] protected ITenantContext TenantCtx { get; set; } = default!;
+    [Inject] protected ITenantContextAccessor TenantAccessor { get; set; } = default!;
 
     protected string UserId { get; private set; } = "";
     protected string UserName { get; private set; } = "";
     protected bool IsAdmin { get; private set; }
-    protected Actor Me => new(UserId, UserName, Client.Ip, Client.UserAgent);
+    protected Actor Me => new(UserId, UserName, Client.Ip, Client.UserAgent, TenantCtx?.TenantId);
 
     protected string? Flash { get; set; }
     protected bool FlashIsError { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
+        if (TenantCtx is not null && TenantCtx.TenantId.HasValue)
+        {
+            TenantAccessor.Current = TenantCtx;
+        }
         var user = (await Auth.GetAuthenticationStateAsync()).User;
         UserId = user.FindFirstValue(ClaimTypes.NameIdentifier) ?? "";
         UserName = user.Identity?.Name ?? "";

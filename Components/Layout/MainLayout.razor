@@ -10,6 +10,7 @@
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject NotificationService Notifications
 @inject AccessConfigurationService AccessConfig
+@inject ITenantContext TenantContext
 @inject IJSRuntime JS
 
 <div class="shell" @onkeydown="HandleNavKey">
@@ -52,6 +53,12 @@
                     <NavLink class="nav-item" href="admin/settings"><Icon Name="cog" /><span class="lbl">Settings</span></NavLink>
                 }
             }
+
+            @if (isSuperAdmin)
+            {
+                <div class="nav-section">Platform</div>
+                <NavLink class="nav-item" href="platform/tenants"><Icon Name="grid" /><span class="lbl">Workspaces</span></NavLink>
+            }
         </nav>
         <button class="nav-item pin-btn" type="button" data-nav-toggle title="Pin or unpin sidebar"><Icon Name="panel" /><span class="lbl">Pin sidebar</span></button>
     </aside>
@@ -59,6 +66,44 @@
     <div class="main">
         <header class="topbar">
             <button class="mobile-nav-toggle icon-btn" type="button" aria-label="Open navigation" aria-controls="app-navigation" aria-expanded="@(mobileNavOpen ? "true" : "false")" @onclick="() => mobileNavOpen = !mobileNavOpen"><Icon Name="panel" /></button>
+
+            @if (!string.IsNullOrEmpty(currentTenantName))
+            {
+                <details class="rel" style="margin-left:8px">
+                    <summary style="list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:8px;padding:6px 12px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:8px;font-size:13px;font-weight:600;color:var(--text-primary)">
+                        <span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;background:rgba(99,102,241,0.15);color:#818cf8;border-radius:4px;font-size:11px"><Icon Name="db" /></span>
+                        <span>@currentTenantName</span>
+                        @if (userTenants.Count > 1 || isSuperAdmin)
+                        {
+                            <span style="font-size:10px;opacity:0.6;margin-left:2px">&#9662;</span>
+                        }
+                    </summary>
+                    @if (userTenants.Count > 1 || isSuperAdmin)
+                    {
+                        <div class="menu" style="min-width:220px;left:0">
+                            <div style="padding:6px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">Switch Workspace</div>
+                            @foreach (var t in userTenants)
+                            {
+                                <a href="/t/@t.Slug/dashboard" style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;text-decoration:none;color:inherit;background:@(t.Slug == currentTenantSlug ? "rgba(99,102,241,0.08)" : "transparent")">
+                                    <span>@t.Name</span>
+                                    @if (t.Slug == currentTenantSlug)
+                                    {
+                                        <span style="color:#10b981;font-size:12px">&#10003;</span>
+                                    }
+                                </a>
+                            }
+                            @if (isSuperAdmin)
+                            {
+                                <div style="border-top:1px solid var(--border-color);margin:4px 0"></div>
+                                <a href="/platform/tenants" style="display:flex;align-items:center;gap:8px;padding:8px 12px;text-decoration:none;color:#818cf8">
+                                    <Icon Name="grid" />Platform Admin
+                                </a>
+                            }
+                        </div>
+                    }
+                </details>
+            }
+
             <div class="spacer"></div>
             <button class="icon-btn" type="button" title="Toggle theme" data-theme-toggle>
                 <span class="theme-sun"><Icon Name="sun" /></span><span class="theme-moon"><Icon Name="moon" /></span>
@@ -70,6 +115,14 @@
                     <span class="who"><b>@displayName</b><span>@roleText</span></span>
                 </summary>
                 <div class="menu">
+                    @if (isSuperAdmin)
+                    {
+                        <a href="/platform/tenants"><Icon Name="grid" />Platform admin</a>
+                    }
+                    @if (userTenants.Count > 1)
+                    {
+                        <a href="/select-tenant"><Icon Name="users" />Switch workspace</a>
+                    }
                     <a href="Account/Manage"><Icon Name="user" />Account settings</a>
                     <a href="Account/Manage/ChangePassword"><Icon Name="lock" />Change password</a>
                     <form action="Account/Logout" method="post">
@@ -102,13 +155,16 @@
 <div id="blazor-error-ui" data-nosnippet>
     An unhandled error has occurred.
     <a href="." class="reload">Reload</a>
-    <span class="dismiss">🗙</span>
+    <span class="dismiss">&#128473;</span>
 </div>
 
 @code {
     private int unread;
-    private bool isAdmin, isAuditor, mobileNavOpen;
+    private bool isAdmin, isAuditor, isSuperAdmin, mobileNavOpen;
     private string displayName = "", initials = "?", roleText = "";
+    private string? currentTenantName;
+    private string? currentTenantSlug;
+    private List<Tenant> userTenants = [];
     private int? idleMinutesLeft;
     private Timer? timer;
     private string? userId;
@@ -127,6 +183,7 @@
         if (user.Identity?.IsAuthenticated != true) return;
 
         userId = user.FindFirstValue(ClaimTypes.NameIdentifier);
+        isSuperAdmin = user.IsInRole(Roles.SuperAdmin);
         isAdmin = user.IsInRole(Roles.Admin);
         isAuditor = userId is not null && await AccessConfig.CanAuditAsync(userId);
         roleText = string.Join(", ", user.FindAll(ClaimTypes.Role).Select(c => c.Value).DefaultIfEmpty("Member"));
@@ -137,6 +194,19 @@
         displayName = ResolveDisplayName(record?.DisplayName, email);
         initials = string.Concat(displayName.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpperInvariant(p[0])));
         if (initials.Length == 0) initials = "?";
+
+        currentTenantName = TenantContext.IsResolved ? TenantContext.Name : null;
+        currentTenantSlug = TenantContext.IsResolved ? TenantContext.Slug : null;
+
+        if (userId is not null)
+        {
+            var memberships = await db.UserTenantMemberships.IgnoreQueryFilters().Where(m => m.UserId == userId).ToListAsync();
+            var tenantIds = memberships.Select(m => m.TenantId).ToList();
+            if (tenantIds.Count > 0)
+            {
+                userTenants = await db.Tenants.IgnoreQueryFilters().Where(t => tenantIds.Contains(t.Id) && t.IsActive).OrderBy(t => t.Name).ToListAsync();
+            }
+        }
 
         var path = Nav.ToBaseRelativePath(Nav.Uri);
         if (record?.MustChangePassword == true && !path.StartsWith("Account/Manage/ChangePassword", StringComparison.OrdinalIgnoreCase))

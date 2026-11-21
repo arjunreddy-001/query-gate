@@ -31,6 +31,6 @@ description: "Build, test, run and browser-verify the Query Gate app. Use when a
 - `object already exists` on startup: the database has tables from older migrations. See the `ef-migrations` skill.
 - SQL certificate error: add `TrustServerCertificate=True` to the connection string.
 - Site not loading on 7245: the default profile is http on 5175. Use `--launch-profile https`.
-- Crash at startup with SQL error 40 or 64: the SQL Server is unreachable (VPN or network). Check with `Test-NetConnection <host> -Port 1433`.
-- Errors are written to the `AppLogs` table and actions to `AuditLogs`. `sqlcmd -S <server> -d <db> -E -C` can read them.
+- Crash at startup: the application PostgreSQL database is unreachable (VPN or network). Check with `Test-NetConnection <host> -Port 5432` or `nc -zv <host> 5432`.
+- Errors are written to the `AppLogs` table and actions to `AuditLogs`. `psql` or `sqlcmd` can read them depending on the database.
 - Settings and Query pages once failed only on the first render. See the `blazor-page-conventions` skill.

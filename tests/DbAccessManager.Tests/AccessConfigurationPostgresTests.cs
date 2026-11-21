@@ -5,31 +5,29 @@ using DbAccessManager.Services;
 using DbAccessManager.Services.Providers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using Npgsql;
 
 namespace DbAccessManager.Tests;
 
-public sealed class SqlServerFactAttribute : FactAttribute
+public sealed class PostgresFactAttribute : FactAttribute
 {
-    public SqlServerFactAttribute()
+    public PostgresFactAttribute()
     {
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("QUERY_GATE_TEST_SQL")))
-            Skip = "Set QUERY_GATE_TEST_SQL to an isolated SQL Server connection with CREATE DATABASE permission.";
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("QUERY_GATE_TEST_PG")))
+            Skip = "Set QUERY_GATE_TEST_PG to an isolated PostgreSQL connection string with CREATEDB permission.";
     }
 }
 
-public class AccessConfigurationSqlServerTests
+public class AccessConfigurationPostgresTests
 {
     private static readonly Actor Actor = new("test", "test", null, null);
 
-    [SqlServerFact]
+    [PostgresFact]
     public async Task Configurable_access_preserves_existing_grants_and_guards_dependencies()
     {
         await WithDatabase(async services =>
@@ -59,7 +57,7 @@ public class AccessConfigurationSqlServerTests
             await using (var db = await factory.CreateDbContextAsync())
                 envId = await db.DatabaseEnvironments.Where(e => e.Name == "Staging").Select(e => e.Id).SingleAsync();
             Assert.True((await access.SaveDefaultsAsync(Actor, envId, roleId, [Perm.Select, "sysproc:sp_example"])).Ok);
-            Assert.True((await databases.RegisterAsync(Actor, "First", "Staging", null, "Server=localhost;Database=sample;Integrated Security=true", 30, 100)).Ok);
+            Assert.True((await databases.RegisterAsync(Actor, "First", "Staging", null, "Host=localhost;Database=sample", 30, 100)).Ok);
             Assert.False((await access.DeleteRoleAsync(Actor, roleId)).Ok);
             Assert.False((await access.DeleteEnvironmentAsync(Actor, envId)).Ok);
             Assert.False((await access.SaveRoleAsync(Actor, roleId, "Admin", false)).Ok);
@@ -78,7 +76,7 @@ public class AccessConfigurationSqlServerTests
             Assert.True((await authorization.AuthorizeAsync(principal, null, "AuditAccess")).Succeeded);
             Assert.True((await access.SaveEnvironmentAsync(Actor, envId, "Preproduction")).Ok);
             Assert.True((await access.SaveDefaultsAsync(Actor, envId, roleId, [Perm.Insert])).Ok);
-            Assert.True((await databases.RegisterAsync(Actor, "Second", "Preproduction", null, "Server=localhost;Database=sample;Integrated Security=true", 30, 100)).Ok);
+            Assert.True((await databases.RegisterAsync(Actor, "Second", "Preproduction", null, "Host=localhost;Database=sample", 30, 100)).Ok);
 
             await using (var db = await factory.CreateDbContextAsync())
             {
@@ -112,42 +110,18 @@ public class AccessConfigurationSqlServerTests
         });
     }
 
-    [SqlServerFact]
-    public async Task Upgrade_imports_existing_environments_and_preserves_auditor_and_grants()
-    {
-        await WithDatabase(async services =>
-        {
-            var factory = services.GetRequiredService<IDbContextFactory<ApplicationDbContext>>();
-            await using (var db = await factory.CreateDbContextAsync())
-            {
-                await db.GetService<IMigrator>().MigrateAsync("20261108070935_AddEditorPreferences");
-                var role = new IdentityRole("Auditor") { NormalizedName = "AUDITOR" };
-                var user = new ApplicationUser { UserName = "auditor", NormalizedUserName = "AUDITOR" };
-                var database = new ManagedDatabase { Name = "Legacy", Environment = "LegacyEnv", EncryptedConnectionString = "encrypted" };
-                db.Roles.Add(role);
-                db.Users.Add(user);
-                db.UserRoles.Add(new IdentityUserRole<string> { UserId = user.Id, RoleId = role.Id });
-                db.ManagedDatabases.Add(database);
-                db.PermissionGrants.Add(new PermissionGrant { DatabaseId = database.Id, RoleId = role.Id, PermissionCode = Perm.Select });
-                await db.SaveChangesAsync();
-                await db.Database.MigrateAsync();
-                Assert.True(await db.DatabaseEnvironments.AnyAsync(e => e.Name == "LegacyEnv"));
-                Assert.True(await db.PermissionGrants.AnyAsync(g => g.DatabaseId == database.Id && g.RoleId == role.Id && g.PermissionCode == Perm.Select));
-                Assert.True(await services.GetRequiredService<AccessConfigurationService>().CanAuditAsync(user.Id));
-                Assert.Equal(9, await db.EnvironmentDefaultGrants.CountAsync());
-            }
-        });
-    }
-
     private static async Task WithDatabase(Func<ServiceProvider, Task> test)
     {
-        var connection = new SqlConnectionStringBuilder(Environment.GetEnvironmentVariable("QUERY_GATE_TEST_SQL")!)
+        var baseCs = Environment.GetEnvironmentVariable("QUERY_GATE_TEST_PG")!;
+        var builder = new NpgsqlConnectionStringBuilder(baseCs)
         {
-            InitialCatalog = "QueryGateTest_" + Guid.NewGuid().ToString("N")
+            Database = "querygatetests_" + Guid.NewGuid().ToString("N")
         };
+        var connectionString = builder.ConnectionString;
+
         var collection = new ServiceCollection();
         collection.AddLogging();
-        collection.AddDbContextFactory<ApplicationDbContext>(o => o.UseSqlServer(connection.ConnectionString));
+        collection.AddDbContextFactory<ApplicationDbContext>(o => o.UseNpgsql(connectionString));
         collection.AddScoped(sp => sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
         collection.AddIdentityCore<ApplicationUser>(o => o.Stores.SchemaVersion = IdentitySchemaVersions.Version3)
             .AddRoles<IdentityRole>().AddEntityFrameworkStores<ApplicationDbContext>();
