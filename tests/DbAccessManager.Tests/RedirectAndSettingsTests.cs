@@ -1,5 +1,6 @@
 using DbAccessManager.Components.Account;
 using DbAccessManager.Services;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace DbAccessManager.Tests;
