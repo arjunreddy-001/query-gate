@@ -21,7 +21,15 @@ Custom CSS only (no new Bootstrap dependency). Files: `wwwroot\app.css`, `wwwroo
 
 ## Query workspace
 
-- `.ws` fills the viewport height. `.editor-box` and `.results` are flex children and the `.ws-split` bar resizes the editor.
+- `.ws` fills the viewport height. The workspace work area is wrapped in `.ws-body` containing `.ws-editor-pane`, the `.ws-split` resizer, and `.results`.
+- **Layout Split & Body Isolation**: `.ws-main` remains a vertical container with tabs, toolbar (`.ws-bar`), and prompt bars at full width across the top. Never apply `flex-direction: row` to `.ws-main`. When toggled to horizontal split (`.ws-body.ws-body-horizontal`), `.ws-body` flexes row-wise with side-by-side editor and results. `.ws-split` switches to `cursor: col-resize`, handles horizontal `clientX` width dragging, and `dbam.editorLayout` is triggered to reflow Monaco.
+- **Form Mode Runner**: When active, `.form-mode-view` occupies `.ws-editor-pane` and the Monaco editor is given `display: none` (preserving instance state in memory). It renders `.form-mode-head`, `.form-mode-body` with `.form-mode-grid`, and an expandable SQL preview drawer. Clicking "Edit SQL" restores Monaco and calls `dbam.editorLayout`.
+- **Global Command Palette**: Rendered via `.cmd-palette-modal` with `max-width: 780px` on desktop and laptop displays, fuzzy filtering across routes and databases, and full keyboard navigation.
+- **Results Grid Overhaul**:
+  - Resizable column headers via `.th-resizable` and `.th-resizer` divider dragging.
+  - Sticky aggregates bar (`.grid-aggregates-bar`) displaying real-time statistics (Count, Distinct, Sum, Avg, Min, Max).
+  - Slide-out cell inspector drawer (`.cell-inspector-drawer`) opened on cell double-click with formatted JSON and XML viewing and copy button.
+- **Button Hover Expansion**: Limit `.btn-hover-expand` to short action verbs in compact toolbars (e.g. Save, Format, Explain). Never use for long labels or inside `.actions` button groups, because the CSS width transition clips text.
 - The results card has a Maximize and Restore toggle (`.results.maximized` is `position: fixed; inset: 0`).
 - Monaco is created in `app.js` (`editorInit`) with `fixedOverflowWidgets: true` so suggestions are not clipped. Suggestion rows rely on Monaco's own class names, so avoid global CSS that targets generic names.
 - Database selector (`.db-selector-*`): Custom trigger dropdown displaying database name with engine badge and environment badge. Badges use `flex-shrink: 0` so they are never truncated or hidden when long database names are selected.

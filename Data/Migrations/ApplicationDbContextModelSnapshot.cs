@@ -719,8 +719,16 @@ namespace DbAccessManager.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Category")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
 
                     b.Property<Guid>("DatabaseId")
                         .HasColumnType("uuid");
@@ -728,6 +736,9 @@ namespace DbAccessManager.Data.Migrations
                     b.Property<string>("Description")
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
+
+                    b.Property<bool>("IsShared")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -754,6 +765,8 @@ namespace DbAccessManager.Data.Migrations
                         .HasColumnType("character varying(450)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "DatabaseId", "IsShared");
 
                     b.HasIndex("TenantId", "UserId", "DatabaseId", "Name")
                         .IsUnique();

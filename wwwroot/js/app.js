@@ -491,6 +491,12 @@ window.dbam = (function () {
         window.monaco.editor.setModelMarkers(e.editor.getModel(), "dbam-syntax", []);
       } else scheduleDiagnostics(e);
     },
+    editorLayout: function (id) {
+      const e = editors[id];
+      if (e && e.kind === "monaco") {
+        setTimeout(() => e.editor.layout(), 10);
+      }
+    },
     setMetadata: function (objects) {
       metadata = objects || [];
     },
@@ -737,6 +743,268 @@ window.dbam = (function () {
       }
     });
   }
+
+  window.registerGlobalCommandPalette = function (ref) {
+    window._commandPaletteRef = ref;
+    if (!window._commandPaletteListenerAttached) {
+      window._commandPaletteListenerAttached = true;
+      document.addEventListener("keydown", function (e) {
+        if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+          e.preventDefault();
+          if (window._commandPaletteRef) {
+            window._commandPaletteRef.invokeMethodAsync("OpenPalette");
+          }
+        }
+      });
+    }
+  };
+
+  window.toggleTheme = function () {
+    const root = document.documentElement;
+    const current = root.getAttribute("data-theme") || "light";
+    const next = current === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try {
+      localStorage.setItem("theme", next);
+    } catch (e) {}
+    if (window.monaco) {
+      window.monaco.editor.setTheme(next === "dark" ? "vs-dark" : "vs");
+    }
+  };
+
+  window.initTableColumnResizing = function (tableContainerId) {
+    const wrap = document.getElementById(tableContainerId);
+    if (!wrap) return;
+    const headers = wrap.querySelectorAll("th.th-resizable");
+    headers.forEach(function (th) {
+      let resizer = th.querySelector(".th-resizer");
+      if (!resizer) {
+        resizer = document.createElement("div");
+        resizer.className = "th-resizer";
+        th.appendChild(resizer);
+      }
+      resizer.onmousedown = function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const startX = e.pageX;
+        const startWidth = th.offsetWidth;
+        resizer.classList.add("resizing");
+
+        function onMouseMove(ev) {
+          const newWidth = Math.max(50, startWidth + (ev.pageX - startX));
+          th.style.width = newWidth + "px";
+          th.style.minWidth = newWidth + "px";
+        }
+
+        function onMouseUp() {
+          resizer.classList.remove("resizing");
+          document.removeEventListener("mousemove", onMouseMove);
+          document.removeEventListener("mouseup", onMouseUp);
+        }
+
+        document.addEventListener("mousemove", onMouseMove);
+        document.addEventListener("mouseup", onMouseUp);
+      };
+    });
+  };
+
+  window.renderQueryChart = function (containerId, config) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = "";
+
+    const labels = config.labels || [];
+    const values = config.values || [];
+    const chartType = config.chartType || "bar";
+    const colors = [
+      "#5b5bf0", "#18b6e8", "#12a36b", "#d98a06",
+      "#e03e52", "#8b5cf6", "#ec4899", "#f97316"
+    ];
+
+    if (!labels.length || !values.length) {
+      container.innerHTML = "<div class='muted small' style='padding:20px;text-align:center'>No numeric data available to chart.</div>";
+      return;
+    }
+
+    const width = container.clientWidth || 600;
+    const height = Math.max(260, container.clientHeight || 300);
+    const padding = { top: 30, right: 30, bottom: 50, left: 60 };
+    const chartWidth = width - padding.left - padding.right;
+    const chartHeight = height - padding.top - padding.bottom;
+
+    const maxVal = Math.max(...values, 0) || 1;
+    const minVal = Math.min(...values, 0);
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("width", "100%");
+    svg.setAttribute("height", "100%");
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.style.overflow = "visible";
+
+    if (chartType === "donut" || chartType === "pie") {
+      const centerX = width / 2;
+      const centerY = height / 2;
+      const radius = Math.min(chartWidth, chartHeight) / 2.2;
+      const innerRadius = chartType === "donut" ? radius * 0.55 : 0;
+      const total = values.reduce((a, b) => a + (b > 0 ? b : 0), 0) || 1;
+
+      let startAngle = 0;
+      values.forEach((val, i) => {
+        if (val <= 0) return;
+        const sliceAngle = (val / total) * 2 * Math.PI;
+        const endAngle = startAngle + sliceAngle;
+
+        const x1 = centerX + radius * Math.cos(startAngle);
+        const y1 = centerY + radius * Math.sin(startAngle);
+        const x2 = centerX + radius * Math.cos(endAngle);
+        const y2 = centerY + radius * Math.sin(endAngle);
+
+        const ix1 = centerX + innerRadius * Math.cos(endAngle);
+        const iy1 = centerY + innerRadius * Math.sin(endAngle);
+        const ix2 = centerX + innerRadius * Math.cos(startAngle);
+        const iy2 = centerY + innerRadius * Math.sin(startAngle);
+
+        const largeArc = sliceAngle > Math.PI ? 1 : 0;
+        const d = innerRadius > 0
+          ? `M ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} L ${ix1} ${iy1} A ${innerRadius} ${innerRadius} 0 ${largeArc} 0 ${ix2} ${iy2} Z`
+          : `M ${centerX} ${centerY} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z`;
+
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", d);
+        path.setAttribute("fill", colors[i % colors.length]);
+        path.setAttribute("stroke", "var(--bg-elev)");
+        path.setAttribute("stroke-width", "2");
+
+        const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+        title.textContent = `${labels[i] || ""}: ${val} (${((val / total) * 100).toFixed(1)}%)`;
+        path.appendChild(title);
+
+        svg.appendChild(path);
+        startAngle = endAngle;
+      });
+    } else if (chartType === "line" || chartType === "area") {
+      // Y Grid lines
+      for (let s = 0; s <= 4; s++) {
+        const y = padding.top + (chartHeight * s) / 4;
+        const val = maxVal - (maxVal / 4) * s;
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", padding.left);
+        line.setAttribute("x2", width - padding.right);
+        line.setAttribute("y1", y);
+        line.setAttribute("y2", y);
+        line.setAttribute("stroke", "var(--line)");
+        line.setAttribute("stroke-dasharray", "3,3");
+        svg.appendChild(line);
+
+        const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        txt.setAttribute("x", padding.left - 8);
+        txt.setAttribute("y", y + 4);
+        txt.setAttribute("text-anchor", "end");
+        txt.setAttribute("fill", "var(--text-faint)");
+        txt.setAttribute("font-size", "11px");
+        txt.textContent = Math.round(val);
+        svg.appendChild(txt);
+      }
+
+      const points = values.map((val, i) => {
+        const x = padding.left + (chartWidth * i) / (values.length - 1 || 1);
+        const y = padding.top + chartHeight - (val / maxVal) * chartHeight;
+        return { x, y, val, label: labels[i] };
+      });
+
+      const pathData = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+
+      if (chartType === "area") {
+        const areaData = `${pathData} L ${points[points.length - 1].x} ${padding.top + chartHeight} L ${points[0].x} ${padding.top + chartHeight} Z`;
+        const areaPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        areaPath.setAttribute("d", areaData);
+        areaPath.setAttribute("fill", "rgba(91, 91, 240, 0.15)");
+        svg.appendChild(areaPath);
+      }
+
+      const linePath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      linePath.setAttribute("d", pathData);
+      linePath.setAttribute("fill", "none");
+      linePath.setAttribute("stroke", colors[0]);
+      linePath.setAttribute("stroke-width", "3");
+      svg.appendChild(linePath);
+
+      // Points
+      points.forEach((p) => {
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        circle.setAttribute("cx", p.x);
+        circle.setAttribute("cy", p.y);
+        circle.setAttribute("r", "4");
+        circle.setAttribute("fill", colors[0]);
+        circle.setAttribute("stroke", "var(--bg-elev)");
+        circle.setAttribute("stroke-width", "2");
+
+        const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+        title.textContent = `${p.label}: ${p.val}`;
+        circle.appendChild(title);
+        svg.appendChild(circle);
+      });
+    } else {
+      // Default: Bar Chart
+      const barWidth = Math.min(48, Math.max(12, (chartWidth / values.length) * 0.7));
+
+      // Y Grid lines
+      for (let s = 0; s <= 4; s++) {
+        const y = padding.top + (chartHeight * s) / 4;
+        const val = maxVal - (maxVal / 4) * s;
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", padding.left);
+        line.setAttribute("x2", width - padding.right);
+        line.setAttribute("y1", y);
+        line.setAttribute("y2", y);
+        line.setAttribute("stroke", "var(--line)");
+        line.setAttribute("stroke-dasharray", "3,3");
+        svg.appendChild(line);
+
+        const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        txt.setAttribute("x", padding.left - 8);
+        txt.setAttribute("y", y + 4);
+        txt.setAttribute("text-anchor", "end");
+        txt.setAttribute("fill", "var(--text-faint)");
+        txt.setAttribute("font-size", "11px");
+        txt.textContent = Math.round(val);
+        svg.appendChild(txt);
+      }
+
+      values.forEach((val, i) => {
+        const barHeight = (val / maxVal) * chartHeight;
+        const x = padding.left + (chartWidth / values.length) * i + (chartWidth / values.length - barWidth) / 2;
+        const y = padding.top + chartHeight - barHeight;
+
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", x);
+        rect.setAttribute("y", y);
+        rect.setAttribute("width", barWidth);
+        rect.setAttribute("height", barHeight);
+        rect.setAttribute("rx", "3");
+        rect.setAttribute("fill", colors[i % colors.length]);
+
+        const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+        title.textContent = `${labels[i] || ""}: ${val}`;
+        rect.appendChild(title);
+        svg.appendChild(rect);
+
+        // X Axis labels
+        if (values.length <= 25) {
+          const lbl = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          lbl.setAttribute("x", x + barWidth / 2);
+          lbl.setAttribute("y", height - padding.bottom + 16);
+          lbl.setAttribute("text-anchor", "middle");
+          lbl.setAttribute("fill", "var(--text-dim)");
+          lbl.setAttribute("font-size", "10.5px");
+          lbl.textContent = (labels[i] || "").substring(0, 10);
+          svg.appendChild(lbl);
+        }
+      });
+    }
+
+    container.appendChild(svg);
+  };
 
   function init() {
     attachPasswordToggles();

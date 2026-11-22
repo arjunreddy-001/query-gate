@@ -46,6 +46,18 @@ Avoid broad directory searches or recursive greps:
 - Test: `dotnet test tests/DbAccessManager.Tests`
 - Run: `dotnet run` (default http port: 5175, https: 7245)
 
+## Development & Token Rules
+
+1. **Check Skills First**: Always review the corresponding `.github/skills/<skill-name>/SKILL.md` before exploring code.
+2. **Fail-Closed Auditing**: Never weaken or skip the pre-execution audit row write in `ExecutionService`.
+3. **No Blocking Async**: Never call `.GetAwaiter().GetResult()` or `.Result` in circuit/request code; always use `await`.
+4. **Plain Human Copy**: No em dashes or en dashes in UI copy, documentation, or code comments. Use full stops, commas, colons, or parentheses.
+5. **Icon Registry**: Any icon name passed to `<Icon Name="..." />` must exist in `Components/Shared/Icon.razor`. Adding a missing icon renders an empty SVG that looks like a mystery checkbox or blank square.
+6. **No Text Clipping on Buttons**: Avoid `.btn-hover-expand` for long labels or inside `.actions` button groups; use standard `.btn.btn-sm`.
+7. **Layout Split Isolation**: Never apply `flex-direction: row` to `.ws-main`. Keep tabs and toolbar full width at top; wrap only editor and results in `.ws-body` (with `.ws-body-horizontal`), support bidirectional resizing, and invoke `dbam.editorLayout`.
+8. **Form Mode Separation**: When Form Mode is active, replace the Monaco editor in `.ws-editor-pane` rather than stacking both simultaneously.
+9. **Command Palette Integration**: Register new pages, routes, and major tools in `Components/Shared/CommandPalette.razor`.
+
 ## Skill Management Convention
 
 Whenever a new skill or workflow is created in this project:

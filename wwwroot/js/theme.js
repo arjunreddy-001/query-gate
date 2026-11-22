@@ -91,16 +91,30 @@
     var drag = null;
     document.addEventListener('mousedown', function (e) {
         var s = e.target.closest && e.target.closest('.ws-split');
-        var ed = document.getElementById('sql-editor');
-        if (!s || !ed) return;
-        drag = { y: e.clientY, h: ed.getBoundingClientRect().height, ed: ed };
+        if (!s) return;
+        var pane = s.closest('.ws-body') ? s.closest('.ws-body').querySelector('.ws-editor-pane') : document.getElementById('sql-editor');
+        if (!pane) return;
+        var isHoriz = !!s.closest('.ws-body-horizontal');
+        drag = {
+            isHoriz: isHoriz,
+            x: e.clientX,
+            y: e.clientY,
+            w: pane.getBoundingClientRect().width,
+            h: pane.getBoundingClientRect().height,
+            pane: pane
+        };
         document.body.style.userSelect = 'none';
         e.preventDefault();
     });
     document.addEventListener('mousemove', function (e) {
         if (!drag) return;
-        var h = Math.max(80, drag.h + (e.clientY - drag.y));
-        drag.ed.style.flex = '0 0 ' + h + 'px';
+        if (drag.isHoriz) {
+            var w = Math.max(160, drag.w + (e.clientX - drag.x));
+            drag.pane.style.flex = '0 0 ' + w + 'px';
+        } else {
+            var h = Math.max(80, drag.h + (e.clientY - drag.y));
+            drag.pane.style.flex = '0 0 ' + h + 'px';
+        }
     });
     document.addEventListener('mouseup', function () {
         if (drag) { drag = null; document.body.style.userSelect = ''; }

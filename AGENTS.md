@@ -41,6 +41,11 @@ Avoid broad directory listings or recursive greps; check these specific files:
 4. **Plain Human Copy**: No em dashes or en dashes in UI copy, documentation, or code comments. Use full stops, commas, colons, or parentheses.
 5. **Multi-Engine Consistency**: When adding or updating SQL operations, support all four engines or validate dialect constraints.
 6. **Environment Variable for Tests**: On macOS/Linux sandboxes, prepend `DOTNET_CLI_HOME=$HOME` if running build or tests.
+7. **Icon Registry**: Any icon name passed to `<Icon Name="..." />` must exist in `Components/Shared/Icon.razor`. Adding a missing icon renders an empty SVG that looks like a mystery checkbox or blank square.
+8. **No Text Clipping on Buttons**: Avoid `.btn-hover-expand` for long labels or inside `.actions` button groups; use standard `.btn.btn-sm`.
+9. **Layout Split Isolation**: Never apply `flex-direction: row` to `.ws-main`. Keep tabs and toolbar full width at top; wrap only editor and results in `.ws-body` (with `.ws-body-horizontal`), support bidirectional resizing, and invoke `dbam.editorLayout`.
+10. **Form Mode Separation**: When Form Mode is active, replace the Monaco editor in `.ws-editor-pane` rather than stacking both simultaneously.
+11. **Command Palette Integration**: Register new pages, routes, and major tools in `Components/Shared/CommandPalette.razor`.
 
 ## Baseline Commands
 

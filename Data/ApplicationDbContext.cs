@@ -207,7 +207,10 @@ public class ApplicationDbContext(
             entity.Property(q => q.Name).HasMaxLength(200);
             entity.Property(q => q.Tags).HasMaxLength(400);
             entity.Property(q => q.Description).HasMaxLength(1000);
+            entity.Property(q => q.Category).HasMaxLength(100);
+            entity.Property(q => q.CreatedByUserName).HasMaxLength(256);
             entity.HasIndex(q => new { q.TenantId, q.UserId, q.DatabaseId, q.Name }).IsUnique();
+            entity.HasIndex(q => new { q.TenantId, q.DatabaseId, q.IsShared });
             entity.HasQueryFilter(e => e.TenantId == FilterTenantId);
         });
 

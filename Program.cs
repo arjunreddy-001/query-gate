@@ -145,6 +145,7 @@ builder.Services.AddSingleton<DatabaseProviderFactory>();
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<DbAccessManager.Services.Ai.AiAssistantService>();
 builder.Services.AddScoped<DbAccessManager.Services.OidcService>();
+builder.Services.AddScoped<PiiDiscoveryService>();
 builder.Services.AddSingleton<DatabaseAdminService>();
 builder.Services.AddSingleton<UserAdminService>();
 builder.Services.AddSingleton<RequestService>();

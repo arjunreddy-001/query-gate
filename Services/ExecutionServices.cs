@@ -3,6 +3,7 @@ using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
 using DbAccessManager.Data;
 using DbAccessManager.Security;
 using DbAccessManager.Services.Providers;
@@ -185,6 +186,7 @@ public sealed class ExecutionOptions
     public bool ApprovedScript { get; init; }
     public bool Export { get; init; }
     public Guid? RunId { get; init; }
+    public Dictionary<string, object?> Parameters { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed class ExecutionService(
@@ -747,7 +749,26 @@ public sealed class ExecutionService(
             foreach (var batch in analysis.Batches)
             {
                 await using var cmd = connection.CreateCommand();
-                cmd.CommandText = batch;
+                var commandText = batch;
+                if (options.Parameters.Count > 0)
+                {
+                    foreach (var (paramName, paramVal) in options.Parameters)
+                    {
+                        var cleanName = paramName.TrimStart('@', ':').Trim('{', '}');
+                        var formattedName = provider.FormatParameterName(cleanName);
+                        commandText = Regex.Replace(commandText, @"\{\{\s*" + Regex.Escape(cleanName) + @"\s*\}\}", formattedName, RegexOptions.IgnoreCase);
+                        if (formattedName.StartsWith('@'))
+                        {
+                            commandText = Regex.Replace(commandText, @"(?<!:):" + Regex.Escape(cleanName) + @"\b", formattedName, RegexOptions.IgnoreCase);
+                        }
+
+                        var p = cmd.CreateParameter();
+                        p.ParameterName = formattedName;
+                        p.Value = paramVal ?? DBNull.Value;
+                        cmd.Parameters.Add(p);
+                    }
+                }
+                cmd.CommandText = commandText;
                 cmd.CommandTimeout = timeout;
                 if (tx is not null) cmd.Transaction = tx;
 

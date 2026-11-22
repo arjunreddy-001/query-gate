@@ -15,4 +15,5 @@ public interface IDatabaseProvider
     Task<ExecutionPlanDto?> ExplainPlanAsync(string connectionString, string sql, int timeoutSeconds, CancellationToken ct = default);
     (string Outcome, string ErrorMessage, int? ErrorLine) TranslateException(Exception ex, int timeoutSeconds);
     void RegisterMessageListener(DbConnection connection, Action<string> onMessage);
+    string FormatParameterName(string cleanName) => "@" + cleanName;
 }

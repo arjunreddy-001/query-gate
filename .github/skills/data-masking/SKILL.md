@@ -56,6 +56,14 @@ Built-in preset rules are seeded via `DataMaskingService.GetDefaultRules()`.
 4. If masking is active, columns matching rule patterns (`MaskingRule.Patterns` comma-separated list matched against column names case-insensitively) are transformed row by row using `DataMaskingService.MaskValue`.
 5. Exports (CSV, Excel, JSON, Markdown, INSERT statements) automatically honor the masked results.
 
+## Automated Schema PII Discovery (`Services/PiiDiscoveryService.cs`)
+
+Administrators can proactively scan registered databases to detect sensitive columns before queries occur:
+- Service: `PiiDiscoveryService.ScanDatabaseAsync(databaseId)`
+- Analyzes database metadata (table names, column names) against 11 regulatory compliance categories (CreditCard, Ssn, Email, Phone, Name, MedicalRecord, DateOfBirth, Address, ZipCode, Salary, Secret).
+- Cross-references existing active masking rules to flag which columns are protected vs unprotected.
+- 1-Click Protect: creating a recommended rule from a scan finding generates a new `MaskingRule` with appropriate strategy and compliance tags, immediately invalidating the cache.
+
 ## Testing Masking Rules
 
 Use `DataMaskingService.MaskValue(sampleValue, strategy, customMask)` to verify masking transformations in unit tests and UI test preview components without hitting a database.

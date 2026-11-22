@@ -98,8 +98,11 @@ On narrow screens the Objects, Saved and History panel starts closed. Use the pa
    - Suggestions include common SQL snippets. Hover over a resolvable column to see its source and available type details. Basic table variables, temporary tables, scalar variables and DML targets are inferred from the current batch where possible.
    - Use **Editor settings** to change automatic suggestions, font size and optional live syntax diagnostics. Settings follow your account. Diagnostics are off by default, do not execute SQL, and can report errors while a statement is incomplete. They are unavailable for SQL over 4,000 characters.
    - The **object explorer** on the left lists tables/views/procedures.
-   - Object search is **fuzzy by default**. Use the **Fuzzy** toggle to switch between fuzzy and exact contains matching.
-   - Use the object type chips to filter to **Tables**, **Views**, **Procedures** or **Functions**.
+   - **Deep Schema Explorer**:
+     - Click the **Schema** folder icon button in the Object Explorer toolbar to toggle between grouping objects by database schema (e.g. `dbo`, `sales`, `audit`) and viewing them as a flat list.
+     - Check the **Cols** checkbox next to the search filter to search column names across all tables and views in addition to table names.
+     - Object search is **fuzzy by default**. Use the **Fuzzy** toggle to switch between fuzzy and exact contains matching.
+     - Use the object type chips to filter to **Tables**, **Views**, **Procedures** or **Functions**.
    - Database dropdown shows enabled databases by default. Turn on **Show disabled** to include disabled entries.
    - **Interactive ER Diagrams**: Click the ER diagram button in the Objects explorer toolbar (or right-click any table and choose **View ER Diagram**) to launch the visual schema viewer.
      - **Focus Table & Neighborhood**: By default, the diagram loads the selected table and its 1-hop or 2-hop foreign key relationships. This keeps rendering instantaneous even on databases with hundreds of tables.
@@ -123,15 +126,25 @@ On narrow screens the Objects, Saved and History panel starts closed. Use the pa
      - **Operator Breakdown**: sorts operators by cost descending with percentage bars, estimated rows, target objects, and warnings for full index or table scans.
      - **Showplan Viewer**: collapsible view with a one-click **Copy Plan** button.
    - **Format** (`Shift+Alt+F`), **Save query** (`Ctrl+S`), **Cancel** a running query.
+   - **Form Mode & Parameterized Queries**: write queries with `:paramName`, `@paramName`, or `{{paramName}}` tokens and click **Form Mode** in the toolbar to run queries via auto-generated forms. Parameters are bound dynamically via ADO.NET parameters without string concatenation.
+   - **Global Command Palette**: press `Cmd+K` on macOS or `Ctrl+K` on Windows/Linux to open the command palette for instant route navigation, database switching, and workspace actions.
+   - **Workspace Layout Split**: toggle between stacked vertical (editor top, results bottom) and side-by-side horizontal (editor left, results right) split layouts with smooth draggable divider resizing.
+   - **Team Query Library & Shared Snippets**: save queries with category tags, check **Share with Team & Workspace**, and switch between **My Queries** and **Team Library** in the Saved side panel.
+   - **Production Safeguards**: targets in `Production` display an environment warning banner, an editor watermark overlay, and a confirmation modal for destructive write statements (UPDATE, DELETE, DROP, TRUNCATE, ALTER).
    - **Dry run**: executes inside a transaction and **rolls back**, so use it to test INSERT/UPDATE/DELETE safely.
    - **Timeout**: override per run (limited by the admin maximum).
    - **Tabs** are remembered in your browser. **Saved queries** (up to 50 per database) and **History** are in the side panel.
 5. Results appear in a grid (the row cap applies); the **Messages** tab shows errors and row counts.
+   - **Results Grid Overhaul**:
+     - **Interactive Column Resizing**: drag the vertical dividers between column headers to resize columns to any width.
+     - **Live Aggregates Bar**: inspect real-time aggregate statistics (Count, Distinct, Sum, Avg, Min, Max) on the sticky status bar at the bottom of the table.
+     - **Cell Inspector Drawer**: double-click any cell to open a slide-out drawer with formatted JSON and XML viewing and 1-click clipboard copying.
+   - **1-Click Visual Charting**: switch to the **Visual Chart** tab to generate interactive SVG Bar, Line, Area, or Donut charts directly from your query results with customizable category and metric columns.
    - **Dynamic Data Masking**: users without the `UNMASK` permission automatically see sensitive columns (emails, credit cards, SSNs, phone numbers, salaries, passwords/API keys) redacted in-flight. Table headers show a lock icon on redacted columns, and a `Masked (N columns redacted)` badge appears in the results header. Redaction is enforced server-side before delivery, guaranteeing that all exports also contain only masked data.
    - **Export menu**: hover over the compact **Export ▾** button to download as **CSV**, Excel spreadsheet (**Excel** `.xls`), or JSON array (**JSON**). You can also copy results directly as a **Markdown** table or open the **SQL INSERT…** dialog. All export options require the `EXPORT` permission and are audited.
    - **SQL INSERT export**: automatically infers the target table name from your `FROM` clause (e.g. `[Products]`). You can select one or more duplicate check columns to wrap each row in an idempotent `IF NOT EXISTS (SELECT 1 FROM [Products] WHERE col1 = 'val1' AND col2 = 'val2') BEGIN INSERT ... END` block, preventing duplicates when inserting into other databases.
    - **Grid filtering & sorting**: use the search box in the results toolbar to filter displayed rows in real time. Click any column header to sort ascending or descending.
-   - **Cell copy**: double-click any cell to copy its value to the clipboard.
+   - **Cell copy**: double-click any cell to copy its value to the clipboard or inspect it in the cell drawer.
 
 **What the SQL gate does for you**
 
@@ -213,6 +226,8 @@ Errors and warnings with correlation IDs. Users who hit an error see a correlati
 | Temporary password length                         | 16      |
 
 The cache card below the settings lets admins reload or clear cached object metadata per database or for all databases.
+
+**Automated Schema PII Discovery:** under **Admin → Settings → Data Masking**, click **Scan Schema for PII** to scan any registered database against 11 regulatory compliance categories (GDPR, HIPAA, PCI-DSS, SOC 2). The scanner highlights unprotected columns and provides a 1-click **Protect** button that automatically creates dynamic masking rules without manual regex authoring.
 
 **Email & SMTP:** configure outgoing mail settings (host, port, SSL/TLS, username, password, sender address) directly in the UI. Passwords are encrypted at rest with AES-256-GCM. Use the _Send test_ button to verify deliverability with live SMTP status feedback.
 

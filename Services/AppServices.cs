@@ -500,7 +500,17 @@ public sealed class WorkspaceService(IDbContextFactory<ApplicationDbContext> fac
         return await db.SavedQueries.AsNoTracking().Where(q => q.UserId == userId && q.DatabaseId == databaseId).OrderBy(q => q.Name).ToListAsync();
     }
 
-    public async Task<OpResult> SaveAsync(string userId, Guid databaseId, string name, string sql, string? tags, string? description)
+    public async Task<List<SavedQuery>> TeamSavedAsync(Guid databaseId)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        return await db.SavedQueries.AsNoTracking()
+            .Where(q => q.DatabaseId == databaseId && q.IsShared)
+            .OrderBy(q => q.Category ?? "")
+            .ThenBy(q => q.Name)
+            .ToListAsync();
+    }
+
+    public async Task<OpResult> SaveAsync(string userId, Guid databaseId, string name, string sql, string? tags, string? description, string? category = null, bool isShared = false, string? userName = null)
     {
         if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(sql)) return OpResult.Fail("Name and SQL are required.");
         await using var db = await factory.CreateDbContextAsync();
@@ -509,20 +519,40 @@ public sealed class WorkspaceService(IDbContextFactory<ApplicationDbContext> fac
         {
             if (await db.SavedQueries.CountAsync(q => q.UserId == userId && q.DatabaseId == databaseId) >= MaxSavedPerDatabase)
                 return OpResult.Fail($"Limit of {MaxSavedPerDatabase} saved queries per database reached.");
-            db.SavedQueries.Add(new SavedQuery { UserId = userId, DatabaseId = databaseId, Name = name.Trim(), SqlText = sql, Tags = tags, Description = description });
+            db.SavedQueries.Add(new SavedQuery
+            {
+                UserId = userId,
+                DatabaseId = databaseId,
+                Name = name.Trim(),
+                SqlText = sql,
+                Tags = tags,
+                Description = description,
+                Category = string.IsNullOrWhiteSpace(category) ? null : category.Trim(),
+                IsShared = isShared,
+                CreatedByUserName = userName
+            });
         }
         else
         {
-            existing.SqlText = sql; existing.Tags = tags; existing.Description = description; existing.UpdatedAt = DateTimeOffset.UtcNow;
+            existing.SqlText = sql;
+            existing.Tags = tags;
+            existing.Description = description;
+            existing.Category = string.IsNullOrWhiteSpace(category) ? null : category.Trim();
+            existing.IsShared = isShared;
+            if (!string.IsNullOrWhiteSpace(userName)) existing.CreatedByUserName = userName;
+            existing.UpdatedAt = DateTimeOffset.UtcNow;
         }
         await db.SaveChangesAsync();
         return OpResult.Success();
     }
 
-    public async Task DeleteAsync(string userId, Guid id)
+    public async Task DeleteAsync(string userId, Guid id, bool isAdmin = false)
     {
         await using var db = await factory.CreateDbContextAsync();
-        await db.SavedQueries.Where(q => q.Id == id && q.UserId == userId).ExecuteDeleteAsync();
+        if (isAdmin)
+            await db.SavedQueries.Where(q => q.Id == id).ExecuteDeleteAsync();
+        else
+            await db.SavedQueries.Where(q => q.Id == id && q.UserId == userId).ExecuteDeleteAsync();
     }
 
     public async Task<List<QueryHistory>> HistoryAsync(string userId, Guid databaseId, int take = 50)

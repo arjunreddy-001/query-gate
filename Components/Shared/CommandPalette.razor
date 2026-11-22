@@ -1,0 +1,253 @@
+@inject NavigationManager Nav
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ITenantContext TenantCtx
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthProvider
+@using DbAccessManager.Data
+@using Microsoft.EntityFrameworkCore
+@implements IAsyncDisposable
+
+@if (isOpen)
+{
+    <div class="cmd-palette-backdrop" @onclick="Close">
+        <div class="cmd-palette-modal" @onclick:stopPropagation>
+            <div class="cmd-palette-head">
+                <Icon Name="search" />
+                <input @ref="inputRef"
+                       type="text"
+                       class="cmd-palette-input"
+                       placeholder="Type a command, database name, or page to jump to…"
+                       @bind="query"
+                       @bind:event="oninput"
+                       @onkeydown="HandleKeyDown" />
+                <span class="cmd-palette-esc" @onclick="Close">ESC</span>
+            </div>
+
+            <div class="cmd-palette-body">
+                @if (filteredItems.Count == 0)
+                {
+                    <div class="cmd-palette-empty">
+                        <Icon Name="alert" />
+                        <span>No results found for "@query"</span>
+                    </div>
+                }
+                else
+                {
+                    var activeGroup = "";
+                    @for (var i = 0; i < filteredItems.Count; i++)
+                    {
+                        var idx = i;
+                        var item = filteredItems[idx];
+                        if (item.Group != activeGroup)
+                        {
+                            activeGroup = item.Group;
+                            <div class="cmd-palette-group">@activeGroup</div>
+                        }
+                        <div class="cmd-palette-item @(idx == selectedIndex ? "selected" : "")"
+                             @onclick="() => ExecuteItem(item)"
+                             @onmouseenter="() => selectedIndex = idx">
+                            <span class="cmd-palette-icon"><Icon Name="@item.Icon" /></span>
+                            <div class="cmd-palette-info">
+                                <div class="cmd-palette-title">@item.Title</div>
+                                @if (!string.IsNullOrEmpty(item.Subtitle))
+                                {
+                                    <div class="cmd-palette-subtitle">@item.Subtitle</div>
+                                }
+                            </div>
+                            @if (!string.IsNullOrEmpty(item.Badge))
+                            {
+                                <span class="badge @item.BadgeClass">@item.Badge</span>
+                            }
+                        </div>
+                    }
+                }
+            </div>
+
+            <div class="cmd-palette-foot">
+                <span><kbd>↑</kbd> <kbd>↓</kbd> Navigate</span>
+                <span><kbd>↵</kbd> Select</span>
+                <span><kbd>esc</kbd> Dismiss</span>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool isOpen;
+    private string query = "";
+    private int selectedIndex;
+    private ElementReference inputRef;
+    private DotNetObjectReference<CommandPalette>? dotNetRef;
+    private List<PaletteItem> allItems = [];
+    private bool isAdmin;
+
+    public sealed record PaletteItem(
+        string Group,
+        string Title,
+        string? Subtitle,
+        string Icon,
+        string? Url = null,
+        Action? Action = null,
+        string? Badge = null,
+        string? BadgeClass = null);
+
+    private List<PaletteItem> filteredItems
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(query))
+                return allItems;
+
+            var q = query.Trim();
+            return allItems
+                .Where(i => i.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
+                         || (i.Subtitle?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false)
+                         || i.Group.Contains(q, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthProvider.GetAuthenticationStateAsync();
+        isAdmin = auth.User.IsInRole(Roles.Admin);
+        dotNetRef = DotNetObjectReference.Create(this);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && dotNetRef != null)
+        {
+            await JS.InvokeVoidAsync("registerGlobalCommandPalette", dotNetRef);
+        }
+        if (isOpen && !string.IsNullOrEmpty(query) && selectedIndex >= filteredItems.Count)
+        {
+            selectedIndex = Math.Max(0, filteredItems.Count - 1);
+        }
+    }
+
+    [JSInvokable]
+    public async Task OpenPalette()
+    {
+        isOpen = true;
+        query = "";
+        selectedIndex = 0;
+        await LoadItemsAsync();
+        StateHasChanged();
+        await Task.Delay(50);
+        try
+        {
+            await inputRef.FocusAsync();
+        }
+        catch { }
+    }
+
+    public void Close()
+    {
+        isOpen = false;
+        query = "";
+        StateHasChanged();
+    }
+
+    private async Task LoadItemsAsync()
+    {
+        var items = new List<PaletteItem>();
+
+        // Navigation Group
+        items.Add(new("Navigation", "Query Workspace", "Interactive SQL query editor with tabs & results", "terminal", "/query"));
+        items.Add(new("Navigation", "Dashboard", "System overview, quick links, and active grants", "home", "/dashboard"));
+        items.Add(new("Navigation", "My Access & Requests", "Review your database grants and request new permissions", "key", "/access"));
+        items.Add(new("Navigation", "Script Requests", "Submit and view SQL scripts for admin approval", "file", "/scripts"));
+        items.Add(new("Navigation", "Notifications", "System alerts, approval status updates, and reminders", "bell", "/notifications"));
+
+        if (isAdmin)
+        {
+            items.Add(new("Governance", "Approvals", "Review pending database access and script execution requests", "check", "/admin/approvals"));
+            items.Add(new("Governance", "Databases", "Manage registered target database connections and health", "db", "/admin/databases"));
+            items.Add(new("Governance", "Users & Roles", "Manage user accounts, roles, and status", "users", "/admin/users"));
+            items.Add(new("Governance", "Permissions Matrix", "Cross-database permission review matrix", "grid", "/admin/matrix"));
+            items.Add(new("Governance", "Audit Logs", "Append-only execution and security audit trail", "list", "/admin/audit"));
+            items.Add(new("Governance", "Application Logs", "Real-time system events, warnings, and error traces", "activity", "/admin/logs"));
+            items.Add(new("Governance", "Settings", "Global limits, data masking, webhooks, SMTP, and SSO", "cog", "/admin/settings"));
+        }
+
+        // Target Databases Group
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var dbs = await db.ManagedDatabases.AsNoTracking().Where(d => d.IsActive).OrderBy(d => d.Name).ToListAsync();
+            foreach (var d in dbs)
+            {
+                var envClass = d.Environment.ToLowerInvariant() switch
+                {
+                    "prod" or "production" => "bad",
+                    "qa" or "staging" => "warn",
+                    _ => "ok"
+                };
+                items.Add(new(
+                    "Databases",
+                    d.Name,
+                    d.Description ?? $"{d.Engine} in {d.Environment}",
+                    "db",
+                    $"/query?db={d.Id}",
+                    Badge: d.Environment,
+                    BadgeClass: envClass));
+            }
+        }
+        catch { }
+
+        // Actions Group
+        items.Add(new("Actions", "Toggle Dark / Light Theme", "Switch between visual themes", "sun", Action: async () => await JS.InvokeVoidAsync("toggleTheme")));
+        items.Add(new("Actions", "New Query Tab", "Open a fresh query tab in the workspace", "plus", "/query"));
+
+        allItems = items;
+    }
+
+    private void HandleKeyDown(KeyboardEventArgs e)
+    {
+        var count = filteredItems.Count;
+        if (count == 0)
+        {
+            if (e.Key == "Escape") Close();
+            return;
+        }
+
+        if (e.Key == "ArrowDown")
+        {
+            selectedIndex = (selectedIndex + 1) % count;
+        }
+        else if (e.Key == "ArrowUp")
+        {
+            selectedIndex = (selectedIndex - 1 + count) % count;
+        }
+        else if (e.Key == "Enter")
+        {
+            if (selectedIndex >= 0 && selectedIndex < count)
+            {
+                ExecuteItem(filteredItems[selectedIndex]);
+            }
+        }
+        else if (e.Key == "Escape")
+        {
+            Close();
+        }
+    }
+
+    private void ExecuteItem(PaletteItem item)
+    {
+        Close();
+        if (item.Action != null)
+        {
+            item.Action.Invoke();
+        }
+        else if (!string.IsNullOrEmpty(item.Url))
+        {
+            Nav.NavigateTo(item.Url);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        dotNetRef?.Dispose();
+    }
+}

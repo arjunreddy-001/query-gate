@@ -84,6 +84,14 @@ public sealed partial class SqlGate(IMemoryCache? cache = null)
         ["Login", "User", "Role", "Server", "Credential", "Certificate", "AsymmetricKey", "SymmetricKey", "MasterKey",
          "Endpoint", "Audit", "Database", "Application", "Availability", "Resource", "Event", "Trigger", "Linked", "Assembly"];
 
+    public static string NormalizeParameterTokens(string sql)
+    {
+        if (string.IsNullOrWhiteSpace(sql)) return sql;
+        var result = Regex.Replace(sql, @"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}", "@$1");
+        result = Regex.Replace(result, @"(?<!:):([a-zA-Z0-9_]+)\b", "@$1");
+        return result;
+    }
+
     public GateAnalysis Analyze(string sql) => Analyze(sql, DatabaseEngine.SqlServer);
 
     public GateAnalysis Analyze(string sql, DatabaseEngine engine)
@@ -93,6 +101,11 @@ public sealed partial class SqlGate(IMemoryCache? cache = null)
             var empty = new GateAnalysis { Parsed = true };
             empty.ParseErrors.Add("The script is empty.");
             return empty;
+        }
+
+        if (sql.Contains("{{") || sql.Contains(':'))
+        {
+            sql = NormalizeParameterTokens(sql);
         }
 
         var cacheKey = $"sqlgate:{engine}:{CryptoService.Sha256(sql)}";

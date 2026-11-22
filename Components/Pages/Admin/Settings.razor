@@ -11,6 +11,7 @@
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject DbAccessManager.Services.Ai.AiAssistantService AiService
 @inject DbAccessManager.Services.OidcService OidcSvc
+@inject PiiDiscoveryService PiiScanner
 
 <PageTitle>Settings · Query Gate</PageTitle>
 
@@ -320,6 +321,9 @@ else
                         <button class="btn btn-sm btn-primary" @onclick="OpenAddRuleModal">
                             <Icon Name="plus" />Add Rule
                         </button>
+                        <button class="btn btn-sm" @onclick="TogglePiiScanner" title="Scan database schema for sensitive PII columns and recommend masking rules">
+                            <Icon Name="search" />Scan Schema for PII
+                        </button>
                     </div>
                 </div>
                 <div class="card-pad">
@@ -373,6 +377,106 @@ else
                     }
                 </div>
             </div>
+
+            <!-- Automated Schema PII Discovery Card -->
+            @if (showPiiScanner)
+            {
+                <div class="card" style="border:1px solid var(--brand);box-shadow:0 4px 16px rgba(91,91,240,0.08)">
+                    <div class="card-head" style="background:var(--brand-soft)">
+                        <div class="row-inline" style="gap:8px">
+                            <Icon Name="search" />
+                            <h3 style="margin:0;font-size:14px">Automated Schema PII Discovery & Recommendations</h3>
+                        </div>
+                        <button class="icon-btn sm" @onclick="() => showPiiScanner = false"><Icon Name="x" /></button>
+                    </div>
+                    <div class="card-pad stack" style="gap:12px">
+                        <div class="row-inline" style="gap:10px;flex-wrap:wrap">
+                            <label class="small faint">Target Database:</label>
+                            <select class="form-control" style="width:220px;height:30px;font-size:12px" @bind="piiScanDbId">
+                                @foreach (var d in managedDatabases)
+                                {
+                                    <option value="@d.Id">@d.Name (@d.Environment)</option>
+                                }
+                            </select>
+                            <button class="btn btn-primary btn-sm" @onclick="RunPiiScan" disabled="@piiScanning">
+                                @if (piiScanning)
+                                {
+                                    <span>Scanning Schema...</span>
+                                }
+                                else
+                                {
+                                    <Icon Name="search" /><span>Scan Schema for PII</span>
+                                }
+                            </button>
+                        </div>
+
+                        @if (piiFindings != null)
+                        {
+                            <div class="row-inline" style="gap:12px">
+                                <span class="badge ok">@piiFindings.Count sensitive column(s) detected</span>
+                                <span class="badge @(piiFindings.Count(f => !f.IsAlreadyProtected) > 0 ? "warn" : "ok")">
+                                    @piiFindings.Count(f => !f.IsAlreadyProtected) unprotected
+                                </span>
+                            </div>
+
+                            @if (piiFindings.Count == 0)
+                            {
+                                <div class="muted small" style="padding:12px;text-align:center">No sensitive PII columns detected in the scanned tables.</div>
+                            }
+                            else
+                            {
+                                <div class="table-wrap">
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>Table</th>
+                                                <th>Column</th>
+                                                <th>Category</th>
+                                                <th>Standards</th>
+                                                <th>Status</th>
+                                                <th>Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var f in piiFindings)
+                                            {
+                                                <tr>
+                                                    <td><b>@f.Schema.@f.TableName</b></td>
+                                                    <td><code>@f.ColumnName</code></td>
+                                                    <td>@f.DetectedCategory</td>
+                                                    <td><span class="badge">@f.ComplianceStandard</span></td>
+                                                    <td>
+                                                        @if (f.IsAlreadyProtected)
+                                                        {
+                                                            <span class="badge ok" title="Covered by rule '@f.MatchedRuleName'"><Icon Name="shield" /> Protected</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="badge warn"><Icon Name="alert" /> Unprotected</span>
+                                                        }
+                                                    </td>
+                                                    <td>
+                                                        @if (!f.IsAlreadyProtected)
+                                                        {
+                                                            <button class="btn btn-sm btn-primary" type="button" @onclick="() => QuickProtectPiiColumn(f)">
+                                                                <Icon Name="plus" /> Protect
+                                                            </button>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="faint small">@f.MatchedRuleName</span>
+                                                        }
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        }
+                    </div>
+                </div>
+            }
 
             <!-- Rules Table -->
             <div class="card">
@@ -877,6 +981,11 @@ else
     private string standardFilter = "All";
     private string testColumnName = "";
     private string testSampleValue = "";
+    private bool showPiiScanner;
+    private bool piiScanning;
+    private Guid piiScanDbId;
+    private List<ManagedDatabase> managedDatabases = [];
+    private List<PiiFinding>? piiFindings;
     private MaskingRule? editingRule;
     private string editingRulePatternsRaw = "";
     private HashSet<string> editingStandards = new(StringComparer.OrdinalIgnoreCase);
@@ -1147,6 +1256,74 @@ else
         var (rules, enabled) = await DataMaskingService.GetConfigAsync(DbFactory);
         maskingRules = rules;
         maskingEnabled = enabled;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        managedDatabases = await db.ManagedDatabases.AsNoTracking().Where(d => d.IsActive).OrderBy(d => d.Name).ToListAsync();
+        if (piiScanDbId == Guid.Empty && managedDatabases.Count > 0)
+        {
+            piiScanDbId = managedDatabases[0].Id;
+        }
+    }
+
+    private void TogglePiiScanner() => showPiiScanner = !showPiiScanner;
+
+    private async Task RunPiiScan()
+    {
+        if (piiScanDbId == Guid.Empty) return;
+        piiScanning = true;
+        StateHasChanged();
+        try
+        {
+            piiFindings = await PiiScanner.ScanDatabaseAsync(piiScanDbId);
+            Say($"PII scan completed: {piiFindings.Count} sensitive columns analyzed.");
+        }
+        catch (Exception ex)
+        {
+            Say($"PII scan failed: {ex.Message}", true);
+        }
+        finally
+        {
+            piiScanning = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task QuickProtectPiiColumn(PiiFinding finding)
+    {
+        try
+        {
+            var existingRule = maskingRules.FirstOrDefault(r => r.Name.Contains(finding.DetectedCategory, StringComparison.OrdinalIgnoreCase));
+            if (existingRule != null)
+            {
+                var patterns = existingRule.GetPatternList().ToList();
+                if (!patterns.Contains(finding.ColumnName, StringComparer.OrdinalIgnoreCase))
+                {
+                    patterns.Add(finding.ColumnName.ToLowerInvariant());
+                    existingRule.Patterns = string.Join(", ", patterns);
+                }
+            }
+            else
+            {
+                var newRule = new MaskingRule
+                {
+                    Name = $"{finding.DetectedCategory} ({finding.ColumnName})",
+                    Patterns = finding.ColumnName.ToLowerInvariant(),
+                    Strategy = Enum.TryParse<DataMaskingService.MaskingStrategy>(finding.RecommendedStrategy, out var strat) ? strat : DataMaskingService.MaskingStrategy.Secret,
+                    Standards = finding.ComplianceStandard,
+                    Description = $"Auto-created from PII Discovery scanner for table {finding.TableName}",
+                    IsEnabled = true
+                };
+                maskingRules.Add(newRule);
+            }
+
+            await DataMaskingService.SaveConfigAsync(DbFactory, maskingRules, maskingEnabled);
+            await RunPiiScan();
+            Say($"Column '{finding.ColumnName}' is now protected with dynamic data masking.");
+        }
+        catch (Exception ex)
+        {
+            Say($"Failed to protect column: {ex.Message}", true);
+        }
     }
 
     private void PromptToggleGlobalMasking()

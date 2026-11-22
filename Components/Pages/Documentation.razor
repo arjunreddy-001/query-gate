@@ -31,10 +31,15 @@
                 <div class="docs-nav-group">
                     <span class="docs-nav-group-title">Features &amp; Security</span>
                     <a href="/documentation#user-guide">User guide</a>
+                    <a href="/documentation#parameterized-queries">Form Mode &amp; Parameters</a>
+                    <a href="/documentation#command-palette">Command Palette (Cmd+K)</a>
+                    <a href="/documentation#visual-charting">Visual Charting</a>
+                    <a href="/documentation#team-library">Team Library &amp; Safeguards</a>
                     <a href="/documentation#ai-assistant">AI Assistant &amp; Guardrails</a>
                     <a href="/documentation#er-diagrams">ER Diagrams</a>
                     <a href="/documentation#object-rules">Object scoping</a>
                     <a href="/documentation#data-masking">Data masking</a>
+                    <a href="/documentation#schema-pii-discovery">Schema PII Discovery</a>
                     <a href="/documentation#exports-and-plans">Exports &amp; Explain (DAG)</a>
                     <a href="/documentation#sso-oidc">Enterprise SSO (OIDC)</a>
                     <a href="/documentation#multi-tenancy">Multi-tenancy &amp; Workspaces</a>
@@ -71,10 +76,15 @@
                 <div class="docs-nav-group">
                     <span class="docs-nav-group-title">Features &amp; Security</span>
                     <a href="/documentation#user-guide">User guide</a>
+                    <a href="/documentation#parameterized-queries">Form Mode &amp; Parameters</a>
+                    <a href="/documentation#command-palette">Command Palette (Cmd+K)</a>
+                    <a href="/documentation#visual-charting">Visual Charting</a>
+                    <a href="/documentation#team-library">Team Library &amp; Safeguards</a>
                     <a href="/documentation#ai-assistant">AI Assistant &amp; Guardrails</a>
                     <a href="/documentation#er-diagrams">ER Diagrams</a>
                     <a href="/documentation#object-rules">Object scoping</a>
                     <a href="/documentation#data-masking">Data masking</a>
+                    <a href="/documentation#schema-pii-discovery">Schema PII Discovery</a>
                     <a href="/documentation#exports-and-plans">Exports &amp; Explain (DAG)</a>
                     <a href="/documentation#sso-oidc">Enterprise SSO (OIDC)</a>
                     <a href="/documentation#multi-tenancy">Multi-tenancy &amp; Workspaces</a>
@@ -134,7 +144,83 @@
                         <h3><Icon Name="lock" /> Dynamic PII masking</h3>
                         <p>Columns matching PII patterns (credit cards, SSNs, patient names, medical IDs) are redacted automatically. Users with the high-risk <code>UNMASK</code> permission see plain data.</p>
                     </div>
+                    <div class="docs-card">
+                        <h3><Icon Name="table" /> Results grid &amp; live aggregates</h3>
+                        <p>Drag column dividers to resize, inspect real-time statistics (Count, Distinct, Sum, Avg, Min, Max) on the sticky aggregates bar, and double-click any cell to inspect JSON and XML with auto-formatting.</p>
+                    </div>
+                    <div class="docs-card">
+                        <h3><Icon Name="folder" /> Deep schema explorer</h3>
+                        <p>Group tables and views by schema (dbo, sales, audit) or display as a flat list. Check <code>Cols</code> to search column names across all database tables directly from the filter bar.</p>
+                    </div>
+                    <div class="docs-card">
+                        <h3><Icon Name="columns" /> Flexible workspace layout</h3>
+                        <p>Toggle between stacked vertical and side-by-side horizontal workspace split layouts with smooth, bidirectional draggable divider resizing.</p>
+                    </div>
+                    <div class="docs-card">
+                        <h3><Icon Name="search" /> Global command palette</h3>
+                        <p>Press <kbd>Cmd+K</kbd> or <kbd>Ctrl+K</kbd> anywhere to search routes, switch databases with 1 click, toggle dark and light themes, or open new query tabs.</p>
+                    </div>
                 </div>
+            </section>
+
+            <section id="parameterized-queries">
+                <h2>Parameterized queries and Form Mode (No-Code Data Runner)</h2>
+                <p>Query Gate supports parameterized SQL queries and can automatically generate interactive data entry forms for non-technical team members:</p>
+                <ul>
+                    <li><b>Supported parameter syntax:</b> Query Gate automatically recognizes parameters in three common syntaxes:
+                        <ul>
+                            <li>Colon prefix: <code>:userId</code>, <code>:startDate</code></li>
+                            <li>At-sign prefix: <code>@@status</code>, <code>@@limit</code></li>
+                            <li>Mustache brackets: <code>&#123;&#123;department&#125;&#125;</code>, <code>&#123;&#123;orderId&#125;&#125;</code></li>
+                        </ul>
+                    </li>
+                    <li><b>AST gate normalization:</b> Before parsing with ScriptDom or dialect gates, parameter tokens are safely normalized so that parameters inside WHERE, HAVING, and LIMIT clauses do not trigger AST syntax errors.</li>
+                    <li><b>Native driver parameter binding:</b> Parameter values supplied by the user are bound as dynamic ADO.NET parameters (such as <code>NpgsqlParameter</code>, <code>SqlParameter</code>, or <code>MySqlParameter</code>). Values are never concatenated into the raw SQL string, preventing SQL injection vulnerabilities.</li>
+                    <li><b>Form Mode runner:</b> Click <b>Form Mode</b> in the editor toolbar to switch into form mode. Query Gate generates input fields based on parameter names (datetime pickers for dates, number inputs for IDs/counts, text inputs for codes and names). Users enter values and click <b>Run Form</b> to execute without editing raw SQL.</li>
+                    <li><b>Preview SQL drawer:</b> Non-technical operators can expand the <b>Preview Parameterized SQL Query</b> drawer to see how parameters map to the underlying statement, and click <b>Edit SQL</b> at any time to return to the Monaco editor.</li>
+                </ul>
+            </section>
+
+            <section id="command-palette">
+                <h2>Global Command Palette (Cmd+K / Ctrl+K)</h2>
+                <p>Access navigation, database connections, and operational power tools from any page without touching the mouse:</p>
+                <ul>
+                    <li><b>Keyboard shortcut:</b> Press <kbd>Cmd+K</kbd> on macOS or <kbd>Ctrl+K</kbd> on Windows and Linux to open the command palette.</li>
+                    <li><b>Instant navigation:</b> Type to filter routes across the Query Workspace, Dashboard, My Access, Approvals, Users, Databases, Settings, Matrix, and Audit logs.</li>
+                    <li><b>Direct database switcher:</b> Search through managed databases and press Enter to navigate directly to the Query Workspace connected to that specific database.</li>
+                    <li><b>Workspace actions:</b> Trigger theme toggling (Light / Dark mode), open new query tabs, or jump to documentation directly from the palette.</li>
+                    <li><b>Keyboard navigation:</b> Use the Up and Down arrow keys to highlight items, Enter to select, and Escape to dismiss.</li>
+                </ul>
+            </section>
+
+            <section id="visual-charting">
+                <h2>1-Click visual charting for query results</h2>
+                <p>Transform tabular query results into clean, interactive data visualizations directly inside the Query Workspace:</p>
+                <ul>
+                    <li><b>Zero external charting dependencies:</b> Charts are rendered as lightweight, responsive inline SVG elements directly in the browser, with no external CDN or heavy third-party libraries required.</li>
+                    <li><b>Supported chart types:</b>
+                        <ul>
+                            <li><b>Bar chart:</b> Vertical bars with numerical Y-axis gridlines and value labels.</li>
+                            <li><b>Line chart:</b> Trend lines with data point tooltips and connected vertices.</li>
+                            <li><b>Area chart:</b> Smooth semi-transparent area graphs visualizing volume over categories.</li>
+                            <li><b>Donut chart:</b> Proportional category slices with center metric totals.</li>
+                        </ul>
+                    </li>
+                    <li><b>Column mapping:</b> Use the Category Column (X-axis) and Value Metric (Y-axis) dropdowns to select which result set columns to visualize.</li>
+                    <li><b>Multi-result set support:</b> Each result set in a multi-statement batch includes its own Visual Chart tab.</li>
+                </ul>
+            </section>
+
+            <section id="team-library">
+                <h2>Team Query Library and production safeguards</h2>
+                <p>Collaborate on approved queries while enforcing strict safety boundaries when executing against critical production databases:</p>
+                <ul>
+                    <li><b>Team Query Library:</b> Save queries with a title, category tag (e.g. Finance, Customer Support, DevOps), and check <b>Share with Team &amp; Workspace</b> to make queries available to all workspace members.</li>
+                    <li><b>Sidebar switcher:</b> In the left sidebar Saved panel, switch between <b>My Queries</b> (personal private queries) and <b>Team Library</b> (shared queries created by colleagues).</li>
+                    <li><b>Production safeguard banner:</b> Whenever the active target database is designated as <code>Production</code>, a prominent high-visibility warning banner is rendered across the workspace.</li>
+                    <li><b>Editor watermark:</b> A subtle <code>PRODUCTION</code> watermark overlay displays inside the editor pane to prevent accidental execution against live systems.</li>
+                    <li><b>Destructive DML confirmation modal:</b> When a user initiates a destructive write statement (UPDATE, DELETE, DROP, TRUNCATE, ALTER) against a production database, a safety confirmation modal prompts the user to verify the database name or run as a safe rollback Dry-Run first.</li>
+                </ul>
             </section>
 
             <section id="object-rules">
@@ -157,6 +243,25 @@
                     <li><b>GDPR &amp; CCPA:</b> Redacts email addresses, IP addresses, government IDs, and telephone numbers.</li>
                     <li><b>SOC 2 Confidentiality:</b> Redacts employee salaries, compensation figures, and authentication secrets.</li>
                     <li><b>The UNMASK permission:</b> Marked as High Risk in the access matrix; required to view unredacted data. All unmasked queries are recorded in the audit trail.</li>
+                </ul>
+            </section>
+
+            <section id="schema-pii-discovery">
+                <h2>Automated schema PII discovery and masking recommendations</h2>
+                <p>Prevent sensitive data exposure proactively by scanning database schemas for sensitive columns before queries are executed:</p>
+                <ul>
+                    <li><b>In-app scanner:</b> Navigate to <b>Admin &rarr; Settings &rarr; Data Masking</b> and click <b>Scan Schema for PII</b>. Select any connected target database and click <b>Scan Schema</b>.</li>
+                    <li><b>Heuristic compliance detection:</b> Analyzes table and column metadata against 11 compliance categories:
+                        <ul>
+                            <li>Credit card numbers and CVVs (PCI-DSS)</li>
+                            <li>Social security and national identity numbers (GDPR, HIPAA)</li>
+                            <li>Email addresses, phone numbers, and physical addresses (GDPR, CCPA)</li>
+                            <li>Patient names and medical record numbers (HIPAA)</li>
+                            <li>Birthdates, salaries, compensation, and authentication secrets (SOC 2)</li>
+                        </ul>
+                    </li>
+                    <li><b>Coverage analysis:</b> Results distinguish between columns already covered by existing active masking rules and unprotected columns.</li>
+                    <li><b>1-Click protection:</b> For any unprotected column detected, click <b>Protect</b> to automatically create and activate an appropriate dynamic masking rule with zero manual regular expression authoring.</li>
                 </ul>
             </section>
 
