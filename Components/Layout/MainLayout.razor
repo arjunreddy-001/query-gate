@@ -123,7 +123,10 @@
             <button class="topbar-cmd-btn" type="button" @onclick="async () => { if (paletteRef != null) await paletteRef.OpenPalette(); }" title="Command Palette (Cmd+K / Ctrl+K)">
                 <Icon Name="search" />
                 <span class="cmd-label">Jump to…</span>
-                <kbd class="cmd-kbd">⌘K</kbd>
+                <kbd class="cmd-kbd" title="Shortcut">
+                    <span class="kbd-mac">⌘K</span>
+                    <span class="kbd-other">Ctrl+K</span>
+                </kbd>
             </button>
 
             <div class="spacer"></div>

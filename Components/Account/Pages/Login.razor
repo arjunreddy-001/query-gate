@@ -34,19 +34,20 @@
 }
 
 @* ── Passkey sign-in (shown when browser supports WebAuthn) ── *@
-<form @formname="passkey-login" @onsubmit="PasskeySignIn" method="post" class="passkey-form">
-    <AntiforgeryToken />
-    <PasskeySubmit Operation="PasskeyOperation.Request"
-                   Name="PasskeyInput"
-                   EmailName="Input.Email"
-                   class="btn btn-passkey btn-lg"
-                   data-passkey-btn>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:18px;height:18px"><circle cx="12" cy="8" r="4"/><path d="M20 20c0-4.4-3.6-8-8-8s-8 3.6-8 8"/><path d="M15 11.5l2 2 4-4" stroke-width="2"/></svg>
-        Sign in with a passkey
-    </PasskeySubmit>
-</form>
-
-<div class="auth-divider"><span>or sign in with password</span></div>
+<div class="passkey-section" data-passkey-section style="display:none">
+    <form @formname="passkey-login" @onsubmit="PasskeySignIn" method="post" class="passkey-form">
+        <AntiforgeryToken />
+        <PasskeySubmit Operation="PasskeyOperation.Request"
+                       Name="PasskeyInput"
+                       EmailName="Input.Email"
+                       class="btn btn-passkey btn-lg"
+                       data-passkey-btn>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:18px;height:18px"><circle cx="12" cy="8" r="4"/><path d="M20 20c0-4.4-3.6-8-8-8s-8 3.6-8 8"/><path d="M15 11.5l2 2 4-4" stroke-width="2"/></svg>
+            Sign in with a passkey
+        </PasskeySubmit>
+    </form>
+    <div class="auth-divider"><span>or sign in with password</span></div>
+</div>
 
 @if (editContext is not null)
 {
@@ -88,6 +89,7 @@
 <p class="small faint login-hint">
     Accounts are created by an administrator. After five failed attempts the account is locked for 15&nbsp;minutes.
     If you've forgotten your password, contact your administrator to reset it.
+    <a href="/">Return to homepage</a>
 </p>
 
 @code {

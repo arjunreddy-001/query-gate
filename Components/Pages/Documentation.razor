@@ -4,6 +4,13 @@
 
 <PageTitle>Documentation · Query Gate</PageTitle>
 
+<HeadContent>
+    <meta name="description" content="Deploy, configure and use Query Gate: governed SQL access for PostgreSQL, SQL Server, MySQL and MariaDB with audit logging, data masking, OIDC SSO and more." />
+    <meta property="og:title" content="Documentation · Query Gate" />
+    <meta property="og:description" content="Deploy, configure and use Query Gate: governed SQL access for PostgreSQL, SQL Server, MySQL and MariaDB with audit logging, data masking, OIDC SSO and more." />
+    <meta property="og:type" content="website" />
+</HeadContent>
+
 <div class="docs-page" id="top">
     <div class="docs-heading">
         <span class="landing-kicker">QUERY GATE DOCUMENTATION</span>
@@ -13,6 +20,15 @@
 
     <!-- Mobile Navigation Bar (Sticky on mobile, hidden on desktop) -->
     <div class="docs-mobile-nav">
+        <noscript>
+            <div class="docs-noscript-nav">
+                <a href="/documentation#overview">Overview</a>
+                <a href="/documentation#first-steps">First steps</a>
+                <a href="/documentation#user-guide">User guide</a>
+                <a href="/documentation#deployment">Deployment</a>
+                <a href="/documentation#troubleshooting">Troubleshooting</a>
+            </div>
+        </noscript>
         <div class="docs-mobile-toc" id="docsMobileToc">
             <button type="button" class="docs-mobile-toc-trigger" id="docsMobileTocTrigger" aria-expanded="false" aria-controls="docsMobileDropdown">
                 <span class="docs-mobile-toc-icon"><Icon Name="list" /></span>
@@ -114,6 +130,17 @@
                 <h2>Overview</h2>
                 <p>Query Gate is a .NET 10 Blazor Server application backed by PostgreSQL for governed database access across PostgreSQL, SQL Server, MySQL and MariaDB. Users work in a query workspace without seeing database credentials. Permissions, approvals and audit records control and document every execution.</p>
                 <p>Key capabilities: permission-gated SQL with ScriptDom AST parsing, multi-engine support, granular object-level scoping and role boundaries, dynamic PII data masking (HIPAA, GDPR, PCI-DSS, SOC 2), visual query execution plans, time-boxed access grants, audit-first execution, passkey / TOTP authentication, an access-request workflow, and multi-format exports (CSV, Excel XLSX/XLSB, JSON, Markdown, and SQL INSERT scripts).</p>
+            </section>
+
+            <section id="first-steps">
+                <h2>First steps</h2>
+                <p>Once deployed, create your administrator account on the setup screen or via optional environment variables on first start.</p>
+                <ol>
+                    <li>Complete the initial setup wizard to create your root administrator account.</li>
+                    <li>Register a target database (SQL Server, PostgreSQL, MySQL, or MariaDB) using a dedicated, least-privilege account.</li>
+                    <li>Create users and grant permissions or review their access requests.</li>
+                    <li>Open the query workspace to run permitted SQL and review activity in the audit log.</li>
+                </ol>
             </section>
 
             <section id="user-guide">
@@ -543,17 +570,6 @@ docker compose logs -f query-gate</code></pre>
                     </table>
                 </div>
                 <p>Keys stored in the persistent volume remain consistent across container restarts. Apply migrations on one instance at a time after a database backup.</p>
-            </section>
-
-            <section id="first-steps">
-                <h2>First steps</h2>
-                <p>Once deployed, create your administrator account on the setup screen or via optional environment variables on first start.</p>
-                <ol>
-                    <li>Complete the initial setup wizard to create your root administrator account.</li>
-                    <li>Register a target database (SQL Server, PostgreSQL, MySQL, or MariaDB) using a dedicated, least-privilege account.</li>
-                    <li>Create users and grant permissions or review their access requests.</li>
-                    <li>Open the query workspace to run permitted SQL and review activity in the audit log.</li>
-                </ol>
             </section>
 
             <section id="troubleshooting">

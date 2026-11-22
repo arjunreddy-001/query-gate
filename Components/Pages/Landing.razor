@@ -11,7 +11,7 @@
     <section class="landing-hero" aria-labelledby="hero-title">
         <div class="landing-copy">
             <span class="landing-eyebrow">
-                <Icon Name="shield" /> Enterprise SQL governance for PostgreSQL, SQL Server, MySQL &amp; MariaDB
+                <Icon Name="shield" /> Enterprise governed SQL access
             </span>
             <h1 id="hero-title">Give your team access.<br /><span>Keep the guardrails.</span></h1>
             <p>Centralise database access, enforce strict AST query gates, mask sensitive PII on the fly, and guarantee a tamper-evident audit trail without sharing raw database credentials.</p>
@@ -37,23 +37,13 @@
                 </div>
             </div>
             <div class="landing-badges">
-                <span class="badge-chip"><Icon Name="github" /> Open source</span>
-                <span class="badge-chip"><Icon Name="terminal" /> .NET 10 &amp; PostgreSQL</span>
-                <span class="badge-chip"><Icon Name="search" /> Command Palette (Cmd+K)</span>
-                <span class="badge-chip"><Icon Name="edit" /> Form Mode &amp; Parameters</span>
-                <span class="badge-chip"><Icon Name="activity" /> 1-Click Visual Charting</span>
-                <span class="badge-chip"><Icon Name="users" /> Team Query Library</span>
-                <span class="badge-chip"><Icon Name="alert" /> Production Safeguards</span>
-                <span class="badge-chip"><Icon Name="search" /> Schema PII Discovery</span>
+                <span class="badge-chip"><Icon Name="github" /> Open source (MIT)</span>
+                <span class="badge-chip"><Icon Name="shield" /> Fail-closed AST gate</span>
+                <span class="badge-chip"><Icon Name="lock" /> In-flight PII masking</span>
+                <span class="badge-chip"><Icon Name="list" /> Tamper-evident audit</span>
+                <span class="badge-chip"><Icon Name="sparkles" /> BYOAI assistant</span>
                 <span class="badge-chip"><Icon Name="grid" /> Multi-tenant</span>
-                <span class="badge-chip"><Icon Name="sparkles" /> AI Assistant</span>
-                <span class="badge-chip"><Icon Name="grid" /> Interactive ER Diagrams</span>
-                <span class="badge-chip"><Icon Name="shield" /> Enterprise OIDC SSO</span>
-                <span class="badge-chip"><Icon Name="db" /> SQL Server</span>
-                <span class="badge-chip"><Icon Name="db" /> PostgreSQL</span>
-                <span class="badge-chip"><Icon Name="db" /> MySQL</span>
-                <span class="badge-chip"><Icon Name="db" /> MariaDB</span>
-                <span class="badge-chip"><Icon Name="lock" /> Passkeys &amp; MFA</span>
+                <span class="badge-chip"><Icon Name="terminal" /> .NET 10 &amp; PostgreSQL</span>
             </div>
         </div>
 
@@ -88,10 +78,13 @@
 
             <!-- Code Editor Preview -->
             <div class="sim-code-area">
-                <div class="sim-code-line">
-                    <span class="sim-line-num">01</span>
-                    <span>@((MarkupString)GetFormattedHeroQuery())</span>
-                </div>
+                @foreach (var (lineNum, lineHtml) in GetFormattedHeroLines())
+                {
+                    <div class="sim-code-line">
+                        <span class="sim-line-num">@lineNum.ToString("D2")</span>
+                        <span>@((MarkupString)lineHtml)</span>
+                    </div>
+                }
             </div>
 
             <!-- Simulator Toolbar -->
@@ -244,12 +237,28 @@
         </div>
     </section>
 
+    <!-- Project Trust Signals / Social Proof -->
+    <div class="landing-social-proof" aria-label="Project trust signals">
+        <a class="landing-social-proof-item" href="https://github.com/arjunreddy-001/query-gate" target="_blank" rel="noopener">
+            <Icon Name="github" /> Open source on GitHub
+        </a>
+        <span class="landing-social-proof-item">
+            <Icon Name="shield" /> MIT License
+        </span>
+        <span class="landing-social-proof-item">
+            <Icon Name="terminal" /> Built on .NET 10
+        </span>
+        <span class="landing-social-proof-item">
+            <Icon Name="db" /> PostgreSQL · SQL Server · MySQL · MariaDB
+        </span>
+    </div>
+
     <!-- Interactive Workspace Sandbox (Authentic Post-Login Experience) -->
     <section class="landing-section" id="interactive-workspace" aria-labelledby="workspace-title">
         <div class="landing-section-head">
-            <span class="landing-kicker">AUTHENTIC POST-LOGIN EXPERIENCE</span>
+            <span class="landing-kicker">WORKSPACE PREVIEW</span>
             <h2 id="workspace-title">The governed query workspace, in action.</h2>
-            <p>See what users experience after logging in: compact navigation, schema object exploration, ScriptDom AST gate checks, in-flight masking, and visual explain plans.</p>
+            <p>See what users experience after logging in: schema exploration, AST gate checks, in-flight masking, and visual explain plans.</p>
         </div>
 
         <div class="preview-window" aria-label="Authentic Query Gate Post-Login Workspace Preview">
@@ -909,13 +918,13 @@
             <div class="masking-lab-header">
                 <div class="masking-presets">
                     <button type="button" class="mask-preset-btn @(maskPreset == "pci" ? "active" : "")" @onclick='() => SetMaskPreset("pci")'>
-                        PCI-DSS (Credit Cards)
+                        Credit Cards (PCI-DSS)
                     </button>
                     <button type="button" class="mask-preset-btn @(maskPreset == "gdpr" ? "active" : "")" @onclick='() => SetMaskPreset("gdpr")'>
-                        GDPR (Emails &amp; Names)
+                        Emails &amp; Names (GDPR)
                     </button>
                     <button type="button" class="mask-preset-btn @(maskPreset == "hipaa" ? "active" : "")" @onclick='() => SetMaskPreset("hipaa")'>
-                        HIPAA (Medical &amp; SSN)
+                        Medical &amp; SSN (HIPAA)
                     </button>
                 </div>
 
@@ -1169,6 +1178,7 @@
                 <button type="button" class="btn btn-sm" @onclick="PrevPersona" disabled="@(activePersona == "developers")">
                     <Icon Name="chevron" Style="transform: rotate(180deg);" /> Previous role
                 </button>
+                <span class="lifecycle-step-counter">Role @(Array.IndexOf(personaList, activePersona) + 1) of @personaList.Length</span>
                 <button type="button" class="btn btn-sm btn-primary" @onclick="NextPersona" disabled="@(activePersona == "auditors")">
                     Next role <Icon Name="chevron" />
                 </button>
@@ -1191,7 +1201,7 @@
                 </div>
                 <p>Isolate databases, audit trails, and configurations per tenant with path-prefix routing and custom domain mapping.</p>
             </article>
-            <article class="landing-feature">
+            <article class="landing-feature flagship">
                 <div class="landing-feature-header">
                     <span class="landing-feature-icon"><Icon Name="shield" /></span>
                     <h3>Permission-gated SQL</h3>
@@ -1205,7 +1215,7 @@
                 </div>
                 <p>Control access at database, schema, table, and view levels with role-specific whitelists and blacklists.</p>
             </article>
-            <article class="landing-feature">
+            <article class="landing-feature flagship">
                 <div class="landing-feature-header">
                     <span class="landing-feature-icon"><Icon Name="lock" /></span>
                     <h3>Dynamic data masking</h3>
@@ -1254,7 +1264,7 @@
                 </div>
                 <p>Manage role and user grants, review access approval requests, and enforce temporary expiring access windows.</p>
             </article>
-            <article class="landing-feature">
+            <article class="landing-feature flagship">
                 <div class="landing-feature-header">
                     <span class="landing-feature-icon"><Icon Name="list" /></span>
                     <h3>Accountability built in</h3>
@@ -1440,11 +1450,20 @@
         _ => "PostgreSQL 16"
     };
 
-    private string GetFormattedHeroQuery() => heroScenario switch
+    private IEnumerable<(int, string)> GetFormattedHeroLines() => heroScenario switch
     {
-        "blocked" => "<span class='sql-kw'>DROP TABLE</span> public.orders;",
-        "masking" => "<span class='sql-kw'>SELECT</span> customer_id, full_name, email, card_number <span class='sql-kw'>FROM</span> public.customers;",
-        _ => "<span class='sql-kw'>SELECT</span> order_id, customer_name, total_usd <span class='sql-kw'>FROM</span> public.orders <span class='sql-kw'>WHERE</span> status = <span class='sql-str'>'shipped'</span>;"
+        "blocked" => [
+            (1, "<span class='sql-comment'>-- Destructive DDL intercepted before execution</span>"),
+            (2, "<span class='sql-kw'>DROP TABLE</span> public.orders;")
+        ],
+        "masking" => [
+            (1, "<span class='sql-kw'>SELECT</span> customer_id, full_name, email, card_number"),
+            (2, "<span class='sql-kw'>FROM</span> public.customers;")
+        ],
+        _ => [
+            (1, "<span class='sql-kw'>SELECT</span> order_id, customer_name, total_usd"),
+            (2, "<span class='sql-kw'>FROM</span> public.orders <span class='sql-kw'>WHERE</span> status = <span class='sql-str'>'shipped'</span>;")
+        ]
     };
 
     // Workspace Sandbox Methods

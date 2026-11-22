@@ -87,6 +87,11 @@
     document.addEventListener('enhancedload', closeMobileNav);
     window.addEventListener('popstate', closeMobileNav);
 
+    // Detect OS for keyboard shortcuts (mac vs other)
+    var isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+    if (isMac) root.setAttribute('data-os', 'mac');
+    else root.setAttribute('data-os', 'other');
+
     // Draggable splitter between the SQL editor and the results.
     var drag = null;
     document.addEventListener('mousedown', function (e) {
@@ -109,14 +114,46 @@
     document.addEventListener('mousemove', function (e) {
         if (!drag) return;
         if (drag.isHoriz) {
-            var w = Math.max(160, drag.w + (e.clientX - drag.x));
+            var parentW = drag.pane.parentElement ? drag.pane.parentElement.getBoundingClientRect().width : 800;
+            var maxW = Math.max(160, parentW - 160);
+            var w = Math.min(maxW, Math.max(160, drag.w + (e.clientX - drag.x)));
+            drag.pane.dataset.hFlex = w + 'px';
             drag.pane.style.flex = '0 0 ' + w + 'px';
         } else {
-            var h = Math.max(80, drag.h + (e.clientY - drag.y));
+            var parentH = drag.pane.parentElement ? drag.pane.parentElement.getBoundingClientRect().height : 600;
+            var maxH = Math.max(80, parentH - 100);
+            var h = Math.min(maxH, Math.max(80, drag.h + (e.clientY - drag.y)));
+            drag.pane.dataset.vFlex = h + 'px';
             drag.pane.style.flex = '0 0 ' + h + 'px';
         }
     });
     document.addEventListener('mouseup', function () {
-        if (drag) { drag = null; document.body.style.userSelect = ''; }
+        if (drag) {
+            drag = null;
+            document.body.style.userSelect = '';
+            if (window.dbam && window.dbam.editorLayout) {
+                window.dbam.editorLayout('main');
+            }
+        }
     });
+
+    // Keep split layout flex-basis synced when orientation toggles
+    var lastHorizState = null;
+    var splitLayoutObserver = new MutationObserver(function () {
+        var body = document.querySelector('.ws-body');
+        if (!body) return;
+        var isHoriz = body.classList.contains('ws-body-horizontal');
+        if (lastHorizState !== isHoriz) {
+            lastHorizState = isHoriz;
+            var pane = body.querySelector('.ws-editor-pane');
+            if (pane) {
+                if (isHoriz) {
+                    pane.style.flex = pane.dataset.hFlex ? ('0 0 ' + pane.dataset.hFlex) : '';
+                } else {
+                    pane.style.flex = pane.dataset.vFlex ? ('0 0 ' + pane.dataset.vFlex) : '';
+                }
+            }
+        }
+    });
+    splitLayoutObserver.observe(root, { subtree: true, attributes: true, attributeFilter: ['class'] });
 })();

@@ -2728,6 +2728,7 @@ else
         layoutSplitHorizontal = !layoutSplitHorizontal;
         try { await Storage.SetAsync("query_split_h", layoutSplitHorizontal); } catch { }
         await Task.Yield();
+        try { await JS.InvokeVoidAsync("dbam.syncSplitLayout", layoutSplitHorizontal); } catch { }
         await JS.InvokeVoidAsync("dbam.editorLayout", "main");
     }
 

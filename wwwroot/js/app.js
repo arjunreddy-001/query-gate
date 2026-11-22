@@ -497,6 +497,20 @@ window.dbam = (function () {
         setTimeout(() => e.editor.layout(), 10);
       }
     },
+    syncSplitLayout: function (isHoriz) {
+      const panes = document.querySelectorAll(".ws-body .ws-editor-pane");
+      panes.forEach((pane) => {
+        if (isHoriz) {
+          pane.style.flex = pane.dataset.hFlex ? "0 0 " + pane.dataset.hFlex : "";
+        } else {
+          pane.style.flex = pane.dataset.vFlex ? "0 0 " + pane.dataset.vFlex : "";
+        }
+      });
+      setTimeout(() => {
+        const e = editors["main"];
+        if (e && e.kind === "monaco") e.editor.layout();
+      }, 20);
+    },
     setMetadata: function (objects) {
       metadata = objects || [];
     },
@@ -544,7 +558,7 @@ window.dbam = (function () {
       typeof navigator.credentials !== 'undefined' &&
       typeof window.PublicKeyCredential !== 'undefined'
     ) {
-      document.querySelectorAll('[data-passkey-btn]').forEach(function (btn) {
+      document.querySelectorAll('[data-passkey-btn], [data-passkey-section]').forEach(function (btn) {
         btn.style.display = '';
       });
     }
