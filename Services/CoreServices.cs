@@ -104,7 +104,19 @@ public sealed class SettingsService(
         ["MetadataTtlMinutes"] = ("10", "Object metadata cache TTL (minutes)"),
         ["MetadataCacheEnabled"] = ("true", "Cache object metadata (object explorer and autocomplete)"),
         ["PasswordResetLength"] = ("16", "Generated temporary password length"),
-        ["HealthVisibleRoles"] = ("", "Additional roles that can view the DB Health dashboard (comma-separated, e.g. Auditor,Developer)")
+        ["HealthVisibleRoles"] = ("", "Additional roles that can view the DB Health dashboard (comma-separated, e.g. Auditor,Developer)"),
+        ["Ai:Enabled"] = ("false", "Enable AI Assistant"),
+        ["Ai:Provider"] = ("", "AI Provider (OpenAI, Gemini, Anthropic, Ollama)"),
+        ["Ai:Endpoint"] = ("", "AI Endpoint URL"),
+        ["Ai:ApiKey"] = ("", "Encrypted AI API Key"),
+        ["Ai:Model"] = ("", "AI Model Name"),
+        ["Ai:Temperature"] = ("0.1", "AI Temperature"),
+        ["Oidc:Enabled"] = ("false", "Enable OpenID Connect SSO"),
+        ["Oidc:DisplayName"] = ("Enterprise SSO", "SSO Button Display Name"),
+        ["Oidc:Authority"] = ("", "OIDC Authority / Issuer URL"),
+        ["Oidc:ClientId"] = ("", "OIDC Client ID"),
+        ["Oidc:ClientSecret"] = ("", "Encrypted OIDC Client Secret"),
+        ["Oidc:Scopes"] = ("openid profile email", "OIDC Scopes")
     };
 
     public async Task<string> GetAsync(string key)

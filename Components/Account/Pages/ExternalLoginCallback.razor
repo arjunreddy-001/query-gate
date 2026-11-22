@@ -1,0 +1,157 @@
+@page "/Account/ExternalLoginCallback"
+@using System.IdentityModel.Tokens.Jwt
+@using System.Text.Json
+@using Microsoft.AspNetCore.Identity
+@inject OidcService Oidc
+@inject SettingsService Settings
+@inject CryptoService Crypto
+@inject UserManager<ApplicationUser> UserManager
+@inject SignInManager<ApplicationUser> SignInManager
+@inject AuditService Audit
+@inject NavigationManager Nav
+@inject IHttpClientFactory HttpClientFactory
+
+@code {
+    [SupplyParameterFromQuery] private string? Code { get; set; }
+    [SupplyParameterFromQuery] private string? State { get; set; }
+    [SupplyParameterFromQuery] private string? Error { get; set; }
+    [SupplyParameterFromQuery(Name = "error_description")] private string? ErrorDescription { get; set; }
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var userAgent = HttpContext.Request.Headers.UserAgent.ToString();
+
+        if (!string.IsNullOrWhiteSpace(Error))
+        {
+            var msg = ErrorDescription ?? Error;
+            await Audit.TryWriteAsync(new Actor("anonymous", "SSO Error", ip, userAgent), "Auth", "OidcLogin", "Failed", msg);
+            Nav.NavigateTo("Account/Login?error=" + Uri.EscapeDataString($"Identity Provider error: {msg}"), replace: true);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Code) || string.IsNullOrWhiteSpace(State))
+        {
+            Nav.NavigateTo("Account/Login?error=" + Uri.EscapeDataString("Missing OIDC authorization code or state."), replace: true);
+            return;
+        }
+
+        var savedState = HttpContext.Request.Cookies["qg_oidc_state"];
+        if (string.IsNullOrWhiteSpace(savedState) || savedState != State)
+        {
+            await Audit.TryWriteAsync(new Actor("anonymous", "State Mismatch", ip, userAgent), "Auth", "OidcLogin", "Denied", "State parameter mismatch or expired session");
+            Nav.NavigateTo("Account/Login?error=" + Uri.EscapeDataString("Invalid or expired SSO session state."), replace: true);
+            return;
+        }
+
+        var authority = await Settings.GetAsync(OidcService.SettingsKeyAuthority);
+        var clientId = await Settings.GetAsync(OidcService.SettingsKeyClientId);
+        var clientSecret = await Oidc.GetDecryptedClientSecretAsync();
+
+        // Discover token endpoint
+        var discoveryUrl = $"{authority.TrimEnd('/')}/.well-known/openid-configuration";
+        string? tokenEndpoint = null;
+        try
+        {
+            var http = HttpClientFactory.CreateClient("Oidc");
+            var json = await http.GetStringAsync(discoveryUrl);
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("token_endpoint", out var ep))
+            {
+                tokenEndpoint = ep.GetString();
+            }
+        }
+        catch (Exception ex)
+        {
+            Nav.NavigateTo("Account/Login?error=" + Uri.EscapeDataString($"Failed to discover token endpoint: {ex.Message}"), replace: true);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(tokenEndpoint))
+        {
+            Nav.NavigateTo("Account/Login?error=" + Uri.EscapeDataString("Token endpoint not found in discovery document."), replace: true);
+            return;
+        }
+
+        // Exchange code for tokens
+        var redirectUri = $"{HttpContext.Request.Scheme}://{HttpContext.Request.Host}/Account/ExternalLoginCallback";
+        var tokenHttp = HttpClientFactory.CreateClient("OidcToken");
+
+        var tokenParams = new Dictionary<string, string>
+        {
+            ["grant_type"] = "authorization_code",
+            ["code"] = Code,
+            ["redirect_uri"] = redirectUri,
+            ["client_id"] = clientId,
+            ["client_secret"] = clientSecret
+        };
+
+        using var tokenResponse = await tokenHttp.PostAsync(tokenEndpoint, new FormUrlEncodedContent(tokenParams));
+        var tokenBody = await tokenResponse.Content.ReadAsStringAsync();
+
+        if (!tokenResponse.IsSuccessStatusCode)
+        {
+            await Audit.TryWriteAsync(new Actor("anonymous", "Token Exchange", ip, userAgent), "Auth", "OidcLogin", "Failed", $"HTTP {tokenResponse.StatusCode}: {tokenBody}");
+            Nav.NavigateTo("Account/Login?error=" + Uri.EscapeDataString("Failed to exchange authorization code with identity provider."), replace: true);
+            return;
+        }
+
+        using var tokenDoc = JsonDocument.Parse(tokenBody);
+        var idToken = tokenDoc.RootElement.TryGetProperty("id_token", out var it) ? it.GetString() : null;
+
+        if (string.IsNullOrWhiteSpace(idToken))
+        {
+            Nav.NavigateTo("Account/Login?error=" + Uri.EscapeDataString("No id_token received from identity provider."), replace: true);
+            return;
+        }
+
+        // Parse claims from id_token
+        var handler = new JwtSecurityTokenHandler();
+        var jwt = handler.ReadJwtToken(idToken);
+        var email = jwt.Claims.FirstOrDefault(c => c.Type is "email" or "upn" or "preferred_username" or "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")?.Value;
+        var displayName = jwt.Claims.FirstOrDefault(c => c.Type is "name" or "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name")?.Value;
+
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            await Audit.TryWriteAsync(new Actor("anonymous", "No Email Claim", ip, userAgent), "Auth", "OidcLogin", "Denied", "Identity provider did not return an email claim");
+            Nav.NavigateTo("Account/Login?error=" + Uri.EscapeDataString("Identity provider did not return an email claim."), replace: true);
+            return;
+        }
+
+        // Strict Authorized-Only check
+        var user = await UserManager.FindByEmailAsync(email);
+        if (user is null)
+        {
+            await Audit.TryWriteAsync(new Actor("anonymous", email, ip, userAgent), "Auth", "OidcLogin", "Denied", "Unauthorized user: account not provisioned in Query Gate");
+            Nav.NavigateTo("Account/Login?error=" + Uri.EscapeDataString("Your account is not authorized to access Query Gate. Please contact an administrator to request access."), replace: true);
+            return;
+        }
+
+        if (!user.CanSignIn(DateTimeOffset.UtcNow))
+        {
+            await Audit.TryWriteAsync(new Actor(user.Id, email, ip, userAgent), "Auth", "OidcLogin", "Denied", "Account inactive or expired");
+            Nav.NavigateTo("Account/Login?error=" + Uri.EscapeDataString("Your account is inactive or expired. Please contact an administrator."), replace: true);
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(displayName) && string.IsNullOrWhiteSpace(user.DisplayName))
+        {
+            user.DisplayName = displayName;
+            await UserManager.UpdateAsync(user);
+        }
+
+        // Sign in
+        await SignInManager.SignInAsync(user, isPersistent: false);
+        await Audit.TryWriteAsync(new Actor(user.Id, email, ip, userAgent), "Auth", "OidcLogin", "Success", $"Provider: {authority}");
+
+        var returnUrl = HttpContext.Request.Cookies["qg_oidc_return"] ?? "/";
+        HttpContext.Response.Cookies.Delete("qg_oidc_state");
+        HttpContext.Response.Cookies.Delete("qg_oidc_nonce");
+        HttpContext.Response.Cookies.Delete("qg_oidc_return");
+
+        Nav.NavigateTo(returnUrl, forceLoad: true);
+    }
+}

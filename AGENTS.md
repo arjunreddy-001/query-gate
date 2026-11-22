@@ -16,11 +16,14 @@ Before executing procedures or workflows in this project, refer to the documenta
 | **Blazor Pages**       | `.github/skills/blazor-page-conventions/SKILL.md`  | Page lifecycle, admin menus, navigation, and first-render handling.                                 |
 | **UI Design**          | `.github/skills/ui-design-system/SKILL.md`         | Design tokens (`app.css`), themes, sidebar layout, and Monaco editor integration.                   |
 | **Multi-Tenancy**      | `.github/skills/multi-tenancy/SKILL.md`            | Workspaces (/t/{slug}), custom domains, user memberships, data isolation, and platform admin.       |
+| **AI & Visuals**       | `.github/skills/ai-and-visualizations/SKILL.md`    | BYOAI query assistant, interactive ER diagrams, visual DAG execution plans, and enterprise OIDC SSO.|
 
 ## Quick Architecture Map (Token Saver)
 
 Avoid broad directory listings or recursive greps; check these specific files:
 
+- **AI & OpenID Connect**: `Services/Ai/AiAssistantService.cs`, `Services/OidcService.cs`, `Components/Account/Pages/ExternalLogin.razor`
+- **Diagrams & Plans**: `Services/ErDiagramDto.cs`, `wwwroot/js/er-diagram.js`, `Services/ExecutionPlanParser.cs`
 - **Execution & Auditing**: `Services/ExecutionServices.cs` (`ExecutionService`), `Security/AuditAuthorization.cs`
 - **SQL Analysis & Scopes**: `Security/SqlGate.cs` (ScriptDom + Dialect), `Security/PermissionResolver.cs`, `Security/ObjectScope.cs`
 - **Engine Providers**: `Services/Providers/` (`DatabaseProviderFactory`, `IDatabaseProvider`, engine implementations)

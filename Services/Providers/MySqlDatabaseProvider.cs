@@ -310,7 +310,7 @@ public class MySqlDatabaseProvider : IDatabaseProvider
                         }
 
                         var nodeId = 1;
-                        ParseMySqlBlock(qb, dto, ref nodeId);
+                        ParseMySqlBlock(qb, dto, ref nodeId, null);
                     }
                 }
                 catch
@@ -383,8 +383,9 @@ public class MySqlDatabaseProvider : IDatabaseProvider
         return idx >= 0 && !reader.IsDBNull(idx) ? reader.GetValue(idx)?.ToString() : null;
     }
 
-    private static void ParseMySqlBlock(JsonElement element, ExecutionPlanDto dto, ref int nodeId)
+    private static int? ParseMySqlBlock(JsonElement element, ExecutionPlanDto dto, ref int nodeId, int? parentNodeId)
     {
+        int? createdNodeId = null;
         if (element.TryGetProperty("table", out var tbl))
         {
             var tableName = tbl.TryGetProperty("table_name", out var tn) ? tn.GetString() : "table";
@@ -392,9 +393,11 @@ public class MySqlDatabaseProvider : IDatabaseProvider
             var rowsExamined = tbl.TryGetProperty("rows_examined_per_scan", out var re) && re.TryGetInt64(out var r) ? (double)r : 0;
             var isScan = accessType.Equals("ALL", StringComparison.OrdinalIgnoreCase);
 
+            createdNodeId = nodeId++;
             dto.Operators.Add(new PlanOperatorDto
             {
-                NodeId = nodeId++,
+                NodeId = createdNodeId.Value,
+                ParentNodeId = parentNodeId,
                 PhysicalOp = accessType,
                 LogicalOp = "TABLE ACCESS",
                 TargetObject = tableName,
@@ -409,8 +412,18 @@ public class MySqlDatabaseProvider : IDatabaseProvider
         {
             foreach (var item in nl.EnumerateArray())
             {
-                ParseMySqlBlock(item, dto, ref nodeId);
+                var childId = ParseMySqlBlock(item, dto, ref nodeId, createdNodeId ?? parentNodeId);
+                if (childId.HasValue && createdNodeId.HasValue)
+                {
+                    var parentOp = dto.Operators.FirstOrDefault(o => o.NodeId == createdNodeId.Value);
+                    if (parentOp != null && !parentOp.ChildrenNodeIds.Contains(childId.Value))
+                    {
+                        parentOp.ChildrenNodeIds.Add(childId.Value);
+                    }
+                }
             }
         }
+
+        return createdNodeId;
     }
 }

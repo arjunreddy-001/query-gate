@@ -109,7 +109,7 @@
 - `UserPermissions` (UserId, DatabaseId, PermissionTypeId, Effect, StartsAt, EndsAt, SourceRequestId)
 - `AccessRequests` (Id, RequesterId, DatabaseId, Permissions, Justification, Ticket, Duration, Status, ReviewerId, ReviewedAt, Comments)
 - `ScriptRequests` (Id, RequesterId, DatabaseId, ScriptText, Justification, Status, ReviewerId, ExecutedAt, ResultSummary, AuditId)
-- `SavedQueries` (Id, UserId, DatabaseId, Name, SqlText, Tags, CreatedAt, UpdatedAt) — unique, count ≤ 50 per (UserId, DatabaseId)
+- `SavedQueries` (Id, UserId, DatabaseId, Name, SqlText, Tags, CreatedAt, UpdatedAt): unique, count <= 50 per (UserId, DatabaseId)
 - `QueryHistory`, `AuditLogs` (append-only), `AppLogs`, `RefreshTokens`, `Notifications`, `Settings`.
 - Indexes on AuditLogs (UserId, DatabaseId, Timestamp).
 
@@ -117,7 +117,7 @@
 `/auth/login|refresh|logout|change-password` · `/users` (CRUD, activate/deactivate) · `/roles` · `/databases` (+`/test`, `/metadata`) · `/permissions/user|role` · `/access/effective`, `/access/matrix` · `/query/execute|cancel` · `/saved-queries` · `/history` · `/access-requests` · `/script-requests` · `/audit` · `/logs` · `/notifications` · `/settings`.
 
 ## 8. Screens
-Login · Dashboard · Query Workspace (tabs, explorer, editor, results, saved/history panel) · My Access & Requests · Request Access · Script Requests (submit/review) · Admin: Users, Roles, Databases, Permissions, Access Matrix, Approvals, Audit Log, App Logs, Settings.
+Login · Dashboard · Query Workspace (tabs, explorer, editor, results, saved/history panel, ER diagrams, AI assistant prompt) · My Access & Requests · Request Access · Script Requests (submit/review) · Admin: Users, Roles, Databases, Permissions, Access Matrix, Approvals, Audit Log, App Logs, Settings (General, SMTP, Webhooks, Masking, AI Assistant, SSO & OIDC, Cache).
 
 ## 9. Default Role Seeds
 - **Admin:** manage everything; all permissions via admin screens.
@@ -128,14 +128,21 @@ Login · Dashboard · Query Workspace (tabs, explorer, editor, results, saved/hi
 ## 10. Success Metrics
 - 100% of query executions audited.
 - 0 shared DB credentials among users.
-- ≥80% access changes via self-service workflow; median approval time <1 business day.
+- >=80% access changes via self-service workflow; median approval time <1 business day.
 - Time-bound grants auto-expire with 0 lingering access.
-- User satisfaction ≥4/5 on query workspace.
+- User satisfaction >=4/5 on query workspace.
 
 ## 11. Release Plan
-- **Phase 1 (MVP, ~8–10 wks):** auth/JWT, users on/offboarding, DBs, roles, user/role permissions with precedence, SQL gate, query workspace (tabs, autocomplete, format, copy, saved queries, timeout), audit and error logs.
-- **Phase 2 (~4–6 wks):** access requests, script requests, time-bound access and expiry jobs, access matrix, notifications, history, export.
-- **Phase 3:** access reviews, break-glass, MFA/SSO, masking, anomaly alerts, API/CLI.
+- **Phase 1 (MVP):** auth/JWT, users on/offboarding, DBs, roles, user/role permissions with precedence, SQL gate, query workspace (tabs, autocomplete, format, copy, saved queries, timeout), audit and error logs. [Completed]
+- **Phase 2:** access requests, script requests, time-bound access and expiry jobs, access matrix, notifications, history, export. [Completed]
+- **Phase 3:**
+  - Multi-database engine support: Microsoft SQL Server, PostgreSQL, MySQL, MariaDB. [Completed]
+  - Multi-tenant workspaces: path routing (`/t/{slug}`), custom domains, row-level tenant isolation, SuperAdmin platform admin. [Completed]
+  - Dynamic Data Masking: in-flight redaction presets for GDPR, HIPAA, PCI-DSS, SOC 2, CCPA and custom regex rules with UNMASK permission. [Completed]
+  - AI Query Assistant with Guardrails (BYOAI): Natural language SQL generation (`Ctrl+I`), error repair advisor, and plan explainer with AST `SqlGate` pre-validation and zero table row leakage. [Completed]
+  - Interactive Entity-Relationship (ER) Diagrams: Visual schema exploration with 1-2 hop neighborhood rendering, draggable cards, Bezier paths, and 1-click query tab opening. [Completed]
+  - Visual Execution Plan Tree: Hierarchical operator DAG with bottleneck highlights, scan warnings, and missing index recommendations. [Completed]
+  - Enterprise OIDC Single Sign-On: OpenID Connect federation with strict authorized-only access and fail-closed audit logging. [Completed]
 
 ## 12. Risks & Mitigations
 | Risk | Mitigation |

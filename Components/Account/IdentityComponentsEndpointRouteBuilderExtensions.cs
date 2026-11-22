@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -17,19 +18,49 @@ internal static class IdentityComponentsEndpointRouteBuilderExtensions
 
         var accountGroup = endpoints.MapGroup("/Account");
 
-        accountGroup.MapPost("/Logout", async (
+        static async Task<IResult> PerformLogoutAsync(
+            ClaimsPrincipal user,
+            SignInManager<ApplicationUser> signInManager,
+            HttpContext http,
+            DbAccessManager.Services.AuditService audit,
+            string? returnUrl)
+        {
+            var userId = user.FindFirstValue(ClaimTypes.NameIdentifier) ?? "";
+            var userName = user.Identity?.Name ?? "";
+            if (!string.IsNullOrEmpty(userId) || !string.IsNullOrEmpty(userName))
+            {
+                await audit.TryWriteAsync(
+                    new DbAccessManager.Services.Actor(userId, userName, http.Connection.RemoteIpAddress?.ToString(), http.Request.Headers.UserAgent.ToString()),
+                    "Auth", "Logout", "Success");
+            }
+
+            await signInManager.SignOutAsync();
+            try { await http.SignOutAsync(IdentityConstants.ExternalScheme); } catch { }
+
+            if (!string.IsNullOrWhiteSpace(returnUrl) &&
+                !returnUrl.Contains("dashboard", StringComparison.OrdinalIgnoreCase) &&
+                returnUrl != "/" && returnUrl != "~/")
+            {
+                var target = returnUrl.StartsWith('/') ? returnUrl : $"/{returnUrl}";
+                return TypedResults.LocalRedirect(target);
+            }
+
+            return TypedResults.LocalRedirect("/Account/Login");
+        }
+
+        accountGroup.MapPost("/Logout", (
             ClaimsPrincipal user,
             [FromServices] SignInManager<ApplicationUser> signInManager,
             HttpContext http,
             [FromServices] DbAccessManager.Services.AuditService audit,
-            [FromForm] string returnUrl) =>
-        {
-            await audit.TryWriteAsync(
-                new DbAccessManager.Services.Actor(user.FindFirstValue(ClaimTypes.NameIdentifier) ?? "", user.Identity?.Name ?? "", http.Connection.RemoteIpAddress?.ToString(), http.Request.Headers.UserAgent.ToString()),
-                "Auth", "Logout", "Success");
-            await signInManager.SignOutAsync();
-            return TypedResults.LocalRedirect($"~/{returnUrl}");
-        });
+            [FromForm] string? returnUrl) => PerformLogoutAsync(user, signInManager, http, audit, returnUrl));
+
+        accountGroup.MapGet("/Logout", (
+            ClaimsPrincipal user,
+            [FromServices] SignInManager<ApplicationUser> signInManager,
+            HttpContext http,
+            [FromServices] DbAccessManager.Services.AuditService audit,
+            [FromQuery] string? returnUrl) => PerformLogoutAsync(user, signInManager, http, audit, returnUrl));
 
         accountGroup.MapPost("/PasskeyCreationOptions", async (
             HttpContext context,

@@ -1,0 +1,188 @@
+@using DbAccessManager.Services
+@inject MetadataService Metadata
+@inject IJSRuntime JS
+@implements IDisposable
+
+<div class="modal-back" @onclick="Close" style="z-index:1100">
+    <div class="modal card" @onclick:stopPropagation style="max-width:94vw;width:1300px;max-height:92vh;display:flex;flex-direction:column;padding:0;overflow:hidden">
+        <div class="row-inline" style="justify-content:space-between;padding:12px 18px;border-bottom:1px solid var(--line);background:var(--bg-elev)">
+            <div class="row-inline" style="gap:10px">
+                <Icon Name="grid" />
+                <h3 style="margin:0;font-size:15px;font-weight:700">Entity-Relationship (ER) Diagram</h3>
+                <span class="badge" style="font-size:11px">@DatabaseName</span>
+                @if (diagramData is not null)
+                {
+                    <span class="muted small">(@diagramData.Nodes.Count tables, @diagramData.Edges.Count relations)</span>
+                }
+            </div>
+
+            <div class="row-inline" style="gap:8px">
+                <div class="row-inline" style="gap:4px">
+                    <span class="muted small" style="margin-right:4px">Focus:</span>
+                    <select class="form-control" style="height:28px;padding:2px 8px;font-size:12px;width:170px" value="@focusTable" @onchange="OnFocusChanged">
+                        @foreach (var t in availableTables)
+                        {
+                            <option value="@t">@t</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="row-inline" style="gap:2px">
+                    <button class="btn btn-sm @(!fullSchema && hops == 1 ? "btn-primary" : "")" type="button" @onclick="() => SetHops(1)">1 Hop</button>
+                    <button class="btn btn-sm @(!fullSchema && hops == 2 ? "btn-primary" : "")" type="button" @onclick="() => SetHops(2)">2 Hops</button>
+                    <button class="btn btn-sm @(fullSchema ? "btn-primary" : "")" type="button" @onclick="ToggleFullSchema">Full Schema</button>
+                </div>
+
+                <div class="row-inline" style="gap:2px;margin-left:6px;border-left:1px solid var(--line);padding-left:8px">
+                    <button class="btn btn-sm icon-btn" title="Zoom in" type="button" @onclick="ZoomIn"><Icon Name="plus" /></button>
+                    <button class="btn btn-sm icon-btn" title="Zoom out" type="button" @onclick="ZoomOut"><Icon Name="minus" /></button>
+                    <button class="btn btn-sm icon-btn" title="Fit to screen" type="button" @onclick="ZoomFit"><Icon Name="maximize" /></button>
+                </div>
+
+                <button class="btn btn-sm icon-btn" title="Close" type="button" style="margin-left:6px" @onclick="Close"><Icon Name="x" /></button>
+            </div>
+        </div>
+
+        <div style="flex:1;position:relative;min-height:550px;background:var(--bg-sunken)">
+            @if (loading)
+            {
+                <div style="display:flex;align-items:center;justify-content:center;height:100%;gap:10px;color:var(--text-dim)">
+                    <span class="spinner"></span> Loading schema relationships...
+                </div>
+            }
+            else if (diagramData is null || diagramData.Nodes.Count == 0)
+            {
+                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:8px;color:var(--text-dim)">
+                    <b>No tables or relationships found.</b>
+                    <span class="small">Ensure metadata is loaded for this database.</span>
+                </div>
+            }
+            <div id="@containerId" style="width:100%;height:100%;min-height:550px"></div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid DatabaseId { get; set; }
+    [Parameter] public string DatabaseName { get; set; } = "";
+    [Parameter] public string? InitialFocusTable { get; set; }
+    [Parameter] public EventCallback<string> OnQueryTable { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private readonly string containerId = "er-container-" + Guid.NewGuid().ToString("N")[..8];
+    private DotNetObjectReference<ErDiagramModal>? dotNetRef;
+    private ErDiagramData? diagramData;
+    private List<string> availableTables = [];
+    private string? focusTable;
+    private int hops = 1;
+    private bool fullSchema;
+    private bool loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        focusTable = InitialFocusTable;
+        dotNetRef = DotNetObjectReference.Create(this);
+        await LoadTablesList();
+        await ReloadDiagram();
+    }
+
+    private async Task LoadTablesList()
+    {
+        try
+        {
+            var objects = await Metadata.GetAsync(DatabaseId);
+            availableTables = objects
+                .Where(o => string.Equals(o.Type, "TABLE", StringComparison.OrdinalIgnoreCase)
+                         || string.Equals(o.Type, "BASE TABLE", StringComparison.OrdinalIgnoreCase)
+                         || string.IsNullOrEmpty(o.Type))
+                .Select(o => string.IsNullOrWhiteSpace(o.Schema) ? o.Name : $"{o.Schema}.{o.Name}")
+                .OrderBy(n => n)
+                .ToList();
+
+            if (string.IsNullOrWhiteSpace(focusTable) && availableTables.Count > 0)
+            {
+                focusTable = availableTables[0];
+            }
+        }
+        catch
+        {
+            availableTables = [];
+        }
+    }
+
+    private async Task ReloadDiagram()
+    {
+        loading = true;
+        StateHasChanged();
+        try
+        {
+            diagramData = await Metadata.GetErDiagramDataAsync(DatabaseId, focusTable, hops, fullSchema);
+            if (string.IsNullOrWhiteSpace(focusTable) && diagramData.FocusTable is not null)
+            {
+                focusTable = diagramData.FocusTable;
+            }
+        }
+        finally
+        {
+            loading = false;
+        }
+
+        await InvokeAsync(StateHasChanged);
+        await Task.Delay(50); // allow container element DOM mount
+        if (diagramData is not null && diagramData.Nodes.Count > 0)
+        {
+            await JS.InvokeVoidAsync("dbamEr.render", containerId, diagramData, dotNetRef);
+        }
+    }
+
+    private async Task SetHops(int h)
+    {
+        hops = h;
+        fullSchema = false;
+        await ReloadDiagram();
+    }
+
+    private async Task ToggleFullSchema()
+    {
+        fullSchema = true;
+        await ReloadDiagram();
+    }
+
+    private async Task OnFocusChanged(ChangeEventArgs e)
+    {
+        focusTable = e.Value?.ToString();
+        fullSchema = false;
+        await ReloadDiagram();
+    }
+
+    private async Task ZoomIn() => await JS.InvokeVoidAsync("dbamEr.zoomIn", containerId);
+    private async Task ZoomOut() => await JS.InvokeVoidAsync("dbamEr.zoomOut", containerId);
+    private async Task ZoomFit() => await JS.InvokeVoidAsync("dbamEr.zoomFit", containerId);
+
+    [JSInvokable]
+    public async Task OnSelectTableQuery(string tableName)
+    {
+        if (OnQueryTable.HasDelegate)
+        {
+            await OnQueryTable.InvokeAsync(tableName);
+        }
+    }
+
+    private async Task Close()
+    {
+        if (OnClose.HasDelegate)
+        {
+            await OnClose.InvokeAsync();
+        }
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            _ = JS.InvokeVoidAsync("dbamEr.destroy", containerId);
+        }
+        catch { }
+        dotNetRef?.Dispose();
+    }
+}

@@ -92,7 +92,7 @@
                             <div style="padding:6px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">Switch Workspace</div>
                             @foreach (var t in userTenants)
                             {
-                                <a href="/t/@t.Slug/dashboard" rel="external" style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;text-decoration:none;color:inherit;background:@(t.Slug == currentTenantSlug ? "rgba(99,102,241,0.08)" : "transparent")">
+                                <a href="@GetSwitchWorkspaceUrl(t.Slug)" rel="external" style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;text-decoration:none;color:inherit;background:@(t.Slug == currentTenantSlug ? "rgba(99,102,241,0.08)" : "transparent")">
                                     <span>@t.Name</span>
                                     @if (t.Slug == currentTenantSlug)
                                     {
@@ -141,9 +141,9 @@
                     }
                     <a href="Account/Manage"><Icon Name="user" />Account settings</a>
                     <a href="Account/Manage/ChangePassword"><Icon Name="lock" />Change password</a>
-                    <form action="Account/Logout" method="post">
+                    <form action="/Account/Logout" method="post">
                         <AntiforgeryToken />
-                        <input type="hidden" name="ReturnUrl" value="" />
+                        <input type="hidden" name="ReturnUrl" value="/Account/Login" />
                         <button type="submit"><Icon Name="logout" />Sign out</button>
                     </form>
                 </div>
@@ -163,9 +163,9 @@
 
 <ToastHost />
 
-<form id="idle-logout" action="Account/Logout" method="post" hidden>
+<form id="idle-logout" action="/Account/Logout" method="post" hidden>
     <AntiforgeryToken />
-    <input type="hidden" name="ReturnUrl" value="" />
+    <input type="hidden" name="ReturnUrl" value="/Account/Login" />
 </form>
 
 <div id="blazor-error-ui" data-nosnippet>
@@ -283,6 +283,22 @@
         if (string.IsNullOrWhiteSpace(email)) return "User";
         var at = email.IndexOf('@');
         return at > 0 ? email[..at] : email;
+    }
+
+    private string GetSwitchWorkspaceUrl(string slug)
+    {
+        var relative = Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].Trim('/');
+        if (string.IsNullOrEmpty(relative) || relative.Equals("dashboard", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"/t/{slug}/dashboard";
+        }
+        if (relative.StartsWith("select-tenant", StringComparison.OrdinalIgnoreCase) ||
+            relative.StartsWith("platform", StringComparison.OrdinalIgnoreCase) ||
+            relative.StartsWith("Account", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"/t/{slug}/dashboard";
+        }
+        return $"/t/{slug}/{relative}";
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

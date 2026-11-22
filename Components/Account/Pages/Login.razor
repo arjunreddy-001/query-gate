@@ -9,6 +9,8 @@
 @inject AuditService Audit
 @inject NavigationManager NavigationManager
 @inject IdentityRedirectManager RedirectManager
+@inject OidcService Oidc
+@inject SettingsService Settings
 
 <PageTitle>Sign in · Query Gate</PageTitle>
 
@@ -18,6 +20,17 @@
 @if (!string.IsNullOrEmpty(errorMessage))
 {
     <div class="alert bad" role="alert">@errorMessage</div>
+}
+
+@if (oidcEnabled)
+{
+    <div style="margin-bottom:12px">
+        <a href="Account/ExternalLogin?returnUrl=@Uri.EscapeDataString(ReturnUrl ?? "")" class="btn btn-primary btn-lg" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            Sign in with @oidcDisplayName
+        </a>
+    </div>
+    <div class="auth-divider"><span>or continue with password / passkey</span></div>
 }
 
 @* ── Passkey sign-in (shown when browser supports WebAuthn) ── *@
@@ -85,16 +98,28 @@
     [SupplyParameterFromForm(FormName = "login")] private InputModel Input { get; set; } = default!;
     [SupplyParameterFromForm(FormName = "passkey-login")] private PasskeyInputModel PasskeyInput { get; set; } = default!;
     [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
+    [SupplyParameterFromQuery] private string? Error { get; set; }
+
+    private bool oidcEnabled;
+    private string oidcDisplayName = "Enterprise SSO";
 
     protected override void OnInitialized()
     {
         Input ??= new();
         PasskeyInput ??= new();
         editContext = new EditContext(Input);
+        if (!string.IsNullOrWhiteSpace(Error))
+        {
+            errorMessage = Error;
+        }
     }
 
     protected override async Task OnInitializedAsync()
     {
+        oidcEnabled = await Oidc.IsEnabledAsync();
+        oidcDisplayName = await Settings.GetAsync(OidcService.SettingsKeyDisplayName);
+        if (string.IsNullOrWhiteSpace(oidcDisplayName)) oidcDisplayName = "Enterprise SSO";
+
         var hasUsers = await UserManager.Users.AnyAsync();
         if (!hasUsers)
         {

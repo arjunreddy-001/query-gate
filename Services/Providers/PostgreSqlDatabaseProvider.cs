@@ -287,7 +287,7 @@ public sealed class PostgreSqlDatabaseProvider : IDatabaseProvider
                 dto.EstimatedRows = rowsElem.GetDouble();
 
             var nodeId = 1;
-            ParsePlanElement(planElement, dto, ref nodeId);
+            ParsePlanElement(planElement, dto, ref nodeId, null);
         }
         catch
         {
@@ -297,34 +297,42 @@ public sealed class PostgreSqlDatabaseProvider : IDatabaseProvider
         return dto;
     }
 
-    private static void ParsePlanElement(JsonElement element, ExecutionPlanDto dto, ref int nodeId)
+    private static int ParsePlanElement(JsonElement element, ExecutionPlanDto dto, ref int nodeId, int? parentNodeId)
     {
+        var currentId = nodeId++;
         var nodeType = element.TryGetProperty("Node Type", out var nt) ? nt.GetString() ?? "Unknown" : "Unknown";
         var relation = element.TryGetProperty("Relation Name", out var rn) ? rn.GetString() : null;
         var totalCost = element.TryGetProperty("Total Cost", out var tc) ? tc.GetDouble() : 0;
         var estRows = element.TryGetProperty("Plan Rows", out var pr) ? pr.GetDouble() : 0;
         var isScan = nodeType.Contains("Scan", StringComparison.OrdinalIgnoreCase);
+        var costPct = dto.TotalCost > 0 ? (totalCost / dto.TotalCost) * 100 : 0;
 
-        dto.Operators.Add(new PlanOperatorDto
+        var opDto = new PlanOperatorDto
         {
-            NodeId = nodeId++,
+            NodeId = currentId,
+            ParentNodeId = parentNodeId,
             PhysicalOp = nodeType,
             LogicalOp = nodeType,
             SubtreeCost = totalCost,
             OperatorCost = totalCost,
+            CostPercentage = Math.Min(100, Math.Round(costPct, 1)),
             EstimatedRows = estRows,
             TargetObject = relation,
             IsScan = isScan,
             IsWarning = isScan && estRows > 1000,
             WarningMessage = isScan && estRows > 1000 ? $"Full sequential scan on {relation ?? "table"} with {estRows:N0} estimated rows." : null
-        });
+        };
+        dto.Operators.Add(opDto);
 
         if (element.TryGetProperty("Plans", out var childPlans) && childPlans.ValueKind == JsonValueKind.Array)
         {
             foreach (var child in childPlans.EnumerateArray())
             {
-                ParsePlanElement(child, dto, ref nodeId);
+                var childId = ParsePlanElement(child, dto, ref nodeId, currentId);
+                opDto.ChildrenNodeIds.Add(childId);
             }
         }
+
+        return currentId;
     }
 }

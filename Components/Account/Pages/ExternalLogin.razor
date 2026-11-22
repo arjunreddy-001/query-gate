@@ -1,0 +1,83 @@
+@page "/Account/ExternalLogin"
+@using System.Security.Cryptography
+@using System.Text.Json
+@inject OidcService Oidc
+@inject SettingsService Settings
+@inject NavigationManager Nav
+@inject IHttpClientFactory HttpClientFactory
+
+@code {
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var enabled = await Oidc.IsEnabledAsync();
+        var authority = await Settings.GetAsync(OidcService.SettingsKeyAuthority);
+        var clientId = await Settings.GetAsync(OidcService.SettingsKeyClientId);
+
+        if (!enabled || string.IsNullOrWhiteSpace(authority) || string.IsNullOrWhiteSpace(clientId))
+        {
+            Nav.NavigateTo("Account/Login?error=" + Uri.EscapeDataString("SSO is not enabled or configured."), replace: true);
+            return;
+        }
+
+        // Discover authorization endpoint
+        var discoveryUrl = $"{authority.TrimEnd('/')}/.well-known/openid-configuration";
+        string? authEndpoint = null;
+        try
+        {
+            var http = HttpClientFactory.CreateClient("Oidc");
+            var json = await http.GetStringAsync(discoveryUrl);
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("authorization_endpoint", out var ep))
+            {
+                authEndpoint = ep.GetString();
+            }
+        }
+        catch
+        {
+            authEndpoint = null;
+        }
+
+        if (string.IsNullOrWhiteSpace(authEndpoint))
+        {
+            Nav.NavigateTo("Account/Login?error=" + Uri.EscapeDataString("Failed to discover OIDC authorization endpoint from identity provider."), replace: true);
+            return;
+        }
+
+        // State and nonce
+        var stateBytes = new byte[24];
+        var nonceBytes = new byte[24];
+        RandomNumberGenerator.Fill(stateBytes);
+        RandomNumberGenerator.Fill(nonceBytes);
+        var state = Convert.ToBase64String(stateBytes).Replace("+", "-").Replace("/", "_").TrimEnd('=');
+        var nonce = Convert.ToBase64String(nonceBytes).Replace("+", "-").Replace("/", "_").TrimEnd('=');
+
+        var cookieOptions = new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = HttpContext.Request.IsHttps,
+            SameSite = SameSiteMode.Lax,
+            Expires = DateTimeOffset.UtcNow.AddMinutes(15)
+        };
+
+        HttpContext.Response.Cookies.Append("qg_oidc_state", state, cookieOptions);
+        HttpContext.Response.Cookies.Append("qg_oidc_nonce", nonce, cookieOptions);
+        if (!string.IsNullOrWhiteSpace(ReturnUrl))
+        {
+            HttpContext.Response.Cookies.Append("qg_oidc_return", ReturnUrl, cookieOptions);
+        }
+
+        var redirectUri = $"{HttpContext.Request.Scheme}://{HttpContext.Request.Host}/Account/ExternalLoginCallback";
+        var scopes = await Settings.GetAsync(OidcService.SettingsKeyScopes);
+        if (string.IsNullOrWhiteSpace(scopes)) scopes = "openid profile email";
+
+        var targetUrl = $"{authEndpoint}?client_id={Uri.EscapeDataString(clientId)}&response_type=code&scope={Uri.EscapeDataString(scopes)}&redirect_uri={Uri.EscapeDataString(redirectUri)}&state={Uri.EscapeDataString(state)}&nonce={Uri.EscapeDataString(nonce)}";
+
+        Nav.NavigateTo(targetUrl, forceLoad: true);
+    }
+}

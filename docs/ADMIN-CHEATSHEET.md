@@ -54,6 +54,8 @@ Initial default grants added at registration (configurable under Permissions):
 | Disable a database                     | Databases → Edit        | Untick _Enabled_                                                                                              |
 | Test a registered database quickly     | Databases               | Click **Check** on the database row to probe connection and latency                                           |
 | Monitor database health and latency    | Databases               | Live connectivity, latency, KPI summary cards, and diagnostics are integrated directly on the Databases page  |
+| Configure AI Assistant (BYOAI)         | Settings → AI Assistant | Select provider, enter API key/endpoint, test connection (keys encrypted at rest)                             |
+| Configure Enterprise SSO / OIDC        | Settings → SSO & OIDC   | Enter authority URL, client ID, secret, test discovery (pre-authorize users in Users first)                   |
 | Time-boxed access                      | Permissions → Add grant | Set start and end times                                                                                       |
 | Review who can do what                 | Access matrix           | Pick a database, then **Export CSV**                                                                          |
 | Investigate activity                   | Audit log               | Filter by user, outcome or date, expand **SQL**, **Export CSV**                                               |
@@ -61,7 +63,7 @@ Initial default grants added at registration (configurable under Permissions):
 
 ## 4. Settings (Admin → Settings)
 
-The Settings page is organized into five tabs: **General & Limits**, **Email & SMTP**, **Webhooks & Alerts**, **Data Masking**, and **Metadata Cache**.
+The Settings page is organized into seven tabs: **General & Limits**, **Email & SMTP**, **Webhooks & Alerts**, **Data Masking**, **AI Assistant**, **SSO & OIDC**, and **Metadata Cache**.
 
 | Setting                                    | Default      |
 | ------------------------------------------ | ------------ |
@@ -75,6 +77,8 @@ The Settings page is organized into five tabs: **General & Limits**, **Email & S
 | Temporary password length                  | 16           |
 | Dynamic Data Masking (on/off)              | On           |
 | Additional roles for DB health             | (blank, Admin only) |
+| AI Assistant enabled                       | No (BYOAI)   |
+| SSO & OIDC enabled                         | No           |
 
 **Metadata cache:** the _Object metadata cache_ card on the Settings page shows what is cached per database, with the environment in a separate column. Use _Enable/Disable_, per-database _Reload_ / _Clear_, or _Reload all_ / _Clear all_. All actions are audited.
 
@@ -83,6 +87,10 @@ The Settings page is organized into five tabs: **General & Limits**, **Email & S
 **Collaboration Webhooks:** add webhooks for Slack, Microsoft Teams, Zoho Cliq, Discord, or generic endpoints. Supports event filters (all, access/script requests only, script executions only, or database health alerts only) and instant _Test_ dispatch.
 
 **Data Masking:** manage dynamic data masking rules directly in the UI with HIPAA Safe Harbor, GDPR, PCI-DSS, SOC 2, and CCPA compliance. Filter rules by Origin (All, Built-in, Custom) and regulatory standards. Configure column patterns, select masking strategies (`Name`, `MedicalRecord`, `DateOfBirth`, `Address`, `ZipCode`, `Email`, `CreditCard`, `Ssn`, `Phone`, `IpAddress`, `Salary`, `Secret`, or `CustomText` with custom strings like `[CONFIDENTIAL]`), enable/disable rules or global masking, add/edit rules, test pattern matching with instant live preview, or reset to defaults. Includes security confirmation modals before destructive actions (deleting rules, disabling global masking, resetting to defaults). All administrative actions across the app (grants, approvals, user lifecycle, settings) report instant feedback through highlighted top-center floating toast notifications with animated drain timers. All rule updates are audited.
+
+**AI Assistant (BYOAI):** configure an AI provider (OpenAI, Azure OpenAI, Google Gemini, Anthropic Claude, or local Ollama/vLLM endpoints), encrypted API key, model name, endpoint URL, and temperature. Use _Test connection_ to verify credentials. Schema metadata only is used for query assistance; no customer table data is ever transmitted.
+
+**SSO & OIDC:** configure enterprise OpenID Connect integration (Authority URL, Client ID, encrypted Client Secret, Scopes, and custom sign-in button text). Use _Test discovery_ to validate OIDC metadata. Strictly authorized-only: external accounts can only sign in if an administrator has already created the user under _Admin → Users_.
 
 ## 5. Who can see what
 
@@ -115,6 +123,7 @@ Audit and Access matrix access is configurable per role; Databases access defaul
 | Test connection fails with a certificate error     | Add `TrustServerCertificate=True`                                                                      |
 | Approved script didn't run                         | It was edited (auto-run is off) or lacks a dangerous permission. Use **Run now** or add the permission |
 | Lost the admin password                            | Use another admin's **Reset pwd**, or restart with new `BootstrapAdmin__*` values for a new admin      |
+| SSO sign-in denied ("not authorized")              | Pre-create the user in Admin → Users with the exact email address returned by the OIDC provider       |
 
 ## 8. Multi-Tenancy and Workspaces
 

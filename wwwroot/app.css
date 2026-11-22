@@ -1082,6 +1082,7 @@ html[data-nav="compact"]
 .icon-btn svg {
   width: 16px;
   height: 16px;
+  display: block !important;
 }
 .icon-btn.sm {
   width: 26px;
@@ -1091,6 +1092,7 @@ html[data-nav="compact"]
 .icon-btn.sm svg {
   width: 14px;
   height: 14px;
+  display: block !important;
 }
 .icon-btn .dot {
   position: absolute;
@@ -1639,7 +1641,7 @@ html[data-nav="compact"]
   padding: 40px 20px;
   color: var(--text-dim);
 }
-.empty svg {
+.empty > svg {
   width: 36px;
   height: 36px;
   opacity: 0.4;
@@ -1741,6 +1743,10 @@ html[data-nav="compact"]
 .btn svg {
   width: 14px;
   height: 14px;
+  display: block !important;
+  flex-shrink: 0;
+  margin: 0;
+  opacity: 1;
 }
 .btn:disabled,
 .btn[disabled] {
@@ -3352,10 +3358,11 @@ summary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 4px 8px;
+  gap: 0 !important;
+  padding: 0 8px;
   height: 30px;
-  border-radius: var(--radius);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  border-radius: var(--radius-sm, 8px);
+  transition: padding 0.2s cubic-bezier(0.16, 1, 0.3, 1), background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
   overflow: hidden;
   white-space: nowrap;
   flex-shrink: 0;
@@ -3363,6 +3370,7 @@ summary {
 .btn-hover-expand svg {
   width: 14px;
   height: 14px;
+  display: block !important;
   flex-shrink: 0;
 }
 .btn-hover-expand .btn-lbl {
@@ -3370,20 +3378,24 @@ summary {
   opacity: 0;
   overflow: hidden;
   white-space: nowrap;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  pointer-events: none;
   transition: max-width 0.24s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease, margin 0.2s ease;
-  margin-left: 0;
   font-size: 0.8125rem;
   font-weight: 500;
 }
 .btn-hover-expand:hover,
 .btn-hover-expand:focus-visible {
-  padding: 4px 10px;
+  padding: 0 10px;
 }
 .btn-hover-expand:hover .btn-lbl,
 .btn-hover-expand:focus-visible .btn-lbl {
   max-width: 110px;
   opacity: 1;
   margin-left: 6px;
+  pointer-events: auto;
 }
 
 .chip-toggle {

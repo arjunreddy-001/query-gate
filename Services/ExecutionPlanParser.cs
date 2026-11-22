@@ -28,6 +28,8 @@ public sealed class PlanMissingIndexDto
 public sealed class PlanOperatorDto
 {
     public int NodeId { get; set; }
+    public int? ParentNodeId { get; set; }
+    public List<int> ChildrenNodeIds { get; } = [];
     public string PhysicalOp { get; set; } = "";
     public string LogicalOp { get; set; } = "";
     public double SubtreeCost { get; set; }
@@ -148,6 +150,7 @@ public static class ExecutionPlanParser
     private static void ParseRelOps(XElement queryPlan, ExecutionPlanDto dto)
     {
         var relOps = queryPlan.Descendants().Where(e => e.Name.LocalName == "RelOp").ToList();
+        var nodeMap = new Dictionary<int, PlanOperatorDto>();
 
         foreach (var op in relOps)
         {
@@ -165,7 +168,8 @@ public static class ExecutionPlanParser
 
             // Direct child RelOps:
             var directChildren = op.Elements()
-                .SelectMany(e => e.DescendantsAndSelf().Where(d => d.Name.LocalName == "RelOp" && d != op && !d.Ancestors().TakeWhile(a => a != op).Any(a => a.Name.LocalName == "RelOp")));
+                .SelectMany(e => e.DescendantsAndSelf().Where(d => d.Name.LocalName == "RelOp" && d != op && !d.Ancestors().TakeWhile(a => a != op).Any(a => a.Name.LocalName == "RelOp")))
+                .ToList();
 
             var childCostSum = directChildren.Sum(c =>
                 double.TryParse(c.Attribute("EstimatedTotalSubtreeCost")?.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var cCost) ? cCost : 0);
@@ -190,7 +194,7 @@ public static class ExecutionPlanParser
             var isScan = physicalOp.Contains("Scan", StringComparison.OrdinalIgnoreCase);
             var warnings = op.Descendants().FirstOrDefault(e => e.Name.LocalName == "Warnings");
 
-            dto.Operators.Add(new PlanOperatorDto
+            var opDto = new PlanOperatorDto
             {
                 NodeId = nodeId,
                 PhysicalOp = physicalOp,
@@ -203,7 +207,28 @@ public static class ExecutionPlanParser
                 IsScan = isScan,
                 IsWarning = warnings is not null || isScan,
                 WarningMessage = warnings is not null ? "Operator produced execution warning" : (isScan ? "Full table or index scan" : null)
-            });
+            };
+
+            var directChildNodeIds = directChildren
+                .Select(c => int.TryParse(c.Attribute("NodeId")?.Value, out var cid) ? cid : -1)
+                .Where(cid => cid >= 0)
+                .ToList();
+
+            opDto.ChildrenNodeIds.AddRange(directChildNodeIds);
+            nodeMap[nodeId] = opDto;
+            dto.Operators.Add(opDto);
+        }
+
+        // Link ParentNodeId on child operators
+        foreach (var op in dto.Operators)
+        {
+            foreach (var childId in op.ChildrenNodeIds)
+            {
+                if (nodeMap.TryGetValue(childId, out var childOp))
+                {
+                    childOp.ParentNodeId = op.NodeId;
+                }
+            }
         }
 
         dto.Operators.Sort((a, b) => b.OperatorCost.CompareTo(a.OperatorCost));

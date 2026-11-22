@@ -57,6 +57,17 @@ Standard outcomes emitted by `TranslateException`:
 - `ConnectionError`: Server unreachable, network drop, bad credentials.
 - `ExecutionError`: Fallback for all other database errors.
 
+## Hierarchical Execution Plans (Interactive DAG)
+
+Estimated execution plans are parsed into `ExecutionPlanDto` via `ExecutionPlanParser`:
+- `PlanOperatorDto.NodeId`, `ParentNodeId`, and `ChildrenNodeIds` form an interactive directed acyclic graph (DAG) rendered in the Query workspace.
+- Engine representations:
+  - SQL Server: XML `RelOp` elements with `NodeId`, `PhysicalOp`, `LogicalOp`, `EstimatedTotalSubtreeCost`.
+  - PostgreSQL: Nested JSON `Plans` arrays with `Node Type`, `Total Cost`, `Plan Rows`.
+  - MySQL / MariaDB: Nested JSON query block operations.
+- Operators with cost >= 30% of total subtree cost are flagged as bottlenecks.
+- Full table scans and clustered index scans on large tables emit scan warnings.
+
 ## Adding or Modifying Providers
 
 1. If adding a new engine, add enum value in `Data/DatabaseEngine.cs` and update `DatabaseEngineInfo` helper methods.

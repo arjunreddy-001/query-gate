@@ -12,6 +12,7 @@
 @inject ILogger<Query> Logger
 @inject Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage.ProtectedLocalStorage Storage
 @inject SettingsService SettingsSvc
+@inject DbAccessManager.Services.Ai.AiAssistantService AiAssistant
 @using System.Text
 @using System.Text.Json
 @using Microsoft.SqlServer.TransactSql.ScriptDom
@@ -40,13 +41,14 @@ else
                         <input type="search" placeholder="Filter objects…" @bind="filter" @bind:event="oninput" />
                         <label class="check small" title="Use typo-tolerant fuzzy search"><input type="checkbox" @bind="fuzzySearch" />Fuzzy</label>
                         <button class="icon-btn" title="Refresh" @onclick="() => LoadMetadata(true)" style="flex:none"><Icon Name="refresh" /></button>
+                        <button class="icon-btn" title="Entity-Relationship (ER) Diagram" @onclick="() => OpenErDiagram(null)" style="flex:none"><Icon Name="grid" /></button>
                     </div>
                     <div class="row-inline obj-filters">
                         <button class="icon-btn sm obj-filter @(objectTypeFilter == "All" ? "active" : "")" title="All" @onclick='() => objectTypeFilter = "All"'><Icon Name="list" /></button>
                         <button class="icon-btn sm obj-filter @(objectTypeFilter == "Table" ? "active" : "")" title="Tables" @onclick='() => objectTypeFilter = "Table"'><Icon Name="table" /></button>
                         <button class="icon-btn sm obj-filter @(objectTypeFilter == "View" ? "active" : "")" title="Views" @onclick='() => objectTypeFilter = "View"'><Icon Name="eye" /></button>
                         <button class="icon-btn sm obj-filter @(objectTypeFilter == "Procedure" ? "active" : "")" title="Procedures" @onclick='() => objectTypeFilter = "Procedure"'><Icon Name="code" /></button>
-                        <button class="icon-btn sm obj-filter @(objectTypeFilter == "Function" ? "active" : "")" title="Functions" @onclick='() => objectTypeFilter = "Function"'><Icon Name="code" /></button>
+                        <button class="icon-btn sm obj-filter @(objectTypeFilter == "Function" ? "active" : "")" title="Functions" @onclick='() => objectTypeFilter = "Function"'><Icon Name="function" /></button>
                     </div>
                 </div>
                 @if (metaLoading) { <div class="stack"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div> }
@@ -67,7 +69,7 @@ else
                             <span class="tree-chevron" style="display:inline-block;width:12px;font-size:10px;color:var(--text-faint);cursor:pointer" @onclick:stopPropagation @onclick="() => Toggle(key)" title="Toggle columns">
                                 @(isExpanded ? "▾" : "▸")
                             </span>
-                            <Icon Name="@(o.Type == "Table" ? "table" : o.Type == "View" ? "eye" : "code")" />
+                            <Icon Name="@GetObjectIcon(o.Type)" />
                             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="@key">@key</span>
                             <span class="faint small" style="margin-left:auto;font-size:11px">@o.Type</span>
                         </div>
@@ -211,19 +213,13 @@ else
             else
             {
                 <button class="btn btn-primary" title="Run (F5 or Ctrl+Enter). Runs the selection if any." @onclick="Run"><Icon Name="play" />Run</button>
-                <button class="btn btn-hover-expand" title="Explain query plan" @onclick="ExplainPlan" disabled="@(Current is null)">
-                    <Icon Name="activity" /><span class="btn-lbl">Explain</span>
-                </button>
+                <button class="btn btn-hover-expand" title="Explain query plan" @onclick="ExplainPlan" disabled="@(Current is null)"><Icon Name="activity" /><span class="btn-lbl">Explain</span></button>
             }
-            <button class="btn btn-hover-expand" title="Format (Shift+Alt+F)" @onclick="FormatSql">
-                <Icon Name="format" /><span class="btn-lbl">Format</span>
-            </button>
-            <button class="btn btn-hover-expand" title="Save (Ctrl+S)" @onclick="OpenSave">
-                <Icon Name="save" /><span class="btn-lbl">Save</span>
-            </button>
-            <button class="btn btn-hover-expand" title="Editor preferences" @onclick="() => editingPreferences = true">
-                <Icon Name="cog" /><span class="btn-lbl">Editor settings</span>
-            </button>
+            <button class="btn btn-hover-expand" title="Format (Shift+Alt+F)" @onclick="FormatSql"><Icon Name="format" /><span class="btn-lbl">Format</span></button>
+            <button class="btn btn-hover-expand" title="Save (Ctrl+S)" @onclick="OpenSave"><Icon Name="save" /><span class="btn-lbl">Save</span></button>
+            <button class="btn btn-hover-expand" title="Editor preferences" @onclick="() => editingPreferences = true"><Icon Name="cog" /><span class="btn-lbl">Editor settings</span></button>
+            <button class="btn btn-hover-expand @(showAiPrompt ? "btn-primary" : "")" title="AI Assistant (Ctrl+I)" @onclick="ToggleAiPrompt"><Icon Name="sparkles" /><span class="btn-lbl">AI Assistant</span></button>
+            <button class="btn btn-hover-expand" title="Entity-Relationship (ER) Diagram" @onclick="() => OpenErDiagram(null)" disabled="@(Current is null)"><Icon Name="grid" /><span class="btn-lbl">ER Diagram</span></button>
             <label class="chip-toggle chip-warn @(dryRun ? "active" : "")" title="Dry run: execute in transaction and roll back">
                 <input type="checkbox" class="visually-hidden" @bind="dryRun" />
                 <span>Dry run</span>
@@ -234,6 +230,86 @@ else
                 <span class="unit">s</span>
             </div>
         </div>
+
+        @if (showAiPrompt)
+        {
+            <div class="ai-prompt-bar" style="padding:10px 14px;background:var(--bg-elev);border-bottom:1px solid var(--line);box-shadow:0 2px 8px rgba(0,0,0,0.04)">
+                @if (!aiConfigured)
+                {
+                    <div class="row-inline" style="justify-content:space-between;color:var(--text-dim);font-size:12px">
+                        <div class="row-inline" style="gap:8px">
+                            <Icon Name="lock" />
+                            <span><b>AI Assistant is not configured.</b> Bring your own AI (OpenAI, Gemini, Claude, or local Ollama) by configuring Settings.</span>
+                        </div>
+                        <a href="admin/settings" class="btn btn-sm btn-primary" style="text-decoration:none">Configure AI in Settings</a>
+                    </div>
+                }
+                else
+                {
+                    <div class="stack" style="gap:8px">
+                        <div class="row-inline" style="gap:8px">
+                            <div style="flex:1;position:relative">
+                                <input type="text"
+                                       class="form-control"
+                                       placeholder="Ask AI to write a query (e.g. 'Show top 10 customers by total spend with order counts')…"
+                                       @bind="aiUserPrompt"
+                                       @onkeydown='async e => { if (e.Key == "Enter" && !aiGenerating) await GenerateAiSql(); }'
+                                       style="width:100%;height:32px;padding:4px 10px;font-size:13px" />
+                            </div>
+                            <button class="btn btn-primary btn-sm" type="button" disabled="@(aiGenerating || string.IsNullOrWhiteSpace(aiUserPrompt))" @onclick="GenerateAiSql">
+                                @if (aiGenerating)
+                                {
+                                    <span class="spinner" style="width:12px;height:12px"></span> <span>Generating…</span>
+                                }
+                                else
+                                {
+                                    <Icon Name="sparkles" /> <span>Generate SQL</span>
+                                }
+                            </button>
+                            <button class="icon-btn sm" title="Close AI Bar" type="button" @onclick="() => showAiPrompt = false"><Icon Name="x" /></button>
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(aiGeneratedSql))
+                        {
+                            <div style="background:var(--bg-sunken);border:1px solid var(--line);border-radius:var(--radius-sm);padding:8px 12px">
+                                <div class="row-inline" style="justify-content:space-between;margin-bottom:6px">
+                                    <div class="row-inline" style="gap:6px">
+                                        <b>Proposed SQL:</b>
+                                        @if (aiSafetyWarnings.Count == 0)
+                                        {
+                                            <span class="badge ok" style="font-size:10px">✓ Compliant with Gate</span>
+                                        }
+                                        else
+                                        {
+                                            @foreach (var w in aiSafetyWarnings)
+                                            {
+                                                <span class="badge warn" style="font-size:10px">⚠ @w</span>
+                                            }
+                                        }
+                                    </div>
+                                    <div class="row-inline" style="gap:6px">
+                                        <button class="btn btn-sm btn-primary" type="button" @onclick="InsertAiSqlToEditor">
+                                            <Icon Name="code" /> Insert to Editor
+                                        </button>
+                                        <button class="btn btn-sm" type="button" @onclick="ReplaceAiSqlInEditor">
+                                            Replace Tab
+                                        </button>
+                                        <button class="btn btn-sm" type="button" @onclick="CopyAiSql">
+                                            <Icon Name="copy" /> Copy
+                                        </button>
+                                    </div>
+                                </div>
+                                <pre class="mono small" style="margin:0;padding:6px 8px;background:var(--bg-elev);border-radius:4px;overflow-x:auto;max-height:140px"><code>@aiGeneratedSql</code></pre>
+                            </div>
+                        }
+                        @if (!string.IsNullOrEmpty(aiError))
+                        {
+                            <div class="alert bad small" style="margin:0">@aiError</div>
+                        }
+                    </div>
+                }
+            </div>
+        }
 
         <div id="sql-editor" class="editor-box"></div>
         <div class="ws-split" title="Drag to resize"></div>
@@ -306,8 +382,47 @@ else
             {
                 @if (last.Error is not null)
                 {
-                    <div class="alert bad" style="margin:12px"><b>@last.Error</b>@if (last.ErrorLine is not null) { <span> (line @last.ErrorLine)</span> }
-                        @foreach (var d in last.Denials.Where(d => d != last.Error)) { <div class="small">@d</div> }</div>
+                    <div class="alert bad" style="margin:12px">
+                        <div class="row-inline" style="justify-content:space-between;align-items:flex-start">
+                            <div>
+                                <b>@last.Error</b>@if (last.ErrorLine is not null) { <span> (line @last.ErrorLine)</span> }
+                                @foreach (var d in last.Denials.Where(d => d != last.Error)) { <div class="small">@d</div> }
+                            </div>
+                            @if (aiConfigured)
+                            {
+                                <button class="btn btn-sm" type="button" @onclick="FixErrorWithAi" style="background:var(--bg-elev);color:var(--text);flex:none;margin-left:8px">
+                                    <Icon Name="sparkles" /> Fix with AI
+                                </button>
+                            }
+                        </div>
+                    </div>
+                }
+                @if (aiFixResult is not null)
+                {
+                    <div class="card" style="margin:12px;background:var(--bg-elev);border:1px solid var(--brand);box-shadow:0 4px 12px rgba(91,91,240,0.1)">
+                        <div class="card-head" style="background:var(--brand-soft);padding:8px 12px">
+                            <div class="row-inline" style="gap:6px">
+                                <Icon Name="sparkles" />
+                                <b>AI Query Diagnosis & Solution</b>
+                            </div>
+                            <button class="btn btn-sm icon-btn" type="button" @onclick="() => aiFixResult = null"><Icon Name="x" /></button>
+                        </div>
+                        <div class="card-pad stack" style="gap:10px">
+                            <div style="font-size:13px;line-height:1.6">@aiFixResult.Explanation</div>
+                            @if (!string.IsNullOrWhiteSpace(aiFixResult.FixedSql))
+                            {
+                                <div style="background:var(--bg-sunken);border:1px solid var(--line);border-radius:var(--radius-sm);padding:8px 10px">
+                                    <div class="row-inline" style="justify-content:space-between;margin-bottom:6px">
+                                        <span class="faint small"><b>Corrected SQL:</b></span>
+                                        <button class="btn btn-sm btn-primary" type="button" @onclick="ApplyFixedSqlToEditor">
+                                            <Icon Name="code" /> Apply Fix to Editor
+                                        </button>
+                                    </div>
+                                    <pre class="mono small" style="margin:0;padding:6px;background:var(--bg-elev);border-radius:4px;overflow-x:auto"><code>@aiFixResult.FixedSql</code></pre>
+                                </div>
+                            }
+                        </div>
+                    </div>
                 }
                 @if (activeResult >= 0 && activeResult < last.ResultSets.Count)
                 {
@@ -425,77 +540,129 @@ else
 
                         <div class="plan-card" style="margin-top:14px">
                             <div class="row-inline" style="justify-content:space-between;margin-bottom:8px">
-                                <h4 style="margin:0;font-size:13px;font-weight:700">Operator Breakdown (by Cost)</h4>
+                                <div class="row-inline" style="gap:4px">
+                                    <button class="btn btn-sm @(planViewMode == "tree" ? "btn-primary" : "")" type="button" @onclick='() => planViewMode = "tree"'>
+                                        <Icon Name="git-commit" /> Tree (DAG)
+                                    </button>
+                                    <button class="btn btn-sm @(planViewMode == "table" ? "btn-primary" : "")" type="button" @onclick='() => planViewMode = "table"'>
+                                        <Icon Name="table" /> Operator Table
+                                    </button>
+                                    <button class="btn btn-sm @(planViewMode == "raw" ? "btn-primary" : "")" type="button" @onclick='() => planViewMode = "raw"'>
+                                        <Icon Name="code" /> Raw XML/JSON
+                                    </button>
+                                </div>
                                 <div class="row-inline" style="gap:6px">
+                                    @if (aiConfigured)
+                                    {
+                                        <button class="btn btn-sm" type="button" @onclick="ExplainPlanWithAi" disabled="@aiExplainingPlan">
+                                            <Icon Name="sparkles" /> @(aiExplainingPlan ? "Analyzing..." : "Explain Plan with AI")
+                                        </button>
+                                    }
                                     <button class="btn btn-sm" type="button" @onclick="CopyPlanXml"><Icon Name="copy" />Copy Plan XML</button>
-                                    <button class="btn btn-sm" type="button" @onclick="() => showRawPlanXml = !showRawPlanXml"><Icon Name="code" />@(showRawPlanXml ? "Hide XML" : "View Raw XML")</button>
                                 </div>
                             </div>
 
-                            @if (showRawPlanXml)
+                            @if (!string.IsNullOrEmpty(aiPlanExplanation))
                             {
-                                <pre class="mono small" style="max-height:240px;overflow:auto;padding:10px;background:var(--bg-sunken);border:1px solid var(--line);border-radius:var(--radius-sm);margin-bottom:12px"><code>@plan.RawXml</code></pre>
+                                <div class="alert note" style="margin-bottom:12px;background:var(--bg-elev);border:1px solid var(--brand);line-height:1.6">
+                                    <div class="row-inline" style="justify-content:space-between;margin-bottom:6px">
+                                        <div class="row-inline" style="gap:6px">
+                                            <Icon Name="sparkles" />
+                                            <b>AI Performance Analysis & Recommendations</b>
+                                        </div>
+                                        <button class="btn btn-sm icon-btn" type="button" @onclick="() => aiPlanExplanation = null"><Icon Name="x" /></button>
+                                    </div>
+                                    <div style="font-size:12px;white-space:pre-wrap">@aiPlanExplanation</div>
+                                </div>
                             }
 
-                            <div class="table-wrap">
-                                <table>
-                                    <thead>
-                                        <tr>
-                                            <th style="width:40px">Node</th>
-                                            <th>Operator</th>
-                                            <th>Target Object</th>
-                                            <th class="num" style="width:90px">Est. Rows</th>
-                                            <th class="num" style="width:110px">Cost (% of Total)</th>
-                                            <th style="width:160px">% Subtree Cost</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @foreach (var op in plan.Operators)
+                            @if (planViewMode == "raw")
+                            {
+                                <pre class="mono small" style="max-height:360px;overflow:auto;padding:10px;background:var(--bg-sunken);border:1px solid var(--line);border-radius:var(--radius-sm);margin-bottom:12px"><code>@plan.RawXml</code></pre>
+                            }
+                            else if (planViewMode == "tree")
+                            {
+                                <div class="plan-tree-wrap" style="padding:16px;background:var(--bg-sunken);border:1px solid var(--line);border-radius:var(--radius-sm);overflow:auto;max-height:450px">
+                                    <div class="row-inline" style="justify-content:space-between;margin-bottom:12px">
+                                        <span class="muted small">Interactive operator flowchart (data flows from right/bottom children up to the root operator)</span>
+                                        @if (GetBottleneckNode(plan) is { } bottleneck)
                                         {
-                                            <tr>
-                                                <td class="num faint">@op.NodeId</td>
-                                                <td>
-                                                    <div class="row-inline" style="gap:6px">
-                                                        <b>@op.PhysicalOp</b>
-                                                        @if (op.LogicalOp != op.PhysicalOp && !string.IsNullOrEmpty(op.LogicalOp))
-                                                        {
-                                                            <span class="faint small">(@op.LogicalOp)</span>
-                                                        }
-                                                        @if (op.IsScan)
-                                                        {
-                                                            <span class="badge warn" style="font-size:10px;padding:1px 5px" title="Full scan: consider adding index or selective predicate">SCAN</span>
-                                                        }
-                                                        @if (op.IsWarning && !op.IsScan)
-                                                        {
-                                                            <span class="badge bad" style="font-size:10px;padding:1px 5px" title="@op.WarningMessage">WARNING</span>
-                                                        }
-                                                    </div>
-                                                </td>
-                                                <td>
-                                                    @if (!string.IsNullOrEmpty(op.TargetObject))
-                                                    {
-                                                        <code>@op.TargetObject</code>
-                                                    }
-                                                    else
-                                                    {
-                                                        <span class="faint small">-</span>
-                                                    }
-                                                </td>
-                                                <td class="num">@op.EstimatedRows.ToString("N0")</td>
-                                                <td class="num">
-                                                    <span>@op.OperatorCost.ToString("F4")</span>
-                                                    <span class="faint small" style="margin-left:4px">(@op.CostPercentage%)</span>
-                                                </td>
-                                                <td>
-                                                    <div class="plan-cost-bar">
-                                                        <div class="plan-cost-fill @(op.CostPercentage >= 50 ? "cost-high" : op.CostPercentage >= 20 ? "cost-med" : "")" style="width:@(Math.Max(3, Math.Min(100, op.CostPercentage)))%"></div>
-                                                    </div>
-                                                </td>
-                                            </tr>
+                                            <button class="btn btn-sm" type="button" @onclick="() => selectedPlanNodeId = bottleneck.NodeId" style="font-size:11px">
+                                                <Icon Name="alert" /> Focus Bottleneck (Node #@bottleneck.NodeId: @bottleneck.CostPercentage%)
+                                            </button>
                                         }
-                                    </tbody>
-                                </table>
-                            </div>
+                                    </div>
+
+                                    <div style="display:flex;flex-direction:column;gap:12px">
+                                        @foreach (var rootOp in GetRootOperators(plan))
+                                        {
+                                            @RenderPlanTreeNode(plan, rootOp)
+                                        }
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="table-wrap">
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th style="width:40px">Node</th>
+                                                <th>Operator</th>
+                                                <th>Target Object</th>
+                                                <th class="num" style="width:90px">Est. Rows</th>
+                                                <th class="num" style="width:110px">Cost (% of Total)</th>
+                                                <th style="width:160px">% Subtree Cost</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var op in plan.Operators)
+                                            {
+                                                <tr>
+                                                    <td class="num faint">@op.NodeId</td>
+                                                    <td>
+                                                        <div class="row-inline" style="gap:6px">
+                                                            <b>@op.PhysicalOp</b>
+                                                            @if (op.LogicalOp != op.PhysicalOp && !string.IsNullOrEmpty(op.LogicalOp))
+                                                            {
+                                                                <span class="faint small">(@op.LogicalOp)</span>
+                                                            }
+                                                            @if (op.IsScan)
+                                                            {
+                                                                <span class="badge warn" style="font-size:10px;padding:1px 5px" title="Full scan: consider adding index or selective predicate">SCAN</span>
+                                                            }
+                                                            @if (op.IsWarning && !op.IsScan)
+                                                            {
+                                                                <span class="badge bad" style="font-size:10px;padding:1px 5px" title="@op.WarningMessage">WARNING</span>
+                                                            }
+                                                        </div>
+                                                    </td>
+                                                    <td>
+                                                        @if (!string.IsNullOrEmpty(op.TargetObject))
+                                                        {
+                                                            <code>@op.TargetObject</code>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="faint small">-</span>
+                                                        }
+                                                    </td>
+                                                    <td class="num">@op.EstimatedRows.ToString("N0")</td>
+                                                    <td class="num">
+                                                        <span>@op.OperatorCost.ToString("F4")</span>
+                                                        <span class="faint small" style="margin-left:4px">(@op.CostPercentage%)</span>
+                                                    </td>
+                                                    <td>
+                                                        <div class="plan-cost-bar">
+                                                            <div class="plan-cost-fill @(op.CostPercentage >= 50 ? "cost-high" : op.CostPercentage >= 20 ? "cost-med" : "")" style="width:@(Math.Max(3, Math.Min(100, op.CostPercentage)))%"></div>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
                         </div>
                     </div>
                 }
@@ -651,7 +818,7 @@ else
     <div class="context-menu-backdrop" @onclick="CloseContextMenu" @oncontextmenu="CloseContextMenu" @oncontextmenu:preventDefault></div>
     <div class="context-menu" style="left:@(contextMenuX)px;top:@(contextMenuY)px" @onclick:stopPropagation>
         <div class="context-menu-header">
-            <Icon Name="@(o.Type == "Table" ? "table" : o.Type == "View" ? "eye" : "code")" />
+            <Icon Name="@GetObjectIcon(o.Type)" />
             <span style="overflow:hidden;text-overflow:ellipsis">@key</span>
         </div>
         <div class="context-menu-divider"></div>
@@ -673,6 +840,9 @@ else
             <div class="context-menu-divider"></div>
             @if (o.Type == "Table")
             {
+                <button type="button" @onclick="() => RunContextAction(() => OpenErDiagram(key))">
+                    <Icon Name="grid" /> View in ER Diagram
+                </button>
                 <button type="button" @onclick="() => RunContextAction(() => InsertTemplateInsert(o))">
                     <Icon Name="plus" /> Script as INSERT
                 </button>
@@ -713,6 +883,15 @@ else
                IsDanger="true"
                OnConfirm="ConfirmDeleteSaved"
                OnCancel="() => deletingSaved = null" />
+
+@if (showErModal && Current is not null)
+{
+    <ErDiagramModal DatabaseId="Current.DatabaseId"
+                    DatabaseName="@(databases.FirstOrDefault(d => d.Id == Current.DatabaseId)?.Name ?? "")"
+                    InitialFocusTable="@erFocusTable"
+                    OnQueryTable="OpenTableQueryFromEr"
+                    OnClose="() => showErModal = false" />
+}
 
 @code {
     private sealed class QueryTab
@@ -849,6 +1028,7 @@ else
         defaultTimeout = await SettingsSvc.GetIntAsync("DefaultTimeoutSeconds");
         maxTimeout = await SettingsSvc.GetIntAsync("MaxTimeoutSeconds");
         if (!timeout.HasValue) timeout = defaultTimeout;
+        aiConfigured = await AiAssistant.IsConfiguredAsync();
         await using var db = await DbFactory.CreateDbContextAsync();
         var user = await db.Users.AsNoTracking().SingleAsync(u => u.Id == UserId);
         savedPreferences = new(user.EditorAutomaticSuggestions, user.EditorLiveDiagnostics, user.EditorFontSize);
@@ -1769,6 +1949,14 @@ else
             .Take(300);
     }
 
+    private static string GetObjectIcon(string type) => type switch
+    {
+        "Table" => "table",
+        "View" => "eye",
+        "Function" => "function",
+        _ => "code"
+    };
+
     private static string Normalize(string value) => new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 
     private static int FuzzyScore(string query, string fullName, string name)
@@ -1816,5 +2004,234 @@ else
             }
         }
         return matrix[source.Length, target.Length];
+    }
+
+    // AI Assistant State & Methods
+    private bool showAiPrompt;
+    private bool aiConfigured;
+    private bool aiGenerating;
+    private string aiUserPrompt = "";
+    private string? aiGeneratedSql;
+    private List<string> aiSafetyWarnings = [];
+    private string? aiError;
+    private DbAccessManager.Services.Ai.AiFixResult? aiFixResult;
+    private string? aiPlanExplanation;
+    private bool aiExplainingPlan;
+
+    // ER Diagram State & Methods
+    private bool showErModal;
+    private string? erFocusTable;
+
+    // Execution Plan Tree & View State
+    private string planViewMode = "tree";
+    private int? selectedPlanNodeId;
+
+    private PlanOperatorDto? GetBottleneckNode(ExecutionPlanDto plan)
+    {
+        return plan.Operators.OrderByDescending(o => o.CostPercentage).FirstOrDefault(o => o.CostPercentage >= 20.0);
+    }
+
+    private List<PlanOperatorDto> GetRootOperators(ExecutionPlanDto plan)
+    {
+        var roots = plan.Operators.Where(o => o.ParentNodeId == null || !plan.Operators.Any(p => p.NodeId == o.ParentNodeId)).ToList();
+        return roots.Count > 0 ? roots : plan.Operators.Take(1).ToList();
+    }
+
+    private RenderFragment RenderPlanTreeNode(ExecutionPlanDto plan, PlanOperatorDto node) => __builder =>
+    {
+        var isSelected = selectedPlanNodeId == node.NodeId;
+        var isHighCost = node.CostPercentage >= 35.0;
+        var children = plan.Operators.Where(c => c.ParentNodeId == node.NodeId || node.ChildrenNodeIds.Contains(c.NodeId)).ToList();
+
+        <div style="@(node.ParentNodeId.HasValue ? "padding-left:24px;border-left:2px dashed var(--line-strong);margin-left:12px;margin-top:6px;" : "margin-top:6px;")">
+            <div class="plan-node-card @(isSelected ? "selected" : "") @(isHighCost ? "bottleneck" : "")"
+                 @onclick="() => selectedPlanNodeId = (selectedPlanNodeId == node.NodeId ? null : node.NodeId)"
+                 style="display:inline-flex;align-items:center;justify-content:space-between;gap:12px;background:var(--bg-elev);border:1px solid @(isHighCost ? "#ef4444" : isSelected ? "var(--brand)" : "var(--line)");border-radius:6px;padding:8px 12px;box-shadow:0 2px 6px rgba(0,0,0,0.04);cursor:pointer;max-width:700px">
+                <div class="row-inline" style="gap:8px">
+                    <span class="badge" style="font-family:monospace;font-size:10px">#@node.NodeId</span>
+                    <b>@node.PhysicalOp</b>
+                    @if (!string.IsNullOrEmpty(node.LogicalOp) && node.LogicalOp != node.PhysicalOp)
+                    {
+                        <span class="muted small">(@node.LogicalOp)</span>
+                    }
+                    @if (!string.IsNullOrEmpty(node.TargetObject))
+                    {
+                        <code style="font-size:11px">@node.TargetObject</code>
+                    }
+                </div>
+                <div class="row-inline" style="gap:6px">
+                    <span class="badge @(node.CostPercentage >= 35 ? "bad" : node.CostPercentage >= 15 ? "warn" : "ok")" style="font-size:10px;font-weight:600">
+                        @node.CostPercentage%
+                    </span>
+                    <span class="muted small">@node.EstimatedRows.ToString("N0") rows</span>
+                    @if (node.IsScan)
+                    {
+                        <span class="badge warn" style="font-size:10px" title="Table / Index Scan">SCAN</span>
+                    }
+                </div>
+            </div>
+
+            @if (isSelected)
+            {
+                <div style="background:var(--bg-elev);border:1px solid var(--line);border-radius:6px;padding:10px 14px;font-size:12px;max-width:700px;margin-top:4px">
+                    <div class="row-inline" style="justify-content:space-between;margin-bottom:6px">
+                        <b>Operator Details (Node #@node.NodeId)</b>
+                        <span class="badge @(node.CostPercentage >= 35 ? "bad" : "ok")">Cost: @node.OperatorCost.ToString("F4") (@node.CostPercentage%)</span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+                        <div>Subtree Cost: <b>@node.SubtreeCost.ToString("F4")</b></div>
+                        <div>Estimated Rows: <b>@node.EstimatedRows.ToString("N0")</b></div>
+                        <div>Target Object: <b>@(node.TargetObject ?? "None")</b></div>
+                        <div>Has Scan: <b>@(node.IsScan ? "Yes (Sequential Scan)" : "No")</b></div>
+                    </div>
+                    @if (!string.IsNullOrEmpty(node.WarningMessage))
+                    {
+                        <div class="alert warn small" style="margin-top:6px">@node.WarningMessage</div>
+                    }
+                </div>
+            }
+
+            @foreach (var child in children)
+            {
+                @RenderPlanTreeNode(plan, child)
+            }
+        </div>
+    };
+
+    private void ToggleAiPrompt()
+    {
+        showAiPrompt = !showAiPrompt;
+    }
+
+    private async Task GenerateAiSql()
+    {
+        if (string.IsNullOrWhiteSpace(aiUserPrompt) || Current is null) return;
+        aiGenerating = true;
+        aiError = null;
+        aiGeneratedSql = null;
+        aiSafetyWarnings.Clear();
+        StateHasChanged();
+
+        try
+        {
+            var currentDb = databases.FirstOrDefault(d => d.Id == Current.DatabaseId);
+            var engine = currentDb?.Engine ?? DatabaseEngine.SqlServer;
+            var res = await AiAssistant.GenerateSqlAsync(Current.DatabaseId, engine, aiUserPrompt);
+            if (res.Success)
+            {
+                aiGeneratedSql = res.Sql;
+                aiSafetyWarnings = res.SafetyWarnings;
+            }
+            else
+            {
+                aiError = res.ErrorMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            aiError = ex.Message;
+        }
+        finally
+        {
+            aiGenerating = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task InsertAiSqlToEditor()
+    {
+        if (string.IsNullOrEmpty(aiGeneratedSql)) return;
+        await SyncCurrent();
+        var existing = Current?.Sql ?? "";
+        var sep = string.IsNullOrWhiteSpace(existing) ? "" : "\n\n";
+        var newSql = existing + sep + aiGeneratedSql;
+        await LoadSql(newSql, null);
+        showAiPrompt = false;
+        Say("AI query inserted into editor.");
+    }
+
+    private async Task ReplaceAiSqlInEditor()
+    {
+        if (string.IsNullOrEmpty(aiGeneratedSql)) return;
+        await LoadSql(aiGeneratedSql, null);
+        showAiPrompt = false;
+        Say("Editor replaced with AI query.");
+    }
+
+    private async Task CopyAiSql()
+    {
+        if (string.IsNullOrEmpty(aiGeneratedSql)) return;
+        await JS.InvokeVoidAsync("dbam.copy", aiGeneratedSql);
+        Say("SQL copied to clipboard.");
+    }
+
+    private async Task FixErrorWithAi()
+    {
+        if (last is null || string.IsNullOrWhiteSpace(last.Error) || Current is null) return;
+        var currentDb = databases.FirstOrDefault(d => d.Id == Current.DatabaseId);
+        var engine = currentDb?.Engine ?? DatabaseEngine.SqlServer;
+        var sqlToDiagnose = lastRunSql ?? Current.Sql;
+
+        Flash = "Diagnosing error with AI...";
+        StateHasChanged();
+
+        var res = await AiAssistant.ExplainOrFixAsync(Current.DatabaseId, engine, sqlToDiagnose, last.Error);
+        Flash = null;
+        if (res.Success)
+        {
+            aiFixResult = res;
+        }
+        else
+        {
+            Say(res.ErrorMessage ?? "Failed to diagnose error with AI.", true);
+        }
+        StateHasChanged();
+    }
+
+    private async Task ApplyFixedSqlToEditor()
+    {
+        if (aiFixResult?.FixedSql is null) return;
+        await LoadSql(aiFixResult.FixedSql, null);
+        aiFixResult = null;
+        Say("Fixed query applied to editor.");
+    }
+
+    private async Task ExplainPlanWithAi()
+    {
+        if (last?.ExecutionPlan is null || Current is null) return;
+        var currentDb = databases.FirstOrDefault(d => d.Id == Current.DatabaseId);
+        var engine = currentDb?.Engine ?? DatabaseEngine.SqlServer;
+
+        aiExplainingPlan = true;
+        StateHasChanged();
+
+        try
+        {
+            aiPlanExplanation = await AiAssistant.ExplainPlanAsync(last.ExecutionPlan, engine);
+        }
+        finally
+        {
+            aiExplainingPlan = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OpenErDiagram(string? fullTableName)
+    {
+        erFocusTable = fullTableName;
+        showErModal = true;
+    }
+
+    private async Task OpenTableQueryFromEr(string fullTableName)
+    {
+        showErModal = false;
+        var currentDb = databases.FirstOrDefault(d => d.Id == Current?.DatabaseId);
+        var engine = currentDb?.Engine ?? DatabaseEngine.SqlServer;
+        string sql = engine switch
+        {
+            DatabaseEngine.PostgreSql or DatabaseEngine.MySql or DatabaseEngine.MariaDb => $"SELECT * FROM {fullTableName} LIMIT 100;",
+            _ => $"SELECT TOP 100 * FROM {fullTableName};"
+        };
+        await LoadSql(sql, fullTableName);
     }
 }

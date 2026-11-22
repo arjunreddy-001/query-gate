@@ -312,6 +312,144 @@ public sealed class MetadataService(
         else entries.TryRemove(databaseId, out _);
         return list;
     }
+
+    public async Task<ErDiagramData> GetErDiagramDataAsync(Guid databaseId, string? focusTable = null, int hops = 1, bool fullSchema = false)
+    {
+        var allObjects = await GetAsync(databaseId);
+        var tables = allObjects
+            .Where(o => string.Equals(o.Type, "TABLE", StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(o.Type, "BASE TABLE", StringComparison.OrdinalIgnoreCase)
+                     || string.IsNullOrEmpty(o.Type))
+            .ToList();
+
+        string Normalize(string schema, string name) =>
+            string.IsNullOrWhiteSpace(schema) ? name : $"{schema}.{name}";
+
+        var tableLookup = new Dictionary<string, DbObjectInfo>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in tables)
+        {
+            var key = Normalize(t.Schema, t.Name);
+            tableLookup[key] = t;
+            if (!tableLookup.ContainsKey(t.Name))
+            {
+                tableLookup[t.Name] = t;
+            }
+        }
+
+        // Build all edges
+        var allEdges = new List<ErRelationshipEdge>();
+        foreach (var t in tables)
+        {
+            var fromFull = Normalize(t.Schema, t.Name);
+            foreach (var fk in t.ForeignKeys)
+            {
+                var toFull = Normalize(fk.ReferencedSchema, fk.ReferencedTable);
+                foreach (var col in fk.Columns)
+                {
+                    allEdges.Add(new ErRelationshipEdge(
+                        FromTable: fromFull,
+                        FromColumn: col.Column,
+                        ToTable: toFull,
+                        ToColumn: col.ReferencedColumn,
+                        ConstraintName: fk.Name ?? "FK"));
+                }
+            }
+        }
+
+        // Determine included tables
+        HashSet<string> includedTableNames;
+        string? resolvedFocus = focusTable;
+
+        if (fullSchema || tables.Count == 0)
+        {
+            includedTableNames = tables.Select(t => Normalize(t.Schema, t.Name)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+        else
+        {
+            // Pick a focus table if not provided
+            if (string.IsNullOrWhiteSpace(resolvedFocus) || !tableLookup.ContainsKey(resolvedFocus))
+            {
+                var candidate = tables.FirstOrDefault(t => t.ForeignKeys.Count > 0) ?? tables.FirstOrDefault();
+                resolvedFocus = candidate is not null ? Normalize(candidate.Schema, candidate.Name) : null;
+            }
+
+            includedTableNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(resolvedFocus) && tableLookup.TryGetValue(resolvedFocus, out var initialTable))
+            {
+                var canonicalFocus = Normalize(initialTable.Schema, initialTable.Name);
+                includedTableNames.Add(canonicalFocus);
+
+                var queue = new Queue<(string Table, int CurrentHop)>();
+                queue.Enqueue((canonicalFocus, 0));
+
+                while (queue.Count > 0)
+                {
+                    var (curr, currentHop) = queue.Dequeue();
+                    if (currentHop < hops)
+                    {
+                        var neighbors = allEdges
+                            .Where(e => e.FromTable.Equals(curr, StringComparison.OrdinalIgnoreCase))
+                            .Select(e => e.ToTable)
+                            .Concat(allEdges.Where(e => e.ToTable.Equals(curr, StringComparison.OrdinalIgnoreCase)).Select(e => e.FromTable));
+
+                        foreach (var n in neighbors)
+                        {
+                            if (tableLookup.TryGetValue(n, out var neighborObj))
+                            {
+                                var neighborCanon = Normalize(neighborObj.Schema, neighborObj.Name);
+                                if (includedTableNames.Add(neighborCanon))
+                                {
+                                    queue.Enqueue((neighborCanon, currentHop + 1));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            else
+            {
+                includedTableNames = tables.Select(t => Normalize(t.Schema, t.Name)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        // Filter nodes
+        var filteredTables = tables.Where(t => includedTableNames.Contains(Normalize(t.Schema, t.Name))).ToList();
+        var nodes = new List<ErTableNode>();
+
+        foreach (var t in filteredTables)
+        {
+            var full = Normalize(t.Schema, t.Name);
+            var fkCols = t.ForeignKeys.SelectMany(f => f.Columns.Select(c => c.Column)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var columns = new List<ErColumnDto>();
+            if (t.ColumnDetails.Count > 0)
+            {
+                foreach (var c in t.ColumnDetails)
+                {
+                    var isPk = c.IsIdentity || c.Name.Equals("Id", StringComparison.OrdinalIgnoreCase) || c.Name.Equals($"{t.Name}Id", StringComparison.OrdinalIgnoreCase);
+                    var isFk = fkCols.Contains(c.Name);
+                    columns.Add(new ErColumnDto(c.Name, c.DataType ?? "varchar", isPk, isFk, c.Nullable));
+                }
+            }
+            else
+            {
+                foreach (var cName in t.Columns)
+                {
+                    var isPk = cName.Equals("Id", StringComparison.OrdinalIgnoreCase) || cName.Equals($"{t.Name}Id", StringComparison.OrdinalIgnoreCase);
+                    var isFk = fkCols.Contains(cName);
+                    columns.Add(new ErColumnDto(cName, "text", isPk, isFk, false));
+                }
+            }
+
+            nodes.Add(new ErTableNode(t.Schema, t.Name, full, columns));
+        }
+
+        var edges = allEdges
+            .Where(e => includedTableNames.Contains(e.FromTable) && includedTableNames.Contains(e.ToTable))
+            .ToList();
+
+        return new ErDiagramData(nodes, edges, resolvedFocus, hops, fullSchema);
+    }
 }
 
 public sealed class TokenService(SymmetricSecurityKey key, IDbContextFactory<ApplicationDbContext> factory)

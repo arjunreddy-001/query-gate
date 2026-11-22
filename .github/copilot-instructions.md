@@ -13,6 +13,8 @@ All workflows, domain runbooks, and engineering guidelines are maintained centra
 - **Data Masking & Compliance**: `.github/skills/data-masking/SKILL.md`
 - **Blazor Pages & Navigation**: `.github/skills/blazor-page-conventions/SKILL.md`
 - **UI Design System**: `.github/skills/ui-design-system/SKILL.md`
+- **Multi-Tenancy**: `.github/skills/multi-tenancy/SKILL.md`
+- **AI, Visualizations & SSO**: `.github/skills/ai-and-visualizations/SKILL.md`
 
 ## Key Engineering Rules
 

@@ -22,11 +22,15 @@ Specialized procedures and runbooks are located in `.github/skills/`. Whenever y
   Styling (`app.css`), compact sidebar, themes (light/dark), density, layout, Monaco editor integration, and branding.
 - **Multi-Tenancy** (`.github/skills/multi-tenancy/SKILL.md`):
   Workspaces (/t/{slug}), custom domains, user memberships, data isolation, and platform admin.
+- **AI & Visualizations** (`.github/skills/ai-and-visualizations/SKILL.md`):
+  BYOAI query assistant, interactive ER diagrams, visual DAG execution plans, and enterprise OIDC SSO.
 
 ## Quick Architecture Map (Token Saver)
 
 Avoid broad directory searches or recursive greps:
 
+- **AI & OpenID Connect**: `Services/Ai/AiAssistantService.cs`, `Services/OidcService.cs`, `Components/Account/Pages/ExternalLogin.razor`
+- **Diagrams & Plans**: `Services/ErDiagramDto.cs`, `wwwroot/js/er-diagram.js`, `Services/ExecutionPlanParser.cs`
 - **Execution & Auditing**: `Services/ExecutionServices.cs` (`ExecutionService`), `Security/AuditAuthorization.cs`
 - **SQL Gate & Scopes**: `Security/SqlGate.cs` (ScriptDom + Dialect), `Security/PermissionResolver.cs`, `Security/ObjectScope.cs`
 - **Engine Providers**: `Services/Providers/` (`DatabaseProviderFactory`, `IDatabaseProvider`, engine implementations)

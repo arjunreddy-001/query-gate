@@ -101,13 +101,27 @@ On narrow screens the Objects, Saved and History panel starts closed. Use the pa
    - Object search is **fuzzy by default**. Use the **Fuzzy** toggle to switch between fuzzy and exact contains matching.
    - Use the object type chips to filter to **Tables**, **Views**, **Procedures** or **Functions**.
    - Database dropdown shows enabled databases by default. Turn on **Show disabled** to include disabled entries.
+   - **Interactive ER Diagrams**: Click the ER diagram button in the Objects explorer toolbar (or right-click any table and choose **View ER Diagram**) to launch the visual schema viewer.
+     - **Focus Table & Neighborhood**: By default, the diagram loads the selected table and its 1-hop or 2-hop foreign key relationships. This keeps rendering instantaneous even on databases with hundreds of tables.
+     - **Schema Scope Toggle**: Switch between 1 Hop, 2 Hops, or Full Schema to view the entire database topology.
+     - **Interactive Canvas**: Table cards show column names, data types, nullability, primary key (PK) badges, and foreign key (FK) indicators. Drag table cards to reorganize the layout with live Bezier relationship paths. Use zoom in/out, fit to view, and reset controls.
+     - **One-Click Querying**: Click the **Query** button on any table header inside the diagram to instantly open a new query tab populated with a starter query (`SELECT TOP 100 *`).
 3. **Run** with `F5` or `Ctrl+Enter`. Select text first to run only the selection.
 4. Other actions:
+   - **AI Query Assistant (BYOAI)**: Press `Ctrl+I` or click the **AI Assistant** button in the query toolbar to open the natural language prompt bar.
+     - Type an instruction in plain English (for example, "Find top 10 customers by order total in 2024").
+     - The assistant inspects schema metadata (tables, columns, foreign keys) and crafts an optimized SQL query for your target engine. Table row data is never transmitted to the AI provider.
+     - Every generated query is checked by the server-side `SqlGate` parser before display. If the query requires elevated permissions, introduces dangerous DDL, or lacks a WHERE clause on updates, an alert warns you upfront.
+     - Click **Insert to Editor** to place the generated SQL directly into your active query tab.
+     - **Error Diagnosis & Repair**: When a query encounters a syntax error or database exception, the error banner presents an **Explain & Fix with AI** button. Clicking it asks the AI assistant to pinpoint the root cause and propose corrected SQL.
    - **Explain**: compiles the query and generates an estimated execution plan using the target engine's explain capability (SQL Server `SET SHOWPLAN_XML ON`, PostgreSQL `EXPLAIN (FORMAT JSON)`, MySQL/MariaDB `EXPLAIN FORMAT=JSON`). It compiles without executing data modifications or reading data. The resulting **Execution Plan** tab displays:
+     - **View Modes**: Switch between **Tree (DAG)**, **Operator Table**, and **Raw Plan** (XML or JSON).
+     - **Interactive DAG Tree**: Visual operator hierarchy showing data flow from leaf table/index scans to root result operators. High-cost bottleneck operators are highlighted with distinct warning styling and cost badges. Click any node in the tree to inspect details, estimated rows, and runtime metrics.
+     - **AI Plan Analysis**: Click **Explain Plan with AI** in the plan header to receive an automated analysis of performance bottlenecks, index opportunities, and query structure advice.
      - Estimated Subtree Cost, Optimization Level, Estimated Rows, and compile time metrics.
      - **Missing Index Recommendations**: identifies missing index groups from the query optimizer with estimated cost impact percentage, one-click **Copy Index Script**, and an **Add to Editor** shortcut that appends the DDL to the SQL editor.
      - **Operator Breakdown**: sorts operators by cost descending with percentage bars, estimated rows, target objects, and warnings for full index or table scans.
-     - **Showplan XML Viewer**: collapsible view with a one-click **Copy Plan XML** button.
+     - **Showplan Viewer**: collapsible view with a one-click **Copy Plan** button.
    - **Format** (`Shift+Alt+F`), **Save query** (`Ctrl+S`), **Cancel** a running query.
    - **Dry run**: executes inside a transaction and **rolls back**, so use it to test INSERT/UPDATE/DELETE safely.
    - **Timeout**: override per run (limited by the admin maximum).
@@ -203,6 +217,19 @@ The cache card below the settings lets admins reload or clear cached object meta
 **Email & SMTP:** configure outgoing mail settings (host, port, SSL/TLS, username, password, sender address) directly in the UI. Passwords are encrypted at rest with AES-256-GCM. Use the _Send test_ button to verify deliverability with live SMTP status feedback.
 
 **Collaboration webhooks:** configure instant webhook dispatches to Slack, Microsoft Teams, Zoho Cliq, Discord, or generic webhook receivers. Filter alerts by all events, requests only, or script executions only. Use the _Test_ button to verify end-to-end webhook delivery.
+
+**AI Assistant (BYOAI):** configure your organization's chosen AI provider and model under the _AI Assistant_ tab.
+- Query Gate provides no default AI provider. You bring your own API key or endpoint.
+- Supported providers: OpenAI, Azure OpenAI, Google Gemini, Anthropic Claude, or any OpenAI-compatible local/private endpoint (Ollama, vLLM, LocalAI).
+- API keys are encrypted at rest using AES-256-GCM.
+- Configure default model name, custom base URL, and temperature. Use the _Test connection_ button to verify API connectivity.
+- Privacy assurance: only schema names, column types, and foreign key relations are sent in prompts. Live database rows and sensitive cell values are never sent.
+
+**Single Sign-On (SSO & OIDC):** configure federated enterprise authentication under the _SSO & OIDC_ tab.
+- Connect to OpenID Connect identity providers such as Okta, Microsoft Entra ID, Keycloak, Auth0, or Google Workspace.
+- Configure Authority URL, Client ID, Client Secret (encrypted at rest), requested Scopes (`openid profile email`), and custom button label.
+- Use the _Test discovery_ button to validate the provider's `.well-known/openid-configuration` endpoint.
+- **Strict Authorized-Only Access Policy**: uninvited or unauthorized external users cannot log in. A user must first be created or invited by an administrator under _Admin → Users_ with a matching email before they are permitted to sign in via SSO. All authentication attempts (successful or rejected) are recorded in the audit log.
 
 The effective timeout is the lowest of the admin ceiling and the first available of: per-run override, per-user override, per-database default.
 

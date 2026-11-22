@@ -9,6 +9,8 @@
 @inject CryptoService Crypto
 @inject IConfiguration Config
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject DbAccessManager.Services.Ai.AiAssistantService AiService
+@inject DbAccessManager.Services.OidcService OidcSvc
 
 <PageTitle>Settings · Query Gate</PageTitle>
 
@@ -44,6 +46,14 @@ else
         <button class="tab @(activeTab == "cache" ? "active" : "")" @onclick='() => activeTab = "cache"'>
             Metadata Cache
             <span class="badge @(cacheEnabled ? "ok" : "warn")">@(cacheEnabled ? "Enabled" : "Disabled")</span>
+        </button>
+        <button class="tab @(activeTab == "ai" ? "active" : "")" @onclick='() => activeTab = "ai"'>
+            AI Assistant
+            <span class="badge @(aiConfigured ? "ok" : "warn")">@(aiConfigured ? "Configured" : "Unset")</span>
+        </button>
+        <button class="tab @(activeTab == "oidc" ? "active" : "")" @onclick='() => activeTab = "oidc"'>
+            SSO & OIDC
+            <span class="badge @(oidcEnabled ? "ok" : "muted")">@(oidcEnabled ? "Active" : "Disabled")</span>
         </button>
     </div>
 
@@ -246,7 +256,7 @@ else
                         <Icon Name="bell" />
                         <h3>No webhooks configured</h3>
                         <p>Receive notifications directly in Slack, Microsoft Teams, Zoho Cliq, or Discord whenever a team member requests elevated database access or executes a script.</p>
-                        <button class="btn btn-sm btn-primary" @onclick="() => showAddWebhook = true"><Icon Name="plus" />Add your first webhook</button>
+                        <button type="button" class="btn btn-sm btn-primary" @onclick="() => showAddWebhook = true"><Icon Name="plus" /> Add your first webhook</button>
                     </div>
                 }
                 else
@@ -539,6 +549,148 @@ else
             </div>
         </div>
     }
+    else if (activeTab == "ai")
+    {
+        <div class="card" style="max-width:850px">
+            <div class="card-head">
+                <div>
+                    <h3 style="margin:0">AI Assistant Configuration (BYOAI)</h3>
+                    <span class="muted small">Bring Your Own AI. Connect your preferred AI provider to enable natural language querying, query fix explanations, and execution plan advice.</span>
+                </div>
+            </div>
+            <div class="card-pad stack">
+                <div class="alert note">
+                    <Icon Name="lock" Style="vertical-align:-2px;margin-right:6px" /><b>Zero Data Leakage Guarantee:</b> Query Gate only sends compact schema metadata (table and column names, data types, and foreign keys). <b>Row-level table records and cell values are never sent to external AI providers.</b>
+                </div>
+
+                <div class="field">
+                    <label class="check">
+                        <input type="checkbox" @bind="aiEnabled" />
+                        <b>Enable AI Assistant features</b>
+                    </label>
+                    <span class="faint small">When disabled, all AI prompt bars and explanation buttons are hidden across Query Gate.</span>
+                </div>
+
+                <div class="field">
+                    <label>AI Provider</label>
+                    <select class="form-control" @bind="aiProvider">
+                        <option value="">Select a provider...</option>
+                        <option value="OpenAI">OpenAI / Compatible (OpenAI, Azure, Groq, DeepSeek, vLLM)</option>
+                        <option value="Gemini">Google Gemini (Gemini 1.5/2.0 API)</option>
+                        <option value="Anthropic">Anthropic Claude (Claude 3.5 Sonnet / Haiku)</option>
+                        <option value="Ollama">Local Ollama (Offline / Self-Hosted)</option>
+                    </select>
+                </div>
+
+                <div class="field">
+                    <label>Endpoint URL</label>
+                    <input type="text" placeholder="@GetAiEndpointPlaceholder()" @bind="aiEndpoint" />
+                    <span class="faint small">API base URL. Leave blank to use provider defaults (e.g. https://api.openai.com/v1 or http://localhost:11434/v1 for Ollama).</span>
+                </div>
+
+                <div class="field">
+                    <label>Model Name</label>
+                    <input type="text" placeholder="@GetAiModelPlaceholder()" @bind="aiModel" />
+                    <span class="faint small">Target model identifier (e.g. gpt-4o-mini, gemini-1.5-flash, claude-3-5-sonnet-20241022, llama3.2).</span>
+                </div>
+
+                <div class="field">
+                    <label>API Key (Encrypted with AES-256)</label>
+                    <input type="password" placeholder="@(string.IsNullOrEmpty(aiExistingKey) ? "Enter API key..." : "•••••••••••• (Leave blank to keep current key)")" @bind="aiApiKeyInput" />
+                    <span class="faint small">Your API key is encrypted at rest using Query Gate's master encryption key. Not required for local Ollama.</span>
+                </div>
+
+                <div class="field">
+                    <label>Temperature: @aiTemperature.ToString("F2")</label>
+                    <input type="range" min="0.0" max="1.0" step="0.05" @bind="aiTemperature" />
+                    <span class="faint small">Lower values (0.0 to 0.2) produce more deterministic, accurate SQL.</span>
+                </div>
+
+                @if (!string.IsNullOrEmpty(aiTestMessage))
+                {
+                    <div class="alert @(aiTestSuccess ? "ok" : "bad")">
+                        @(aiTestSuccess ? "Success: " : "Error: ") @aiTestMessage
+                    </div>
+                }
+
+                <div class="row-inline" style="gap:8px;margin-top:12px">
+                    <button class="btn btn-primary" type="button" disabled="@busy" @onclick="SaveAiSettings">
+                        Save AI Configuration
+                    </button>
+                    <button class="btn" type="button" disabled="@(busy || string.IsNullOrWhiteSpace(aiProvider))" @onclick="TestAiConnection">
+                        <Icon Name="activity" /> Test Connection
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+    else if (activeTab == "oidc")
+    {
+        <div class="card" style="max-width:850px">
+            <div class="card-head">
+                <div>
+                    <h3 style="margin:0">OpenID Connect (OIDC) Single Sign-On</h3>
+                    <span class="muted small">Authenticate users via Microsoft Entra ID, Okta, Keycloak, or Auth0.</span>
+                </div>
+            </div>
+            <div class="card-pad stack">
+                <div class="alert warn">
+                    <Icon Name="shield" Style="vertical-align:-2px;margin-right:6px" /><b>Strict Authorized-Only Mode:</b> Only users pre-created and activated by an administrator in <b>Admin -> Users</b> are permitted to sign in via OIDC. Uninvited external users are automatically blocked and audited.
+                </div>
+
+                <div class="field">
+                    <label class="check">
+                        <input type="checkbox" @bind="oidcEnabled" />
+                        <b>Enable OpenID Connect Single Sign-On</b>
+                    </label>
+                    <span class="faint small">When enabled, a "Sign in with SSO" button appears on the login screen.</span>
+                </div>
+
+                <div class="field">
+                    <label>SSO Display Name</label>
+                    <input type="text" placeholder="e.g. Corporate SSO or Okta" @bind="oidcDisplayName" />
+                    <span class="faint small">Shown on the sign-in button (e.g. "Sign in with Okta").</span>
+                </div>
+
+                <div class="field">
+                    <label>Authority / Issuer URL</label>
+                    <input type="text" placeholder="https://login.microsoftonline.com/{tenant-id}/v2.0 or https://auth.company.com/realms/main" @bind="oidcAuthority" />
+                    <span class="faint small">Base issuer URL. Query Gate discovers endpoints from {Authority}/.well-known/openid-configuration.</span>
+                </div>
+
+                <div class="field">
+                    <label>Client ID</label>
+                    <input type="text" placeholder="e.g. query-gate-client" @bind="oidcClientId" />
+                </div>
+
+                <div class="field">
+                    <label>Client Secret (Encrypted with AES-256)</label>
+                    <input type="password" placeholder="@(string.IsNullOrEmpty(oidcExistingSecret) ? "Enter client secret..." : "•••••••••••• (Leave blank to keep current secret)")" @bind="oidcClientSecretInput" />
+                </div>
+
+                <div class="field">
+                    <label>Scopes</label>
+                    <input type="text" placeholder="openid profile email" @bind="oidcScopes" />
+                </div>
+
+                @if (!string.IsNullOrEmpty(oidcTestMessage))
+                {
+                    <div class="alert @(oidcTestSuccess ? "ok" : "bad")">
+                        @(oidcTestSuccess ? "Success: " : "Error: ") @oidcTestMessage
+                    </div>
+                }
+
+                <div class="row-inline" style="gap:8px;margin-top:12px">
+                    <button class="btn btn-primary" type="button" disabled="@busy" @onclick="SaveOidcSettings">
+                        Save SSO Configuration
+                    </button>
+                    <button class="btn" type="button" disabled="@(busy || string.IsNullOrWhiteSpace(oidcAuthority))" @onclick="TestOidcDiscovery">
+                        <Icon Name="activity" /> Test OIDC Discovery
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
 }
 
 @if (editingRule is not null)
@@ -776,6 +928,8 @@ else
         await LoadSmtpConfig();
         await LoadWebhooks();
         await LoadMaskingConfig();
+        await LoadAiConfig();
+        await LoadOidcConfig();
         ready = true;
     }
 
@@ -1218,6 +1372,154 @@ else
         catch (Exception ex)
         {
             Say($"Failed to toggle rule: {ex.Message}", true);
+        }
+    }
+
+    // AI Configuration State & Methods
+    private bool aiEnabled;
+    private bool aiConfigured;
+    private string aiProvider = "";
+    private string aiEndpoint = "";
+    private string aiApiKeyInput = "";
+    private string aiExistingKey = "";
+    private string aiModel = "";
+    private double aiTemperature = 0.1;
+    private string? aiTestMessage;
+    private bool aiTestSuccess;
+
+    private async Task LoadAiConfig()
+    {
+        aiEnabled = await Cfg.GetBoolAsync(DbAccessManager.Services.Ai.AiAssistantService.SettingsKeyEnabled);
+        aiProvider = await Cfg.GetAsync(DbAccessManager.Services.Ai.AiAssistantService.SettingsKeyProvider);
+        aiEndpoint = await Cfg.GetAsync(DbAccessManager.Services.Ai.AiAssistantService.SettingsKeyEndpoint);
+        aiExistingKey = await AiService.GetDecryptedApiKeyAsync();
+        aiApiKeyInput = "";
+        aiModel = await Cfg.GetAsync(DbAccessManager.Services.Ai.AiAssistantService.SettingsKeyModel);
+        var tempStr = await Cfg.GetAsync(DbAccessManager.Services.Ai.AiAssistantService.SettingsKeyTemperature);
+        aiTemperature = double.TryParse(tempStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var t) ? t : 0.1;
+        aiConfigured = await AiService.IsConfiguredAsync();
+    }
+
+    private async Task SaveAiSettings()
+    {
+        busy = true;
+        try
+        {
+            var keyToSave = string.IsNullOrWhiteSpace(aiApiKeyInput) ? aiExistingKey : aiApiKeyInput;
+            await AiService.SaveAiConfigAsync(aiEnabled, aiProvider, aiEndpoint, keyToSave, aiModel, aiTemperature);
+            await AuditSvc.TryWriteAsync(Me, "Settings", "AiConfigured", "Success", $"Provider: {aiProvider}, Enabled: {aiEnabled}");
+            await LoadAiConfig();
+            Say("AI Assistant configuration saved.");
+        }
+        catch (Exception ex)
+        {
+            Say($"Failed to save AI configuration: {ex.Message}", true);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task TestAiConnection()
+    {
+        busy = true;
+        aiTestMessage = "Testing connection to " + aiProvider + "...";
+        aiTestSuccess = false;
+        StateHasChanged();
+
+        try
+        {
+            var keyToUse = string.IsNullOrWhiteSpace(aiApiKeyInput) ? aiExistingKey : aiApiKeyInput;
+            var (ok, msg) = await AiService.TestConfiguredConnectionAsync(aiProvider, aiEndpoint, keyToUse, aiModel);
+            aiTestSuccess = ok;
+            aiTestMessage = msg;
+        }
+        finally
+        {
+            busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private string GetAiEndpointPlaceholder() => aiProvider.ToLowerInvariant() switch
+    {
+        "ollama" => "http://localhost:11434/v1",
+        "gemini" => "https://generativelanguage.googleapis.com",
+        "anthropic" => "https://api.anthropic.com",
+        _ => "https://api.openai.com/v1"
+    };
+
+    private string GetAiModelPlaceholder() => aiProvider.ToLowerInvariant() switch
+    {
+        "ollama" => "llama3.2 or mistral",
+        "gemini" => "gemini-1.5-flash",
+        "anthropic" => "claude-3-5-sonnet-20241022",
+        _ => "gpt-4o-mini"
+    };
+
+    // OIDC Configuration State & Methods
+    private bool oidcEnabled;
+    private string oidcDisplayName = "Enterprise SSO";
+    private string oidcAuthority = "";
+    private string oidcClientId = "";
+    private string oidcClientSecretInput = "";
+    private string oidcExistingSecret = "";
+    private string oidcScopes = "openid profile email";
+    private string? oidcTestMessage;
+    private bool oidcTestSuccess;
+
+    private async Task LoadOidcConfig()
+    {
+        oidcEnabled = await Cfg.GetBoolAsync(DbAccessManager.Services.OidcService.SettingsKeyEnabled);
+        oidcDisplayName = await Cfg.GetAsync(DbAccessManager.Services.OidcService.SettingsKeyDisplayName);
+        if (string.IsNullOrWhiteSpace(oidcDisplayName)) oidcDisplayName = "Enterprise SSO";
+        oidcAuthority = await Cfg.GetAsync(DbAccessManager.Services.OidcService.SettingsKeyAuthority);
+        oidcClientId = await Cfg.GetAsync(DbAccessManager.Services.OidcService.SettingsKeyClientId);
+        oidcExistingSecret = await OidcSvc.GetDecryptedClientSecretAsync();
+        oidcClientSecretInput = "";
+        oidcScopes = await Cfg.GetAsync(DbAccessManager.Services.OidcService.SettingsKeyScopes);
+        if (string.IsNullOrWhiteSpace(oidcScopes)) oidcScopes = "openid profile email";
+    }
+
+    private async Task SaveOidcSettings()
+    {
+        busy = true;
+        try
+        {
+            var secretToSave = string.IsNullOrWhiteSpace(oidcClientSecretInput) ? oidcExistingSecret : oidcClientSecretInput;
+            await OidcSvc.SaveOidcConfigAsync(oidcEnabled, oidcDisplayName, oidcAuthority, oidcClientId, secretToSave, oidcScopes);
+            await AuditSvc.TryWriteAsync(Me, "Settings", "OidcConfigured", "Success", $"Authority: {oidcAuthority}, Enabled: {oidcEnabled}");
+            await LoadOidcConfig();
+            Say("OIDC Single Sign-On configuration saved.");
+        }
+        catch (Exception ex)
+        {
+            Say($"Failed to save SSO configuration: {ex.Message}", true);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task TestOidcDiscovery()
+    {
+        busy = true;
+        oidcTestMessage = "Discovering OIDC endpoints...";
+        oidcTestSuccess = false;
+        StateHasChanged();
+
+        try
+        {
+            var (ok, msg) = await OidcSvc.TestDiscoveryAsync(oidcAuthority);
+            oidcTestSuccess = ok;
+            oidcTestMessage = msg;
+        }
+        finally
+        {
+            busy = false;
+            StateHasChanged();
         }
     }
 }

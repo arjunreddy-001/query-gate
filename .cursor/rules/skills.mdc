@@ -16,6 +16,7 @@ When performing development or maintenance tasks in this codebase, reference the
 - **Blazor Pages & Navigation**: Refer to `.github/skills/blazor-page-conventions/SKILL.md` when creating or modifying Razor components, pages, menus, or first-render state.
 - **UI Design System**: Refer to `.github/skills/ui-design-system/SKILL.md` when modifying CSS styles, themes, sidebar layout, results grid, or editor behavior.
 - **Multi-Tenancy & Workspaces**: Refer to `.github/skills/multi-tenancy/SKILL.md` when modifying tenant resolution, workspaces (/t/{slug}), custom domains, user memberships, data isolation, or platform admin.
+- **AI, Visualizations & SSO**: Refer to `.github/skills/ai-and-visualizations/SKILL.md` when configuring or modifying the BYOAI query assistant, interactive ER diagrams, visual DAG execution plans, or enterprise OIDC single sign-on.
 
 ## Skill Management Convention
 
