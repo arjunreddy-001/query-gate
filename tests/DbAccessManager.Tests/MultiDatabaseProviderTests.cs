@@ -110,6 +110,25 @@ public class MultiDatabaseProviderTests
     [InlineData(DatabaseEngine.PostgreSql)]
     [InlineData(DatabaseEngine.MySql)]
     [InlineData(DatabaseEngine.MariaDb)]
+    public void Connection_string_templates_are_valid_and_non_empty(DatabaseEngine engine)
+    {
+        var templates = DatabaseEngineInfo.GetTemplates(engine);
+        Assert.NotEmpty(templates);
+        var provider = _factory.GetProvider(engine);
+        foreach (var tmpl in templates)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(tmpl.Name));
+            Assert.False(string.IsNullOrWhiteSpace(tmpl.ConnectionString));
+            var (valid, error) = provider.ValidateConnectionString(tmpl.ConnectionString);
+            Assert.True(valid, $"Template '{tmpl.Name}' for {engine} failed validation: {error}");
+        }
+    }
+
+    [Theory]
+    [InlineData(DatabaseEngine.SqlServer)]
+    [InlineData(DatabaseEngine.PostgreSql)]
+    [InlineData(DatabaseEngine.MySql)]
+    [InlineData(DatabaseEngine.MariaDb)]
     public void Translate_exception_handles_timeouts_and_errors(DatabaseEngine engine)
     {
         var provider = _factory.GetProvider(engine);

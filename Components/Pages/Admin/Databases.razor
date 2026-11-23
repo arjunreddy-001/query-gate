@@ -221,20 +221,52 @@ else
                     </select>
                 </div>
                 <div class="field"><label>Environment</label>
-                    <select @bind="env">@foreach (var e in environments) { <option value="@e.Name">@e.Name</option> }</select>
+                    <select @bind="env" disabled="@(environments.Count == 0)">
+                        @if (environments.Count == 0)
+                        {
+                            <option value="" disabled selected>No environments available</option>
+                        }
+                        else
+                        {
+                            @foreach (var e in environments) { <option value="@e.Name">@e.Name</option> }
+                        }
+                    </select>
                 </div>
             </div>
-            @if (environments.Count == 0) { <div class="alert warn">Add an environment under Permissions before registering a database.</div> }
+            @if (environments.Count == 0)
+            {
+                <div class="alert warn" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <Icon Name="alert-triangle" />
+                        <span>No environments available. Create an environment under Permissions before registering a database.</span>
+                    </div>
+                    <a href="admin/permissions" class="btn btn-sm" style="text-decoration:none;font-weight:600">
+                        <Icon Name="plus" /> Manage environments
+                    </a>
+                </div>
+            }
             <div class="field"><label>Name</label><input type="text" @bind="name" placeholder="e.g. OrdersDb" /></div>
             <div class="field"><label>Description</label><input type="text" @bind="description" placeholder="Optional description" /></div>
-            <div class="field"><label>Connection string @(editId is null ? "" : "(leave blank to keep current)")</label>
+            <div class="field">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+                    <label style="margin:0">Connection string @(editId is null ? "" : "(leave blank to keep current)")</label>
+                    <div style="display:inline-flex;align-items:center;gap:6px">
+                        <label class="small muted" style="margin:0;font-size:0.78rem">Template:</label>
+                        <select class="input-sm" style="font-size:0.78rem;padding:2px 8px;width:auto;border-radius:6px;height:26px" @onchange="OnTemplateSelected">
+                            <option value="" selected="@string.IsNullOrEmpty(selectedTemplateConn)">Select template...</option>
+                            @foreach (var t in DatabaseEngineInfo.GetTemplates(engine))
+                            {
+                                <option value="@t.ConnectionString" title="@t.Description">@t.Name</option>
+                            }
+                        </select>
+                    </div>
+                </div>
                 <textarea style="min-height:70px" autocomplete="off" placeholder="@DatabaseEngineInfo.GetSampleConnectionString(engine)" @bind="connection"></textarea>
                 <div class="faint small" style="margin-top:4px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px">
                     <span>Default port: <b>@DatabaseEngineInfo.GetDefaultPort(engine)</b></span>
-                    @if (string.IsNullOrWhiteSpace(connection))
-                    {
-                        <button type="button" class="btn-ghost btn btn-sm" style="padding:2px 8px;font-size:0.75rem" @onclick="FillSampleConnection">Use template</button>
-                    }
+                    <button type="button" class="btn-ghost btn btn-sm" style="padding:2px 8px;font-size:0.75rem" @onclick="FillSampleConnection" title="Fill with default template for @DatabaseEngineInfo.GetDisplayName(engine)">
+                        Use default template
+                    </button>
                 </div>
             </div>
             <div class="grid-2">
@@ -243,12 +275,37 @@ else
             </div>
 
             @if (editId is not null) { <label class="check" style="margin-top:12px"><input type="checkbox" @bind="active" />Enabled</label> }
-            @if (testMsg is not null) { <div class="alert @(testOk ? "success" : "error")" style="margin-top:10px">@testMsg</div> }
+            @if (testingConnection)
+            {
+                <div class="alert info" style="margin-top:10px;display:flex;align-items:center;gap:8px">
+                    <span class="spinner" style="width:14px;height:14px"></span>
+                    <span>Testing database connection...</span>
+                </div>
+            }
+            else if (testMsg is not null)
+            {
+                <div class="alert @(testOk ? "ok" : "bad")" style="margin-top:10px;display:flex;align-items:flex-start;gap:8px">
+                    <Icon Name="@(testOk ? "check" : "alert-triangle")" Style="width:16px;height:16px;flex-shrink:0;margin-top:2px" />
+                    <div>
+                        <b>@(testOk ? "Connection successful:" : "Connection failed:")</b>
+                        <span style="margin-left:4px">@testMsg</span>
+                    </div>
+                </div>
+            }
         </div>
         <div class="modal-foot">
             <button type="button" class="btn" @onclick="() => open = false">Cancel</button>
-            <button type="button" class="btn" disabled="@string.IsNullOrWhiteSpace(connection)" @onclick="Test">Test connection</button>
-            <button type="button" class="btn btn-primary" disabled="@(environments.Count == 0)" @onclick="Save">Save</button>
+            <button type="button" class="btn" disabled="@(testingConnection || string.IsNullOrWhiteSpace(connection))" @onclick="Test">
+                @if (testingConnection)
+                {
+                    <span class="spinner" style="width:12px;height:12px"></span> <span>Testing connection...</span>
+                }
+                else
+                {
+                    <span>Test connection</span>
+                }
+            </button>
+            <button type="button" class="btn btn-primary" disabled="@(environments.Count == 0 || testingConnection)" @onclick="Save">Save</button>
         </div>
     </div></div>
 }
@@ -693,6 +750,8 @@ else
     private string name = "", env = "Development", description = "", connection = "";
     private DatabaseEngine engine = DatabaseEngine.SqlServer;
     private string? testMsg;
+    private bool testingConnection;
+    private string selectedTemplateConn = "";
     private int timeout = 30, maxRows = 1000;
     private string includedObjects = "*", excludedObjects = "";
 
@@ -783,6 +842,8 @@ else
         maxRows = 1000;
         active = true;
         testMsg = null;
+        testingConnection = false;
+        selectedTemplateConn = "";
         includedObjects = "*";
         excludedObjects = "";
         open = true;
@@ -803,22 +864,59 @@ else
         includedObjects = string.IsNullOrWhiteSpace(d.IncludedObjects) ? "*" : d.IncludedObjects;
         excludedObjects = d.ExcludedObjects ?? "";
         testMsg = null;
+        testingConnection = false;
+        selectedTemplateConn = "";
         open = true;
     }
 
     private void OnEngineChanged()
     {
         testMsg = null;
+        selectedTemplateConn = "";
+        if (string.IsNullOrWhiteSpace(connection) || DatabaseEngineInfo.AllEngines.Any(eng => DatabaseEngineInfo.GetTemplates(eng).Any(t => t.ConnectionString == connection)))
+        {
+            connection = DatabaseEngineInfo.GetSampleConnectionString(engine);
+        }
+    }
+
+    private void OnTemplateSelected(ChangeEventArgs e)
+    {
+        var val = e.Value?.ToString();
+        if (!string.IsNullOrWhiteSpace(val))
+        {
+            connection = val;
+            selectedTemplateConn = val;
+            testMsg = null;
+        }
     }
 
     private void FillSampleConnection()
     {
         connection = DatabaseEngineInfo.GetSampleConnectionString(engine);
+        selectedTemplateConn = connection;
+        testMsg = null;
     }
 
     private async Task Test()
     {
-        (testOk, testMsg) = await DbAdmin.TestAsync(connection, engine);
+        testMsg = null;
+        testOk = false;
+        testingConnection = true;
+        StateHasChanged();
+        try
+        {
+            (testOk, testMsg) = await DbAdmin.TestAsync(connection, engine);
+        }
+        catch (Exception ex)
+        {
+            testOk = false;
+            testMsg = ex.Message;
+        }
+        finally
+        {
+            testingConnection = false;
+            StateHasChanged();
+        }
     }
 
     private async Task ProbeOneAsync(Guid id)

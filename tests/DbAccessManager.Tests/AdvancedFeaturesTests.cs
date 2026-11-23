@@ -4,6 +4,7 @@ using DbAccessManager.Services;
 using DbAccessManager.Services.Providers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Configuration;
 using Xunit;
 
 namespace DbAccessManager.Tests;
@@ -110,10 +111,15 @@ public class AdvancedFeaturesTests
         }
 
         // Create a metadata service mock/stub with test tables
-        var dummyCrypto = new CryptoService(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
+        var dummyConfig = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Encryption:Key"] = Convert.ToBase64String(new byte[32])
+            }).Build();
+        var dummyCrypto = new CryptoService(dummyConfig);
         var cache = new MemoryCache(new MemoryCacheOptions());
         var settings = new SettingsService(factory, cache);
-        var providers = new DatabaseProviderFactory(dummyCrypto, cache);
+        var providers = new DatabaseProviderFactory();
         var metaSvc = new MetadataService(factory, dummyCrypto, cache, settings, providers);
 
         var piiScanner = new PiiDiscoveryService(metaSvc, factory);
