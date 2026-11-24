@@ -316,6 +316,11 @@ else
             <button class="btn btn-hover-expand @(formMode ? "btn-primary" : "")" title="Form Mode: auto-generate form for parameterized queries" @onclick="ToggleFormMode"><Icon Name="edit" /><span class="btn-lbl">Form Mode@(DetectedParameters.Count > 0 ? $" ({DetectedParameters.Count})" : "")</span></button>
             <button class="icon-btn sm" title="@(layoutSplitHorizontal ? "Switch to stacked vertical layout" : "Switch to side-by-side horizontal layout")" @onclick="ToggleLayoutSplit"><Icon Name="@(layoutSplitHorizontal ? "rows" : "columns")" /></button>
             <button class="icon-btn sm" title="Keyboard Shortcuts (?)" @onclick="() => showShortcutsModal = true"><Icon Name="key" /></button>
+            <label class="chip-toggle @(impactCheck ? "active" : "")" title="Impact check: analyze affected records and confirm before executing INSERT, UPDATE, DELETE, or DROP commands">
+                <input type="checkbox" class="visually-hidden" @bind="impactCheck" />
+                <Icon Name="shield" />
+                <span>Impact check</span>
+            </label>
             <label class="chip-toggle chip-warn @(dryRun ? "active" : "")" title="Dry run: execute in transaction and roll back">
                 <input type="checkbox" class="visually-hidden" @bind="dryRun" />
                 <span>Dry run</span>
@@ -992,6 +997,120 @@ else
     </div>
 }
 
+@if (showImpactModal && impactAssessment is not null)
+{
+    var isProd = impactAssessment.IsProduction;
+    <div class="modal-back">
+        <div class="modal" style="max-width:580px;border-top:4px solid @(isProd || impactAssessment.Items.Any(i => i.Severity == "danger") ? "var(--bad)" : "var(--warn)")">
+            <div class="modal-head">
+                <div class="row-inline" style="gap:8px">
+                    <Icon Name="shield" />
+                    <h2 style="margin:0;font-size:1.1rem">Execution Impact Assessment</h2>
+                </div>
+                <span class="badge" style="font-size:0.75rem">@impactAssessment.DurationMs ms</span>
+            </div>
+            <div class="modal-body stack" style="gap:12px;max-height:60vh;overflow-y:auto">
+                @if (isProd)
+                {
+                    <div class="alert bad" style="margin:0">
+                        <Icon Name="alert" />
+                        <span><b>PRODUCTION ENVIRONMENT:</b> Executing against <b>@impactAssessment.DatabaseName</b>.</span>
+                    </div>
+                }
+
+                @if (impactAssessment.Error is not null)
+                {
+                    <div class="alert bad" style="margin:0">
+                        <Icon Name="alert" />
+                        <div>
+                            <b>Pre-check Error:</b> @impactAssessment.Error
+                        </div>
+                    </div>
+                }
+
+                @if (impactAssessment.Warnings.Count > 0)
+                {
+                    @foreach (var w in impactAssessment.Warnings)
+                    {
+                        <div class="alert warn" style="margin:0">
+                            <Icon Name="alert-triangle" />
+                            <span>@w</span>
+                        </div>
+                    }
+                }
+
+                <div class="stack" style="gap:8px">
+                    <div style="font-size:12px;font-weight:600;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.5px">
+                        Detected Impact on Database
+                    </div>
+                    @if (impactAssessment.Items.Count > 0)
+                    {
+                        @foreach (var item in impactAssessment.Items)
+                        {
+                            <div class="impact-item-row" style="display:flex;align-items:flex-start;gap:10px;padding:8px 10px;background:var(--bg-elev);border:1px solid var(--line);border-radius:6px">
+                                <span class="badge @(item.Severity == "danger" ? "badge-danger" : "badge-warn")" style="font-weight:700">@item.StatementType</span>
+                                <div style="flex:1;font-size:13px;line-height:1.4">
+                                    <div>@item.Summary</div>
+                                    @if (!string.IsNullOrEmpty(item.TargetObject))
+                                    {
+                                        <div style="font-size:11px;color:var(--text-faint);margin-top:2px">Target: <code>@item.TargetObject</code></div>
+                                    }
+                                </div>
+                                @if (item.RowsAffected.HasValue)
+                                {
+                                    <span class="chip" style="font-size:12px;font-weight:600">@item.RowsAffected.Value.ToString("N0") rows</span>
+                                }
+                                else if (item.ExistingRowCount.HasValue)
+                                {
+                                    <span class="chip" style="font-size:12px;font-weight:600">@item.ExistingRowCount.Value.ToString("N0") existing</span>
+                                }
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <div style="font-size:13px;color:var(--text-faint)">No specific row mutations detected.</div>
+                    }
+                </div>
+
+                @if (impactAssessment.TotalRowsAffected > 0)
+                {
+                    <div style="font-size:13px;padding:6px 10px;background:var(--bg);border-radius:6px;display:flex;justify-content:space-between">
+                        <span>Total Records Impacted:</span>
+                        <b>@impactAssessment.TotalRowsAffected.ToString("N0")</b>
+                    </div>
+                }
+
+                @if (isProd)
+                {
+                    <div class="stack" style="gap:4px;margin-top:6px">
+                        <label style="font-size:12px;font-weight:600">Type <code>@impactAssessment.DatabaseName</code> to confirm execution:</label>
+                        <input type="text"
+                               class="form-control"
+                               placeholder="Type '@impactAssessment.DatabaseName' to confirm"
+                               @bind="safetyConfirmInput"
+                               @bind:event="oninput"
+                               autofocus />
+                    </div>
+                }
+            </div>
+            <div class="modal-foot" style="justify-content:space-between">
+                <button class="btn btn-sm" @onclick="ExecuteDryRunFromImpact">
+                    <Icon Name="play" /> Run as Dry-Run Instead
+                </button>
+                <div class="row-inline" style="gap:6px">
+                    <button class="btn btn-sm" @onclick="() => showImpactModal = false">Cancel</button>
+                    <button class="btn btn-sm @(isProd || impactAssessment.Items.Any(i => i.Severity == "danger") ? "btn-danger" : "btn-primary")"
+                            disabled="@(isProd && !string.Equals(safetyConfirmInput.Trim(), impactAssessment.DatabaseName, StringComparison.OrdinalIgnoreCase))"
+                            @onclick="ExecuteConfirmedImpactRun">
+                        Confirm & Execute
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @if (showShortcutsModal)
 {
     <div class="modal-back" @onclick="() => showShortcutsModal = false">
@@ -1298,6 +1417,10 @@ else
     private bool saveIsShared;
     private bool formMode;
     private Dictionary<string, string> formParamValues = new(StringComparer.OrdinalIgnoreCase);
+    private bool impactCheck = true;
+    private bool showImpactModal;
+    private ImpactAssessmentResult? impactAssessment;
+    private string? pendingImpactSql;
     private bool showSafetyConfirmModal;
     private string safetyConfirmInput = "";
     private string targetSafetySql = "";
@@ -1868,6 +1991,45 @@ else
         var selection = await JS.InvokeAsync<string>("dbam.editorSelection", "main");
         var sql = string.IsNullOrWhiteSpace(selection) ? Current.Sql : selection;
         if (string.IsNullOrWhiteSpace(sql)) { Say("Nothing to run.", true); return; }
+
+        if (!confirmed && impactCheck && !dryRun)
+        {
+            var dbObj = databases.FirstOrDefault(d => d.Id == Current.DatabaseId);
+            var eng = dbObj?.Engine ?? DatabaseEngine.SqlServer;
+            var gateAnalysis = Gate.Analyze(sql, eng);
+            if (gateAnalysis.HasMutatingStatements)
+            {
+                running = true;
+                StateHasChanged();
+                try
+                {
+                    var impact = await Execution.AssessImpactAsync(Me, new ExecutionOptions
+                    {
+                        SqlText = sql,
+                        DatabaseId = Current.DatabaseId,
+                        TimeoutSeconds = timeout,
+                        Parameters = formMode ? formParamValues.ToDictionary(k => k.Key, k => (object?)k.Value, StringComparer.OrdinalIgnoreCase) : []
+                    });
+                    if (impact.HasImpact)
+                    {
+                        impactAssessment = impact;
+                        pendingImpactSql = sql;
+                        safetyConfirmInput = "";
+                        showImpactModal = true;
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Say($"Impact check error: {ex.Message}", true);
+                }
+                finally
+                {
+                    running = false;
+                    StateHasChanged();
+                }
+            }
+        }
 
         if (!confirmed && IsCurrentProd && !dryRun)
         {
@@ -2666,6 +2828,21 @@ else
     {
         showSafetyConfirmModal = false;
         await RunCore(true);
+    }
+
+    private async Task ExecuteConfirmedImpactRun()
+    {
+        showImpactModal = false;
+        safetyConfirmInput = "";
+        await RunCore(true);
+    }
+
+    private async Task ExecuteDryRunFromImpact()
+    {
+        showImpactModal = false;
+        safetyConfirmInput = "";
+        dryRun = true;
+        await RunCore(false);
     }
 
     // Visual Charting

@@ -6,7 +6,7 @@ public sealed class DatabaseProviderFactory
 {
     private readonly Dictionary<DatabaseEngine, IDatabaseProvider> _providers;
 
-    public DatabaseProviderFactory()
+    public DatabaseProviderFactory(IDictionary<DatabaseEngine, IDatabaseProvider>? customProviders = null)
     {
         _providers = new Dictionary<DatabaseEngine, IDatabaseProvider>
         {
@@ -15,6 +15,13 @@ public sealed class DatabaseProviderFactory
             [DatabaseEngine.MySql] = new MySqlDatabaseProvider(),
             [DatabaseEngine.MariaDb] = new MariaDbDatabaseProvider()
         };
+        if (customProviders != null)
+        {
+            foreach (var (engine, provider) in customProviders)
+            {
+                _providers[engine] = provider;
+            }
+        }
     }
 
     public IDatabaseProvider GetProvider(DatabaseEngine engine) =>

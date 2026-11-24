@@ -131,6 +131,7 @@ On narrow screens the Objects, Saved and History panel starts closed. Use the pa
    - **Workspace Layout Split**: toggle between stacked vertical (editor top, results bottom) and side-by-side horizontal (editor left, results right) split layouts with smooth draggable divider resizing.
    - **Team Query Library & Shared Snippets**: save queries with category tags, check **Share with Team & Workspace**, and switch between **My Queries** and **Team Library** in the Saved side panel.
    - **Production Safeguards**: targets in `Production` display an environment warning banner, an editor watermark overlay, and a confirmation modal for destructive write statements (UPDATE, DELETE, DROP, TRUNCATE, ALTER).
+   - **Pre-execution Impact Assessment**: enabled by default via the **Impact check** toolbar toggle. Before running INSERT, UPDATE, DELETE, or DROP commands, Query Gate analyzes the exact records that will be mutated or destroyed and displays an impact preview with statement details and affected row counts for confirmation. For maximum execution speed when confident, toggle **Impact check** off directly from the toolbar.
    - **Dry run**: executes inside a transaction and **rolls back**, so use it to test INSERT/UPDATE/DELETE safely.
    - **Timeout**: override per run (limited by the admin maximum).
    - **Tabs** are remembered in your browser. **Saved queries** (up to 50 per database) and **History** are in the side panel.

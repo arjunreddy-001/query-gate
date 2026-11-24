@@ -174,6 +174,29 @@ public sealed class ExecutionResult
     public bool Ok => Outcome == "Success";
 }
 
+public sealed class ImpactAssessmentResult
+{
+    public bool HasImpact { get; set; }
+    public long TotalRowsAffected { get; set; }
+    public List<ImpactItem> Items { get; set; } = [];
+    public List<string> Warnings { get; set; } = [];
+    public string? Error { get; set; }
+    public long DurationMs { get; set; }
+    public string DatabaseName { get; set; } = "";
+    public string Environment { get; set; } = "";
+    public bool IsProduction { get; set; }
+}
+
+public sealed class ImpactItem
+{
+    public string StatementType { get; set; } = "";
+    public string? TargetObject { get; set; }
+    public long? RowsAffected { get; set; }
+    public long? ExistingRowCount { get; set; }
+    public string Summary { get; set; } = "";
+    public string Severity { get; set; } = "warn";
+}
+
 public sealed class ExecutionOptions
 {
     public string SqlText { get; init; } = "";
@@ -731,6 +754,310 @@ public sealed class ExecutionService(
         await audit.TryWriteAsync(auditEntry);
 
         return result;
+    }
+
+    public async Task<ImpactAssessmentResult> AssessImpactAsync(Actor actor, ExecutionOptions options, CancellationToken ct = default)
+    {
+        var result = new ImpactAssessmentResult();
+        var stopwatch = Stopwatch.StartNew();
+
+        await using var db = await factory.CreateDbContextAsync(ct);
+        CachedDatabaseDescriptor? dbDesc = databaseCache != null ? await databaseCache.GetAsync(options.DatabaseId) : null;
+        ManagedDatabase? database = null;
+        if (dbDesc is not null)
+        {
+            database = new ManagedDatabase
+            {
+                Id = dbDesc.Id,
+                TenantId = dbDesc.TenantId,
+                Name = dbDesc.Name,
+                Environment = dbDesc.Environment,
+                Engine = dbDesc.Engine,
+                IsActive = dbDesc.IsActive,
+                DefaultTimeoutSeconds = dbDesc.DefaultTimeoutSeconds,
+                MaxRows = dbDesc.MaxRows,
+                IncludedObjects = dbDesc.IncludedObjects,
+                ExcludedObjects = dbDesc.ExcludedObjects,
+                EncryptedConnectionString = ""
+            };
+        }
+        else
+        {
+            database = await db.ManagedDatabases.AsNoTracking().FirstOrDefaultAsync(d => d.Id == options.DatabaseId, ct);
+        }
+
+        if (database is null)
+        {
+            result.Error = "Database not found.";
+            return result;
+        }
+
+        result.DatabaseName = database.Name;
+        result.Environment = database.Environment;
+        result.IsProduction = database.Environment.Equals("Production", StringComparison.OrdinalIgnoreCase) || database.Environment.StartsWith("Prod", StringComparison.OrdinalIgnoreCase);
+
+        using var scope = scopes.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<ApplicationUser>>();
+        CachedUserStatus? userStatus = null;
+        if (userStatusCache != null)
+        {
+            userStatus = await userStatusCache.GetOrLoadAsync(actor.UserId, users);
+        }
+        else
+        {
+            var u = await users.FindByIdAsync(actor.UserId);
+            userStatus = u is not null ? new CachedUserStatus(u.Id, u.Email ?? "", u.IsActive, u.ExpiresAt, u.TimeoutOverrideSeconds, u.SecurityStamp) : null;
+        }
+
+        if (userStatus is null || !userStatus.CanSignIn(DateTimeOffset.UtcNow))
+        {
+            result.Error = "Your account is inactive or expired.";
+            return result;
+        }
+
+        if (!database.IsActive)
+        {
+            result.Error = "This database is disabled.";
+            return result;
+        }
+
+        var analysis = gate.Analyze(options.SqlText, database.Engine);
+        if (analysis.HasHardDenial)
+        {
+            result.Error = string.Join(" ", analysis.ParseErrors.Concat(analysis.HardDenials));
+            return result;
+        }
+
+        if (!analysis.HasMutatingStatements)
+        {
+            result.DurationMs = stopwatch.ElapsedMilliseconds;
+            return result;
+        }
+
+        result.HasImpact = true;
+
+        if (analysis.UnfilteredWrites.Count > 0)
+        {
+            result.Warnings.Add("Unfiltered write detected: Statement has no WHERE clause and affects ALL rows in the table.");
+        }
+
+        var provider = providers.GetProvider(database.Engine);
+        string? connectionString = null;
+        try
+        {
+            connectionString = !string.IsNullOrEmpty(dbDesc?.DecryptedConnectionString)
+                ? dbDesc.DecryptedConnectionString
+                : crypto.Decrypt(string.IsNullOrEmpty(database.EncryptedConnectionString)
+                    ? (await db.ManagedDatabases.AsNoTracking().Where(d => d.Id == database.Id).Select(d => d.EncryptedConnectionString).FirstOrDefaultAsync(ct)) ?? ""
+                    : database.EncryptedConnectionString);
+        }
+        catch (Exception ex)
+        {
+            result.Error = $"Failed to decrypt connection string: {ex.Message}";
+            return result;
+        }
+
+        var timeout = options.TimeoutSeconds ?? database.DefaultTimeoutSeconds;
+
+        var ddlRequirements = analysis.ObjectRequirements
+            .Where(r => r.Permission is Perm.Drop or Perm.Truncate)
+            .ToList();
+
+        var ddlStatements = analysis.Statements
+            .Where(s => s.Type is "DROP" or "TRUNCATE" || s.Type.StartsWith("Drop", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (ddlRequirements.Count > 0 || ddlStatements.Count > 0)
+        {
+            await using var conn = provider.CreateConnection(connectionString);
+            try
+            {
+                await conn.OpenAsync(ct);
+                var processedObjects = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var req in ddlRequirements)
+                {
+                    processedObjects.Add(req.TargetDisplay);
+                    long? count = null;
+                    try
+                    {
+                        var quotedTarget = QuoteIdentifier(provider.Engine, req.Schema, req.ObjectName);
+                        await using var cmd = conn.CreateCommand();
+                        cmd.CommandText = $"SELECT COUNT(1) FROM {quotedTarget}";
+                        cmd.CommandTimeout = timeout;
+                        var val = await cmd.ExecuteScalarAsync(ct);
+                        if (val is not null && val != DBNull.Value)
+                        {
+                            count = Convert.ToInt64(val);
+                        }
+                    }
+                    catch
+                    {
+                        // Object might not be a table or doesn't exist
+                    }
+
+                    var isDrop = req.Permission == Perm.Drop;
+                    var actionName = isDrop ? "DROP" : "TRUNCATE";
+                    var countMsg = count.HasValue
+                        ? (count.Value == 0 ? "table is currently empty (0 rows)" : $"table currently contains {count.Value:N0} record(s)")
+                        : "schema object will be removed";
+
+                    result.Items.Add(new ImpactItem
+                    {
+                        StatementType = actionName,
+                        TargetObject = req.TargetDisplay,
+                        ExistingRowCount = count,
+                        Summary = $"Will {actionName.ToLowerInvariant()} '{req.TargetDisplay}': {countMsg}.",
+                        Severity = "danger"
+                    });
+                }
+
+                if (result.Items.Count == 0 && ddlStatements.Count > 0)
+                {
+                    foreach (var s in ddlStatements)
+                    {
+                        result.Items.Add(new ImpactItem
+                        {
+                            StatementType = s.Type,
+                            Summary = $"Will execute {s.Type} statement: {s.Preview}.",
+                            Severity = "danger"
+                        });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"Could not inspect DDL target metadata: {ex.Message}");
+            }
+        }
+
+        var hasDml = analysis.Requirements.Any(r => r is Perm.Insert or Perm.Update or Perm.Delete) ||
+                     analysis.Statements.Any(s => s.Type is "INSERT" or "UPDATE" or "DELETE" or "REPLACE");
+
+        var isMySqlDdl = (database.Engine is DatabaseEngine.MySql or DatabaseEngine.MariaDb) && ddlStatements.Count > 0;
+
+        if (hasDml && !isMySqlDdl)
+        {
+            await using var connection = provider.CreateConnection(connectionString);
+            await connection.OpenAsync(ct);
+            await using var tx = await connection.BeginTransactionAsync(ct);
+            try
+            {
+                long totalDmlRows = 0;
+                foreach (var batch in analysis.Batches)
+                {
+                    await using var cmd = connection.CreateCommand();
+                    cmd.Transaction = tx;
+                    cmd.CommandTimeout = timeout;
+
+                    var commandText = batch;
+                    if (options.Parameters.Count > 0)
+                    {
+                        foreach (var (paramName, paramVal) in options.Parameters)
+                        {
+                            var cleanName = paramName.TrimStart('@', ':').Trim('{', '}');
+                            var formattedName = provider.FormatParameterName(cleanName);
+                            commandText = Regex.Replace(commandText, @"\{\{\s*" + Regex.Escape(cleanName) + @"\s*\}\}", formattedName, RegexOptions.IgnoreCase);
+                            if (formattedName.StartsWith('@'))
+                            {
+                                commandText = Regex.Replace(commandText, @"(?<!:):" + Regex.Escape(cleanName) + @"\b", formattedName, RegexOptions.IgnoreCase);
+                            }
+
+                            var p = cmd.CreateParameter();
+                            p.ParameterName = formattedName;
+                            p.Value = paramVal ?? DBNull.Value;
+                            cmd.Parameters.Add(p);
+                        }
+                    }
+
+                    cmd.CommandText = commandText;
+                    await using var reader = await cmd.ExecuteReaderAsync(ct);
+                    while (await reader.NextResultAsync(ct)) { }
+                    if (reader.RecordsAffected > 0) totalDmlRows += reader.RecordsAffected;
+                }
+
+                await tx.RollbackAsync(CancellationToken.None);
+
+                result.TotalRowsAffected += totalDmlRows;
+
+                var dmlStatements = analysis.Statements.Where(s => s.Type is "UPDATE" or "DELETE" or "INSERT" or "REPLACE").ToList();
+                if (dmlStatements.Count > 0)
+                {
+                    foreach (var stmt in dmlStatements)
+                    {
+                        var targetObj = analysis.ObjectRequirements.FirstOrDefault(o => o.Permission == stmt.Permission)?.TargetDisplay;
+                        var isDelete = stmt.Type == "DELETE";
+                        var isUnfiltered = analysis.UnfilteredWrites.Any(u => u.Contains(stmt.Type, StringComparison.OrdinalIgnoreCase));
+                        result.Items.Add(new ImpactItem
+                        {
+                            StatementType = stmt.Type,
+                            TargetObject = targetObj,
+                            RowsAffected = totalDmlRows,
+                            Summary = $"Will {stmt.Type.ToLowerInvariant()} {totalDmlRows:N0} record(s)" + (!string.IsNullOrEmpty(targetObj) ? $" in '{targetObj}'" : "") + ".",
+                            Severity = isDelete || isUnfiltered ? "danger" : "warn"
+                        });
+                    }
+                }
+                else
+                {
+                    result.Items.Add(new ImpactItem
+                    {
+                        StatementType = "DML",
+                        RowsAffected = totalDmlRows,
+                        Summary = $"Will modify {totalDmlRows:N0} record(s).",
+                        Severity = "warn"
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                try { await tx.RollbackAsync(CancellationToken.None); } catch { }
+                result.Error = $"Pre-check caught database error: {ex.Message}";
+                result.Warnings.Add("Executing this statement will fail on the target database.");
+            }
+        }
+        else if (hasDml && isMySqlDdl)
+        {
+            result.Warnings.Add("Script contains mixed DDL and DML on MySQL/MariaDB; exact row count dry-run was skipped to prevent implicit commit.");
+        }
+
+        result.DurationMs = stopwatch.ElapsedMilliseconds;
+
+        var auditEntry = new AuditLog
+        {
+            UserId = actor.UserId,
+            UserName = actor.UserName,
+            ClientIp = actor.Ip,
+            UserAgent = AuditService.Truncate(actor.UserAgent, 512),
+            DatabaseId = database.Id,
+            DatabaseName = database.Name,
+            Category = "Query",
+            Action = "ImpactCheck",
+            SqlText = options.SqlText,
+            StatementTypes = AuditService.Truncate(string.Join(",", analysis.StatementTypes), 512),
+            Outcome = result.Error is null ? "Success" : "Error",
+            DurationMs = result.DurationMs,
+            RowsAffected = result.TotalRowsAffected,
+            Details = result.Error ?? (result.Items.Count > 0 ? string.Join("; ", result.Items.Select(i => i.Summary)) : null),
+            Executor = "User"
+        };
+        await audit.TryWriteAsync(auditEntry);
+
+        return result;
+    }
+
+    private static string QuoteIdentifier(DatabaseEngine engine, string? schema, string objectName)
+    {
+        var cleanObj = objectName.Trim('[', ']', '`', '"');
+        var cleanSchema = schema?.Trim('[', ']', '`', '"');
+
+        return engine switch
+        {
+            DatabaseEngine.SqlServer => string.IsNullOrEmpty(cleanSchema) ? $"[{cleanObj}]" : $"[{cleanSchema}].[{cleanObj}]",
+            DatabaseEngine.PostgreSql => string.IsNullOrEmpty(cleanSchema) ? $"\"{cleanObj}\"" : $"\"{cleanSchema}\".\"{cleanObj}\"",
+            DatabaseEngine.MySql or DatabaseEngine.MariaDb => string.IsNullOrEmpty(cleanSchema) ? $"`{cleanObj}`" : $"`{cleanSchema}`.`{cleanObj}`",
+            _ => string.IsNullOrEmpty(cleanSchema) ? cleanObj : $"{cleanSchema}.{cleanObj}"
+        };
     }
 
     private async Task RunAsync(ManagedDatabase database, string? decryptedConnectionString, ExecutionOptions options, GateAnalysis analysis, ExecutionResult result, int timeout, int maxRows, CancellationToken ct)

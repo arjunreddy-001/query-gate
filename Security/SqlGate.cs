@@ -31,6 +31,14 @@ public sealed class GateAnalysis
     public bool HasHardDenial => HardDenials.Count > 0 || ParseErrors.Count > 0;
     public IEnumerable<string> StatementTypes => Statements.Select(s => s.Type).Distinct();
     public bool IsReadOnly => !Requirements.Any(Perm.Writes.Contains);
+    public bool HasMutatingStatements =>
+        Requirements.Any(r => string.Equals(r, Perm.Insert, StringComparison.OrdinalIgnoreCase) ||
+                              string.Equals(r, Perm.Update, StringComparison.OrdinalIgnoreCase) ||
+                              string.Equals(r, Perm.Delete, StringComparison.OrdinalIgnoreCase) ||
+                              string.Equals(r, Perm.Drop, StringComparison.OrdinalIgnoreCase) ||
+                              string.Equals(r, Perm.Truncate, StringComparison.OrdinalIgnoreCase)) ||
+        Statements.Any(s => s.Type is "INSERT" or "UPDATE" or "DELETE" or "DROP" or "TRUNCATE" or "REPLACE" ||
+                            s.Type.StartsWith("Drop", StringComparison.OrdinalIgnoreCase));
 
     public void AddObjectRequirement(string permission, string? schema, string objectName)
     {
