@@ -8,91 +8,93 @@
 
 <PageTitle>Dashboard · Query Gate</PageTitle>
 
-<div class="hero">
-    <h1>@Greeting(), @firstName</h1>
-    <p>@(databases.Count == 0 ? "You don't have access to any databases yet." : $"You can work with {databases.Count} database{(databases.Count == 1 ? "" : "s")} right now.")</p>
-    <div class="hero-actions">
-        @if (databases.Count > 0)
-        {
-            <a class="btn btn-primary" href="query"><Icon Name="terminal" />Open query workspace</a>
-        }
-        else
-        {
-            <a class="btn btn-primary" href="access"><Icon Name="key" />Request database access</a>
-        }
-        @if (IsAdmin && pendingApprovals > 0)
-        {
-            <a class="btn" href="admin/approvals"><Icon Name="check" />Review @pendingApprovals pending approval@(pendingApprovals == 1 ? "" : "s")</a>
-        }
+<div class="dashboard-page">
+    <div class="hero">
+        <h1>@Greeting(), @firstName</h1>
+        <p>@(databases.Count == 0 ? "You don't have access to any databases yet." : $"You can work with {databases.Count} database{(databases.Count == 1 ? "" : "s")} right now.")</p>
+        <div class="hero-actions">
+            @if (databases.Count > 0)
+            {
+                <a class="btn btn-primary" href="query"><Icon Name="terminal" />Open query workspace</a>
+            }
+            else
+            {
+                <a class="btn btn-primary" href="access"><Icon Name="key" />Request database access</a>
+            }
+            @if (IsAdmin && pendingApprovals > 0)
+            {
+                <a class="btn" href="admin/approvals"><Icon Name="check" />Review @pendingApprovals pending approval@(pendingApprovals == 1 ? "" : "s")</a>
+            }
+        </div>
     </div>
-</div>
 
-@if (expiring > 0)
-{
-    <div class="alert warn" role="alert" style="margin-bottom:18px">
-        <Icon Name="clock" /> You have <strong>@expiring temporary grant@(expiring == 1 ? "" : "s")</strong> expiring within the next 24 hours.
+    @if (expiring > 0)
+    {
+        <div class="alert warn" role="alert" style="margin-bottom:0">
+            <Icon Name="clock" /> You have <strong>@expiring temporary grant@(expiring == 1 ? "" : "s")</strong> expiring within the next 24 hours.
+        </div>
+    }
+
+    <div class="grid g4 dashboard-stats">
+        <div class="card stat"><div class="label">Databases</div><div class="value">@databases.Count</div><div class="hint">available to you</div></div>
+        <div class="card stat"><div class="label">Temporary grants</div><div class="value">@activeGrants</div><div class="hint">@(expiring > 0 ? $"{expiring} expiring soon" : "active now")</div></div>
+        <div class="card stat"><div class="label">My open requests</div><div class="value">@openRequests</div><div class="hint">awaiting review</div></div>
+        <div class="card stat"><div class="label">@(IsAdmin ? "To approve" : "Unread")</div><div class="value">@(IsAdmin ? pendingApprovals : unread)</div><div class="hint">@(IsAdmin ? "pending requests" : "notifications")</div></div>
     </div>
-}
 
-<div class="grid g4" style="margin-bottom:22px">
-    <div class="card stat"><div class="label">Databases</div><div class="value">@databases.Count</div><div class="hint">available to you</div></div>
-    <div class="card stat"><div class="label">Temporary grants</div><div class="value">@activeGrants</div><div class="hint">@(expiring > 0 ? $"{expiring} expiring soon" : "active now")</div></div>
-    <div class="card stat"><div class="label">My open requests</div><div class="value">@openRequests</div><div class="hint">awaiting review</div></div>
-    <div class="card stat"><div class="label">@(IsAdmin ? "To approve" : "Unread")</div><div class="value">@(IsAdmin ? pendingApprovals : unread)</div><div class="hint">@(IsAdmin ? "pending requests" : "notifications")</div></div>
-</div>
-
-<div class="split">
-    <div class="card">
-        <div class="card-head"><h2>Your databases</h2><div class="actions"><a class="btn btn-sm" href="access"><Icon Name="key" />Request access</a></div></div>
-        @if (databases.Count == 0)
-        {
-            <div class="empty">
-                <Icon Name="inbox" />
-                <div>No databases yet.</div>
-                <a class="btn btn-primary btn-sm" href="access" style="margin-top:12px"><Icon Name="key" />Request access</a>
-            </div>
-        }
-        else
-        {
-            <div class="table-wrap">
-                <table>
-                    <thead><tr><th>Name</th><th>Engine</th><th>Environment</th><th>Description</th><th></th></tr></thead>
-                    <tbody>
-                        @foreach (var d in databases)
-                        {
-                            <tr>
-                                <td><b>@d.Name</b></td>
-                                <td><span class="badge @DatabaseEngineInfo.GetBadgeClass(d.Engine)">@DatabaseEngineInfo.GetDisplayName(d.Engine)</span></td>
-                                <td><span class="badge @EnvClass(d.Environment)">@d.Environment</span></td>
-                                <td class="muted">@d.Description</td>
-                                <td class="right"><a class="btn btn-sm btn-primary" href="query?db=@d.Id"><Icon Name="terminal" />Open</a></td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-        }
-    </div>
-    <div class="card">
-        <div class="card-head"><h2>Recent activity</h2></div>
-        @if (recent.Count == 0)
-        {
-            <div class="empty"><Icon Name="clock" /><div>Nothing run yet.</div></div>
-        }
-        else
-        {
-            <div class="stack card-pad">
-                @foreach (var h in recent)
-                {
-                    <div>
-                        <div class="row-inline"><span class="badge @OutcomeClass(h.Outcome)">@h.Outcome</span><span class="faint small">@Ago(h.ExecutedAt) · @h.DurationMs ms</span>
-                            <a class="btn btn-sm" href="query?db=@h.DatabaseId" style="margin-left:auto" title="Open in workspace"><Icon Name="terminal" /></a>
+    <div class="split dashboard-split">
+        <div class="card dashboard-card">
+            <div class="card-head"><h2>Your databases</h2><div class="actions"><a class="btn btn-sm" href="access"><Icon Name="key" />Request access</a></div></div>
+            @if (databases.Count == 0)
+            {
+                <div class="empty">
+                    <Icon Name="inbox" />
+                    <div>No databases yet.</div>
+                    <a class="btn btn-primary btn-sm" href="access" style="margin-top:12px"><Icon Name="key" />Request access</a>
+                </div>
+            }
+            else
+            {
+                <div class="table-wrap dashboard-table-wrap">
+                    <table>
+                        <thead><tr><th>Name</th><th>Engine</th><th>Environment</th><th>Description</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var d in databases)
+                            {
+                                <tr>
+                                    <td><b>@d.Name</b></td>
+                                    <td><span class="badge @DatabaseEngineInfo.GetBadgeClass(d.Engine)">@DatabaseEngineInfo.GetDisplayName(d.Engine)</span></td>
+                                    <td><span class="badge @EnvClass(d.Environment)">@d.Environment</span></td>
+                                    <td class="muted">@d.Description</td>
+                                    <td class="right"><a class="btn btn-sm btn-primary" href="query?db=@d.Id"><Icon Name="terminal" />Open</a></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+        <div class="card dashboard-card">
+            <div class="card-head"><h2>Recent activity</h2></div>
+            @if (recent.Count == 0)
+            {
+                <div class="empty"><Icon Name="clock" /><div>Nothing run yet.</div></div>
+            }
+            else
+            {
+                <div class="stack card-pad dashboard-activity-list">
+                    @foreach (var h in recent)
+                    {
+                        <div>
+                            <div class="row-inline"><span class="badge @OutcomeClass(h.Outcome)">@h.Outcome</span><span class="faint small">@Ago(h.ExecutedAt) · @h.DurationMs ms</span>
+                                <a class="btn btn-sm" href="query?db=@h.DatabaseId" style="margin-left:auto" title="Open in workspace"><Icon Name="terminal" /></a>
+                            </div>
+                            <div class="cell-sql" title="@h.SqlText">@TruncateSql(h.SqlText)</div>
                         </div>
-                        <div class="cell-sql" title="@h.SqlText">@TruncateSql(h.SqlText)</div>
-                    </div>
-                }
-            </div>
-        }
+                    }
+                </div>
+            }
+        </div>
     </div>
 </div>
 
@@ -119,7 +121,7 @@
                      + await db.ScriptRequests.CountAsync(r => r.RequesterId == UserId && r.Status == RequestStatus.Pending);
         if (IsAdmin)
             pendingApprovals = await db.AccessRequests.CountAsync(r => r.Status == RequestStatus.Pending) + await db.ScriptRequests.CountAsync(r => r.Status == RequestStatus.Pending);
-        recent = await db.QueryHistory.AsNoTracking().Where(h => h.UserId == UserId).OrderByDescending(h => h.Id).Take(6).ToListAsync();
+        recent = await db.QueryHistory.AsNoTracking().Where(h => h.UserId == UserId).OrderByDescending(h => h.Id).Take(30).ToListAsync();
     }
 
     private static string Greeting()

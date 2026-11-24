@@ -29,6 +29,46 @@
         toggles.forEach(function (btn) { btn.setAttribute('aria-expanded', 'false'); });
     }
 
+    function closeTopbarDropdowns() {
+        var openDropdowns = document.querySelectorAll('details.topbar-workspace[open], details.topbar-user[open]');
+        openDropdowns.forEach(function (d) {
+            d.removeAttribute('open');
+        });
+    }
+
+    function handleTopbarDropdownOutside(e) {
+        var openDropdowns = document.querySelectorAll('details.topbar-workspace[open], details.topbar-user[open]');
+        if (!openDropdowns.length) return;
+        var target = e.target;
+        if (target && target.nodeType === 3) target = target.parentNode;
+        openDropdowns.forEach(function (d) {
+            var summary = d.querySelector('summary');
+            if (summary && summary.contains(target)) {
+                return;
+            }
+            if (!d.contains(target) || (target.closest && target.closest('.topbar-menu a, .topbar-menu button'))) {
+                d.removeAttribute('open');
+            }
+        });
+    }
+
+    document.addEventListener('click', handleTopbarDropdownOutside, true);
+    document.addEventListener('pointerdown', function (e) {
+        var openDropdowns = document.querySelectorAll('details.topbar-workspace[open], details.topbar-user[open]');
+        if (!openDropdowns.length) return;
+        var target = e.target;
+        if (target && target.nodeType === 3) target = target.parentNode;
+        openDropdowns.forEach(function (d) {
+            var summary = d.querySelector('summary');
+            if (summary && summary.contains(target)) {
+                return;
+            }
+            if (!d.contains(target)) {
+                d.removeAttribute('open');
+            }
+        });
+    }, true);
+
     function toggleMobileNav() {
         var isOpen = root.getAttribute('data-mobile-nav') === 'open';
         var next = !isOpen;
@@ -81,11 +121,18 @@
     document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') {
             closeMobileNav();
+            closeTopbarDropdowns();
         }
     });
 
-    document.addEventListener('enhancedload', closeMobileNav);
-    window.addEventListener('popstate', closeMobileNav);
+    document.addEventListener('enhancedload', function () {
+        closeMobileNav();
+        closeTopbarDropdowns();
+    });
+    window.addEventListener('popstate', function () {
+        closeMobileNav();
+        closeTopbarDropdowns();
+    });
 
     // Detect OS for keyboard shortcuts (mac vs other)
     var isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);

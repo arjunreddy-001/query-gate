@@ -157,7 +157,7 @@ On narrow screens the Objects, Saved and History panel starts closed. Use the pa
 
 - **Effective permissions** per database, with their source (user rule / role rule).
 - Your active grants and expiry times.
-- **Request access**: choose database, permissions, duration (hours), justification and optional ticket number. Extending an expiring grant is done the same way (mark it as an extension).
+- **Request access**: click **Request access** to open the request dialog, then choose database, permissions, target scope, duration (hours), justification and optional ticket number. Extending an expiring grant is done the same way (mark it as an extension).
 
 ### Script requests (_Script requests_)
 

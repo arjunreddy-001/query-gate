@@ -318,11 +318,11 @@ else
                         <button class="btn btn-sm" @onclick="PromptResetMaskingToDefaults" title="Restore standard default rules">
                             <Icon Name="refresh" />Reset to Defaults
                         </button>
-                        <button class="btn btn-sm btn-primary" @onclick="OpenAddRuleModal">
-                            <Icon Name="plus" />Add Rule
-                        </button>
                         <button class="btn btn-sm" @onclick="TogglePiiScanner" title="Scan database schema for sensitive PII columns and recommend masking rules">
                             <Icon Name="search" />Scan Schema for PII
+                        </button>
+                        <button class="btn btn-sm btn-primary" @onclick="OpenAddRuleModal">
+                            <Icon Name="plus" />Add Rule
                         </button>
                     </div>
                 </div>

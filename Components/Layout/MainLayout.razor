@@ -77,18 +77,18 @@
 
             @if (!string.IsNullOrEmpty(currentTenantName))
             {
-                <details class="rel" style="margin-left:8px">
-                    <summary style="list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:8px;padding:6px 12px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:8px;font-size:13px;font-weight:600;color:var(--text-primary);user-select:none" title="Current workspace (click to switch)">
-                        <span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;background:rgba(99,102,241,0.15);color:#818cf8;border-radius:4px;font-size:11px"><Icon Name="@(currentTenantSlug == "platform" ? "grid" : "db")" /></span>
-                        <span>@currentTenantName</span>
+                <details class="rel topbar-workspace">
+                    <summary class="workspace-chip" title="Current workspace (click to switch)">
+                        <span class="workspace-icon"><Icon Name="@(currentTenantSlug == "platform" ? "grid" : "db")" /></span>
+                        <span class="workspace-name">@currentTenantName</span>
                         @if (userTenants.Count > 1 || isSuperAdmin)
                         {
-                            <span style="font-size:11px;opacity:0.7;margin-left:2px">&#9662;</span>
+                            <span class="workspace-caret">&#9662;</span>
                         }
                     </summary>
                     @if (userTenants.Count > 1 || isSuperAdmin)
                     {
-                        <div class="menu" style="min-width:240px;left:0">
+                        <div class="menu topbar-menu workspace-menu" style="min-width:240px;left:0">
                             <div style="padding:6px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">Switch Workspace</div>
                             @foreach (var t in userTenants)
                             {
@@ -134,12 +134,12 @@
                 <span class="theme-sun"><Icon Name="sun" /></span><span class="theme-moon"><Icon Name="moon" /></span>
             </button>
             <a class="icon-btn" href="notifications" title="Notifications"><Icon Name="bell" />@if (unread > 0) { <span class="dot">@unread</span> }</a>
-            <details class="rel">
+            <details class="rel topbar-user">
                 <summary class="user-chip" style="list-style:none">
                     <span class="avatar">@initials</span>
                     <span class="who"><b>@displayName</b><span>@roleText</span></span>
                 </summary>
-                <div class="menu">
+                <div class="menu topbar-menu">
                     @if (isSuperAdmin)
                     {
                         <a href="/platform/tenants" rel="external"><Icon Name="grid" />Platform admin</a>

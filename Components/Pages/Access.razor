@@ -10,6 +10,9 @@
 
 <div class="page-head">
     <div><h1>My access</h1><p>See what you can do on each database and request more when you need it.</p></div>
+    <div class="actions">
+        <button type="button" class="btn btn-primary" @onclick="OpenRequestDialog"><Icon Name="plus" />Request access</button>
+    </div>
 </div>
 
 <div class="card card-pad" style="margin-bottom:16px">
@@ -44,202 +47,229 @@
     </div>
 </div>
 
-<div class="split">
-    <div class="stack">
-        <div class="card">
-            <div class="card-head">
-                <h2>Effective permissions</h2>
-                <div class="actions">
-                    <select @bind="selectedDb" @bind:after="LoadEffective" style="min-width:220px">
+<div class="stack">
+    <div class="card">
+        <div class="card-head">
+            <h2>Effective permissions</h2>
+            <div class="actions">
+                <select @bind="selectedDb" @bind:after="LoadEffective" style="min-width:220px">
+                    @foreach (var d in allDatabases) { <option value="@d.Id">@d.Name (@d.Environment) · @DatabaseEngineInfo.GetDisplayName(d.Engine)</option> }
+                </select>
+            </div>
+        </div>
+        <div class="card-pad">
+            @if (effective.Count == 0) { <div class="muted">Select a database.</div> }
+            else
+            {
+                var allowedCount = effective.Count(p => p.IsAllowed);
+                var deniedCount = effective.Count(p => !p.IsAllowed);
+                var scopedCount = effective.Count(p => p.IsAllowed && IsScoped(p.AllowedScopes));
+
+                <div class="effective-stat-banner">
+                    <span class="effective-stat-item"><span class="badge ok">@allowedCount Granted</span></span>
+                    <span class="effective-stat-item"><span class="badge">@deniedCount Restricted</span></span>
+                    @if (scopedCount > 0)
+                    {
+                        <span class="effective-stat-item"><span class="badge brand">@scopedCount Object-Scoped</span></span>
+                    }
+                </div>
+
+                <div class="effective-grid">
+                    @foreach (var p in effective)
+                    {
+                        var isHigh = Perm.IsHighRisk(p.PermissionCode);
+                        var isScoped = p.IsAllowed && IsScoped(p.AllowedScopes);
+
+                        <div class="effective-tile @(p.IsAllowed ? (isHigh ? "allowed highrisk" : "allowed") : "denied")" title="@Perm.Description(p.PermissionCode)">
+                            <div class="effective-tile-header">
+                                <span class="badge @(p.IsAllowed ? (isHigh ? "warn" : "ok") : "")" style="font-size:10px;padding:1px 6px">
+                                    @(p.IsAllowed ? "Allowed" : "No access")
+                                </span>
+                                @if (p.IsAllowed)
+                                {
+                                    <span class="effective-source-pill" title="Granted via @p.Source">@p.Source</span>
+                                }
+                            </div>
+                            <div class="effective-perm-name">
+                                @if (isHigh)
+                                {
+                                    <span style="color:var(--warn-fg, #f97316);font-size:12px" title="@Perm.HighRiskReason(p.PermissionCode)">⚠</span>
+                                }
+                                <span>@Perm.Label(p.PermissionCode)</span>
+                            </div>
+                            @if (isScoped)
+                            {
+                                <button type="button" class="effective-scope-trigger" @onclick="() => viewingEffective = p" title="View allowed object scopes">
+                                    <Icon Name="shield" Style="width:11px;height:11px" />
+                                    <span>Scoped: @(p.AllowedScopes.Count == 1 ? p.AllowedScopes[0] : $"{p.AllowedScopes.Count} objects") ▾</span>
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-head"><h2>Time-limited grants</h2></div>
+        @if (grants.Count == 0) { <div class="empty">No temporary grants.</div> }
+        else
+        {
+            <div class="table-wrap"><table>
+                <thead><tr><th>Database</th><th>Permission</th><th>Scope</th><th>Expires</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var g in grants)
+                    {
+                        <tr>
+                            <td>
+                                @if (allDatabases.FirstOrDefault(d => d.Id == g.DatabaseId) is { } d)
+                                {
+                                    <div>
+                                        <b>@d.Name</b>
+                                        <div style="display:flex;gap:4px;margin-top:2px;flex-wrap:wrap">
+                                            <span class="badge @EnvClass(d.Environment)" style="font-size:10px;padding:0 5px">@d.Environment</span>
+                                            <span class="badge @DatabaseEngineInfo.GetBadgeClass(d.Engine)" style="font-size:10px;padding:0 5px">@DatabaseEngineInfo.GetDisplayName(d.Engine)</span>
+                                        </div>
+                                    </div>
+                                }
+                                else
+                                {
+                                    @DbName(g.DatabaseId)
+                                }
+                            </td>
+                            <td><span class="badge @(Perm.IsHighRisk(g.PermissionCode) ? "warn" : "brand")">@Perm.Label(g.PermissionCode)</span></td>
+                            <td>
+                                @if (g.IsObjectLevel && g.TargetScope != "*")
+                                {
+                                    <span class="badge" style="font-family:monospace;font-size:11px;background:var(--bg-card);border:1px solid var(--border-color)">@g.TargetScope</span>
+                                }
+                                else
+                                {
+                                    <span class="muted small">All objects</span>
+                                }
+                            </td>
+                            <td><span class="@(g.EndsAt < DateTimeOffset.UtcNow.AddHours(24) ? "badge warn" : "")">@Local(g.EndsAt)</span></td>
+                            <td class="right"><button class="btn btn-sm" @onclick="() => Extend(g)">Request extension</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table></div>
+        }
+    </div>
+
+    <div class="card">
+        <div class="card-head">
+            <h2>My requests</h2>
+            <div class="actions">
+                <button type="button" class="btn btn-sm btn-primary" @onclick="OpenRequestDialog"><Icon Name="plus" />Request access</button>
+            </div>
+        </div>
+        @if (requests.Count == 0)
+        {
+            <div class="empty">
+                <div>No requests yet.</div>
+                <button type="button" class="btn btn-sm btn-primary" style="margin-top:8px" @onclick="OpenRequestDialog"><Icon Name="plus" />Request access</button>
+            </div>
+        }
+        else
+        {
+            <div class="table-wrap"><table>
+                <thead><tr><th>When</th><th>Database</th><th>Permissions</th><th>Scope</th><th>Status</th><th>Reviewer note</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var r in requests)
+                    {
+                        <tr>
+                            <td class="nowrap">@Ago(r.CreatedAt)</td>
+                            <td>
+                                @if (allDatabases.FirstOrDefault(d => d.Id == r.DatabaseId) is { } rd)
+                                {
+                                    <div>
+                                        <b>@rd.Name</b>
+                                        <div style="display:flex;gap:4px;margin-top:2px;flex-wrap:wrap">
+                                            <span class="badge @EnvClass(rd.Environment)" style="font-size:10px;padding:0 5px">@rd.Environment</span>
+                                            <span class="badge @DatabaseEngineInfo.GetBadgeClass(rd.Engine)" style="font-size:10px;padding:0 5px">@DatabaseEngineInfo.GetDisplayName(rd.Engine)</span>
+                                        </div>
+                                    </div>
+                                }
+                                else
+                                {
+                                    @DbName(r.DatabaseId)
+                                }
+                            </td>
+                            <td class="wrap">@r.Permissions @(r.IsExtension ? "(extension)" : "")</td>
+                            <td>
+                                @if ((!string.IsNullOrEmpty(r.Schema) || !string.IsNullOrEmpty(r.ObjectName)) && r.TargetScope != "*")
+                                {
+                                    <span class="badge" style="font-family:monospace;font-size:11px;background:var(--bg-card);border:1px solid var(--border-color)">@r.TargetScope</span>
+                                }
+                                else
+                                {
+                                    <span class="muted small">All objects</span>
+                                }
+                            </td>
+                            <td><span class="badge @OutcomeClass(r.Status)">@r.Status</span></td>
+                            <td class="wrap muted">@r.Comments</td>
+                            <td class="right">@if (r.Status == RequestStatus.Pending) { <button class="btn btn-sm btn-ghost" @onclick="() => PromptCancel(r)">Cancel</button> }</td>
+                        </tr>
+                    }
+                </tbody>
+            </table></div>
+        }
+    </div>
+</div>
+
+@if (showRequestDialog)
+{
+    <div class="modal-back">
+        <div class="modal" style="max-width:640px">
+            <div class="modal-head">
+                <div style="display:flex;align-items:center;justify-content:space-between;width:100%">
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <Icon Name="key" Style="color:var(--brand)" />
+                        <h2 style="margin:0">Request access</h2>
+                    </div>
+                    <button type="button" class="icon-btn" @onclick="CloseRequestDialog" aria-label="Close dialog"><Icon Name="x" /></button>
+                </div>
+            </div>
+            <div class="modal-body stack" style="gap:14px">
+                <div class="field"><label>Database</label>
+                    <select @bind="reqDb">
                         @foreach (var d in allDatabases) { <option value="@d.Id">@d.Name (@d.Environment) · @DatabaseEngineInfo.GetDisplayName(d.Engine)</option> }
                     </select>
                 </div>
-            </div>
-            <div class="card-pad">
-                @if (effective.Count == 0) { <div class="muted">Select a database.</div> }
-                else
-                {
-                    var allowedCount = effective.Count(p => p.IsAllowed);
-                    var deniedCount = effective.Count(p => !p.IsAllowed);
-                    var scopedCount = effective.Count(p => p.IsAllowed && IsScoped(p.AllowedScopes));
-
-                    <div class="effective-stat-banner">
-                        <span class="effective-stat-item"><span class="badge ok">@allowedCount Granted</span></span>
-                        <span class="effective-stat-item"><span class="badge">@deniedCount Restricted</span></span>
-                        @if (scopedCount > 0)
+                <div class="field"><label>Permissions</label>
+                    <div class="check-grid" style="grid-template-columns:1fr 1fr">
+                        @foreach (var code in Perm.Catalog)
                         {
-                            <span class="effective-stat-item"><span class="badge brand">@scopedCount Object-Scoped</span></span>
-                        }
-                    </div>
-
-                    <div class="effective-grid">
-                        @foreach (var p in effective)
-                        {
-                            var isHigh = Perm.IsHighRisk(p.PermissionCode);
-                            var isScoped = p.IsAllowed && IsScoped(p.AllowedScopes);
-
-                            <div class="effective-tile @(p.IsAllowed ? (isHigh ? "allowed highrisk" : "allowed") : "denied")" title="@Perm.Description(p.PermissionCode)">
-                                <div class="effective-tile-header">
-                                    <span class="badge @(p.IsAllowed ? (isHigh ? "warn" : "ok") : "")" style="font-size:10px;padding:1px 6px">
-                                        @(p.IsAllowed ? "Allowed" : "No access")
-                                    </span>
-                                    @if (p.IsAllowed)
-                                    {
-                                        <span class="effective-source-pill" title="Granted via @p.Source">@p.Source</span>
-                                    }
-                                </div>
-                                <div class="effective-perm-name">
-                                    @if (isHigh)
-                                    {
-                                        <span style="color:var(--warn-fg, #f97316);font-size:12px" title="@Perm.HighRiskReason(p.PermissionCode)">⚠</span>
-                                    }
-                                    <span>@Perm.Label(p.PermissionCode)</span>
-                                </div>
-                                @if (isScoped)
+                            var isHigh = Perm.IsHighRisk(code);
+                            <label class="check" title="@Perm.Description(code)">
+                                <input type="checkbox" checked="@reqPerms.Contains(code)" @onchange="e => Toggle(code, (bool)e.Value!)" />
+                                <span>@Perm.Label(code)</span>
+                                @if (isHigh)
                                 {
-                                    <button type="button" class="effective-scope-trigger" @onclick="() => viewingEffective = p" title="View allowed object scopes">
-                                        <Icon Name="shield" Style="width:11px;height:11px" />
-                                        <span>Scoped: @(p.AllowedScopes.Count == 1 ? p.AllowedScopes[0] : $"{p.AllowedScopes.Count} objects") ▾</span>
-                                    </button>
+                                    <span class="badge warn" style="font-size:9px;padding:1px 4px;margin-left:auto">High Risk</span>
                                 }
-                            </div>
+                            </label>
                         }
                     </div>
-                }
+                </div>
+                <div class="field">
+                    <label>Target Scope <span class="muted small">(Exact object like dbo.Orders, wildcard like sales.*, or * for all)</span></label>
+                    <ObjectScopeSelector DatabaseId="@reqDb"
+                                         @bind-Value="reqScope" />
+                </div>
+                <div class="field"><label>Duration (hours)</label><input type="number" min="1" max="2160" @bind="hours" /></div>
+                <div class="field"><label>Ticket / reference (optional)</label><input type="text" @bind="ticket" maxlength="100" /></div>
+                <div class="field"><label>Justification</label><textarea @bind="justification" maxlength="1000" placeholder="Why do you need this access?"></textarea></div>
+            </div>
+            <div class="modal-foot">
+                <button type="button" class="btn" @onclick="CloseRequestDialog">Cancel</button>
+                <button type="button" class="btn btn-primary" @onclick="Submit"><Icon Name="plus" />Submit request</button>
             </div>
         </div>
-
-        <div class="card">
-            <div class="card-head"><h2>Time-limited grants</h2></div>
-            @if (grants.Count == 0) { <div class="empty">No temporary grants.</div> }
-            else
-            {
-                <div class="table-wrap"><table>
-                    <thead><tr><th>Database</th><th>Permission</th><th>Scope</th><th>Expires</th><th></th></tr></thead>
-                    <tbody>
-                        @foreach (var g in grants)
-                        {
-                            <tr>
-                                <td>
-                                    @if (allDatabases.FirstOrDefault(d => d.Id == g.DatabaseId) is { } d)
-                                    {
-                                        <div>
-                                            <b>@d.Name</b>
-                                            <div style="display:flex;gap:4px;margin-top:2px;flex-wrap:wrap">
-                                                <span class="badge @EnvClass(d.Environment)" style="font-size:10px;padding:0 5px">@d.Environment</span>
-                                                <span class="badge @DatabaseEngineInfo.GetBadgeClass(d.Engine)" style="font-size:10px;padding:0 5px">@DatabaseEngineInfo.GetDisplayName(d.Engine)</span>
-                                            </div>
-                                        </div>
-                                    }
-                                    else
-                                    {
-                                        @DbName(g.DatabaseId)
-                                    }
-                                </td>
-                                <td><span class="badge @(Perm.IsHighRisk(g.PermissionCode) ? "warn" : "brand")">@Perm.Label(g.PermissionCode)</span></td>
-                                <td>
-                                    @if (g.IsObjectLevel && g.TargetScope != "*")
-                                    {
-                                        <span class="badge" style="font-family:monospace;font-size:11px;background:var(--bg-card);border:1px solid var(--border-color)">@g.TargetScope</span>
-                                    }
-                                    else
-                                    {
-                                        <span class="muted small">All objects</span>
-                                    }
-                                </td>
-                                <td><span class="@(g.EndsAt < DateTimeOffset.UtcNow.AddHours(24) ? "badge warn" : "")">@Local(g.EndsAt)</span></td>
-                                <td class="right"><button class="btn btn-sm" @onclick="() => Extend(g)">Request extension</button></td>
-                            </tr>
-                        }
-                    </tbody>
-                </table></div>
-            }
-        </div>
-
-        <div class="card">
-            <div class="card-head"><h2>My requests</h2></div>
-            @if (requests.Count == 0) { <div class="empty">No requests yet.</div> }
-            else
-            {
-                <div class="table-wrap"><table>
-                    <thead><tr><th>When</th><th>Database</th><th>Permissions</th><th>Scope</th><th>Status</th><th>Reviewer note</th><th></th></tr></thead>
-                    <tbody>
-                        @foreach (var r in requests)
-                        {
-                            <tr>
-                                <td class="nowrap">@Ago(r.CreatedAt)</td>
-                                <td>
-                                    @if (allDatabases.FirstOrDefault(d => d.Id == r.DatabaseId) is { } rd)
-                                    {
-                                        <div>
-                                            <b>@rd.Name</b>
-                                            <div style="display:flex;gap:4px;margin-top:2px;flex-wrap:wrap">
-                                                <span class="badge @EnvClass(rd.Environment)" style="font-size:10px;padding:0 5px">@rd.Environment</span>
-                                                <span class="badge @DatabaseEngineInfo.GetBadgeClass(rd.Engine)" style="font-size:10px;padding:0 5px">@DatabaseEngineInfo.GetDisplayName(rd.Engine)</span>
-                                            </div>
-                                        </div>
-                                    }
-                                    else
-                                    {
-                                        @DbName(r.DatabaseId)
-                                    }
-                                </td>
-                                <td class="wrap">@r.Permissions @(r.IsExtension ? "(extension)" : "")</td>
-                                <td>
-                                    @if ((!string.IsNullOrEmpty(r.Schema) || !string.IsNullOrEmpty(r.ObjectName)) && r.TargetScope != "*")
-                                    {
-                                        <span class="badge" style="font-family:monospace;font-size:11px;background:var(--bg-card);border:1px solid var(--border-color)">@r.TargetScope</span>
-                                    }
-                                    else
-                                    {
-                                        <span class="muted small">All objects</span>
-                                    }
-                                </td>
-                                <td><span class="badge @OutcomeClass(r.Status)">@r.Status</span></td>
-                                <td class="wrap muted">@r.Comments</td>
-                                <td class="right">@if (r.Status == RequestStatus.Pending) { <button class="btn btn-sm btn-ghost" @onclick="() => PromptCancel(r)">Cancel</button> }</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table></div>
-            }
-        </div>
     </div>
-
-    <div class="card card-pad" style="align-self:start">
-        <h2>Request access</h2>
-        <div class="field"><label>Database</label>
-            <select @bind="reqDb">
-                @foreach (var d in allDatabases) { <option value="@d.Id">@d.Name (@d.Environment) · @DatabaseEngineInfo.GetDisplayName(d.Engine)</option> }
-            </select>
-        </div>
-        <div class="field"><label>Permissions</label>
-            <div class="check-grid" style="grid-template-columns:1fr 1fr">
-                @foreach (var code in Perm.Catalog)
-                {
-                    var isHigh = Perm.IsHighRisk(code);
-                    <label class="check" title="@Perm.Description(code)">
-                        <input type="checkbox" checked="@reqPerms.Contains(code)" @onchange="e => Toggle(code, (bool)e.Value!)" />
-                        <span>@Perm.Label(code)</span>
-                        @if (isHigh)
-                        {
-                            <span class="badge warn" style="font-size:9px;padding:1px 4px;margin-left:auto">High Risk</span>
-                        }
-                    </label>
-                }
-            </div>
-        </div>
-        <div class="field">
-            <label>Target Scope <span class="muted small">(Exact object like dbo.Orders, wildcard like sales.*, or * for all)</span></label>
-            <ObjectScopeSelector DatabaseId="@reqDb"
-                                 @bind-Value="reqScope" />
-        </div>
-        <div class="field"><label>Duration (hours)</label><input type="number" min="1" max="2160" @bind="hours" /></div>
-        <div class="field"><label>Ticket / reference (optional)</label><input type="text" @bind="ticket" maxlength="100" /></div>
-        <div class="field"><label>Justification</label><textarea @bind="justification" maxlength="1000" placeholder="Why do you need this access?"></textarea></div>
-        <button class="btn btn-primary" @onclick="Submit"><Icon Name="plus" />Submit request</button>
-    </div>
-</div>
+}
 
 <ConfirmDialog IsOpen="@(cancellingRequest is not null)"
                Title="Cancel Access Request?"
@@ -326,6 +356,25 @@
     private int hours = 24;
     private string reqScope = "*";
     private string? ticket, justification;
+    private bool showRequestDialog;
+
+    private void OpenRequestDialog()
+    {
+        if (selectedDb != Guid.Empty)
+        {
+            reqDb = selectedDb;
+        }
+        else if (reqDb == Guid.Empty && allDatabases.Count > 0)
+        {
+            reqDb = allDatabases[0].Id;
+        }
+        showRequestDialog = true;
+    }
+
+    private void CloseRequestDialog()
+    {
+        showRequestDialog = false;
+    }
 
     protected override async Task OnLoadAsync()
     {
@@ -356,7 +405,15 @@
     private async Task Submit()
     {
         Say(await Requests.SubmitAccessAsync(Me, reqDb, reqPerms.ToArray(), justification ?? "", ticket, hours, false, reqScope), "Request submitted. An administrator will review it.");
-        if (!FlashIsError) { reqPerms.Clear(); reqScope = "*"; justification = null; ticket = null; await Refresh(); }
+        if (!FlashIsError)
+        {
+            reqPerms.Clear();
+            reqScope = "*";
+            justification = null;
+            ticket = null;
+            showRequestDialog = false;
+            await Refresh();
+        }
     }
 
     private async Task Extend(PermissionGrant g)

@@ -7,115 +7,117 @@
 
 <PageTitle>Audit logs · Query Gate</PageTitle>
 
-<div class="page-head">
-    <div><h1>Audit logs</h1><p>Immutable record of queries, access and administration.</p></div>
-    <div class="actions">
-        <div class="export-dropdown">
-            <button class="btn btn-sm" type="button" disabled="@(rows.Count == 0)">
-                <Icon Name="download" />Export <span style="font-size:9px;margin-left:2px">▾</span>
-            </button>
-            <div class="export-dropdown-menu">
-                <button class="export-dropdown-item" type="button" @onclick="ExportCsv"><Icon Name="file" />CSV (.csv)</button>
-                <button class="export-dropdown-item" type="button" @onclick="ExportXlsx"><Icon Name="table" />Excel (.xlsx)</button>
-                <button class="export-dropdown-item" type="button" @onclick="ExportXlsb"><Icon Name="table" />Excel Binary (.xlsb)</button>
+<div class="audit-page">
+    <div class="page-head audit-page-head">
+        <div><h1>Audit logs</h1><p>Immutable record of queries, access and administration.</p></div>
+        <div class="actions">
+            <div class="export-dropdown">
+                <button class="btn btn-sm" type="button" disabled="@(rows.Count == 0)">
+                    <Icon Name="download" />Export <span style="font-size:9px;margin-left:2px">▾</span>
+                </button>
+                <div class="export-dropdown-menu">
+                    <button class="export-dropdown-item" type="button" @onclick="ExportCsv"><Icon Name="file" />CSV (.csv)</button>
+                    <button class="export-dropdown-item" type="button" @onclick="ExportXlsx"><Icon Name="table" />Excel (.xlsx)</button>
+                    <button class="export-dropdown-item" type="button" @onclick="ExportXlsb"><Icon Name="table" />Excel Binary (.xlsb)</button>
+                </div>
             </div>
         </div>
     </div>
-</div>
 
-<div class="toolbar audit-toolbar">
-    <div class="audit-key-filters">
-        <input type="search" aria-label="User" placeholder="User…" @bind="user" @bind:event="oninput" @onkeydown="OnFilterKeyDown" />
-        <select aria-label="Category" @bind="category"><option value="">All categories</option><option>Query</option><option>Auth</option><option>Request</option><option>User</option><option>Permission</option><option>Database</option><option>Settings</option><option>Export</option></select>
-        <select aria-label="Outcome" @bind="outcome"><option value="">All outcomes</option><option>Success</option><option>Failed</option><option>Denied</option><option>Cancelled</option><option>Timeout</option></select>
-        <input type="date" aria-label="From date" @bind="from" /><input type="date" aria-label="To date" @bind="to" />
+    <div class="toolbar audit-toolbar">
+        <div class="audit-key-filters">
+            <input type="search" aria-label="User" placeholder="User…" @bind="user" @bind:event="oninput" @onkeydown="OnFilterKeyDown" />
+            <select aria-label="Category" @bind="category"><option value="">All categories</option><option>Query</option><option>Auth</option><option>Request</option><option>User</option><option>Permission</option><option>Database</option><option>Settings</option><option>Export</option></select>
+            <select aria-label="Outcome" @bind="outcome"><option value="">All outcomes</option><option>Success</option><option>Failed</option><option>Denied</option><option>Cancelled</option><option>Timeout</option></select>
+            <input type="date" aria-label="From date" @bind="from" /><input type="date" aria-label="To date" @bind="to" />
+        </div>
+        <input class="grow" type="search" aria-label="Search SQL or details" placeholder="Search SQL / details…" @bind="text" @bind:event="oninput" @onkeydown="OnFilterKeyDown" />
+        <button class="btn btn-primary" @onclick="Load">Filter</button>
     </div>
-    <input class="grow" type="search" aria-label="Search SQL or details" placeholder="Search SQL / details…" @bind="text" @bind:event="oninput" @onkeydown="OnFilterKeyDown" />
-    <button class="btn btn-primary" @onclick="Load">Filter</button>
-</div>
 
-<div class="card">
-    @if (loading)
-    {
-        <div class="empty"><span class="spinner"></span><div>Loading audit logs…</div></div>
-    }
-    else
-    {
-        <div class="table-wrap audit-table-wrap">
-            <table class="audit-table">
-            <thead>
-                <tr>
-                    <th style="width:145px">Time</th>
-                    <th style="width:160px">User</th>
-                    <th style="width:90px">Category</th>
-                    <th style="width:110px">Action</th>
-                    <th style="width:170px">Database</th>
-                    <th style="width:85px">Outcome</th>
-                    <th class="num" style="width:65px">Rows</th>
-                    <th class="num" style="width:65px">ms</th>
-                    <th>Detail Preview</th>
-                </tr>
-            </thead>
-            <tbody>
-            @foreach (var a in rows)
-            {
-                <tr class="audit-row" @onclick="() => viewLog = a" title="Click to view complete audit details">
-                    <td class="nowrap font-mono" style="font-size:0.75rem">@Local(a.Timestamp)</td>
-                    <td class="audit-user-cell" title="@a.UserName">@a.UserName</td>
-                    <td><span class="badge" style="font-size:10px;padding:1px 6px">@a.Category</span></td>
-                    <td><b>@a.Action</b></td>
-                    <td class="audit-db-cell">
-                        @if (a.DatabaseId.HasValue && dbLookup.TryGetValue(a.DatabaseId.Value, out var managedDb))
-                        {
-                            <div class="audit-db-info">
-                                <span class="audit-db-name" title="@managedDb.Name"><b>@managedDb.Name</b></span>
-                                <div class="audit-db-badges">
-                                    <span class="badge @EnvClass(managedDb.Environment)" style="font-size:10px;padding:0 5px">@managedDb.Environment</span>
-                                    <span class="badge @DatabaseEngineInfo.GetBadgeClass(managedDb.Engine)" style="font-size:10px;padding:0 5px">@DatabaseEngineInfo.GetDisplayName(managedDb.Engine)</span>
+    <div class="card audit-card">
+        @if (loading)
+        {
+            <div class="empty"><span class="spinner"></span><div>Loading audit logs…</div></div>
+        }
+        else
+        {
+            <div class="table-wrap audit-table-wrap">
+                <table class="audit-table">
+                <thead>
+                    <tr>
+                        <th style="width:145px">Time</th>
+                        <th style="width:160px">User</th>
+                        <th style="width:90px">Category</th>
+                        <th style="width:110px">Action</th>
+                        <th style="width:170px">Database</th>
+                        <th style="width:85px">Outcome</th>
+                        <th class="num" style="width:65px">Rows</th>
+                        <th class="num" style="width:65px">ms</th>
+                        <th>Detail Preview</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var a in rows)
+                {
+                    <tr class="audit-row" @onclick="() => viewLog = a" title="Click to view complete audit details">
+                        <td class="nowrap font-mono" style="font-size:0.75rem">@Local(a.Timestamp)</td>
+                        <td class="audit-user-cell" title="@a.UserName">@a.UserName</td>
+                        <td><span class="badge" style="font-size:10px;padding:1px 6px">@a.Category</span></td>
+                        <td><b>@a.Action</b></td>
+                        <td class="audit-db-cell">
+                            @if (a.DatabaseId.HasValue && dbLookup.TryGetValue(a.DatabaseId.Value, out var managedDb))
+                            {
+                                <div class="audit-db-info">
+                                    <span class="audit-db-name" title="@managedDb.Name"><b>@managedDb.Name</b></span>
+                                    <div class="audit-db-badges">
+                                        <span class="badge @EnvClass(managedDb.Environment)" style="font-size:10px;padding:0 5px">@managedDb.Environment</span>
+                                        <span class="badge @DatabaseEngineInfo.GetBadgeClass(managedDb.Engine)" style="font-size:10px;padding:0 5px">@DatabaseEngineInfo.GetDisplayName(managedDb.Engine)</span>
+                                    </div>
                                 </div>
+                            }
+                            else if (!string.IsNullOrEmpty(a.DatabaseName))
+                            {
+                                <b>@a.DatabaseName</b>
+                            }
+                            else
+                            {
+                                <span class="muted">—</span>
+                            }
+                        </td>
+                        <td><span class="badge @OutcomeClass(a.Outcome)">@a.Outcome</span></td>
+                        <td class="num font-mono">@(a.RowsReturned ?? a.RowsAffected ?? 0)</td>
+                        <td class="num font-mono">@(a.DurationMs?.ToString() ?? "—")</td>
+                        <td class="audit-detail-cell">
+                            <div class="audit-cell-content">
+                                @if (!string.IsNullOrEmpty(a.SqlText))
+                                {
+                                    <div class="audit-snippet" title="@a.SqlText">
+                                        <Icon Name="terminal" Style="width:12px;height:12px;color:var(--brand);margin-right:3px" />
+                                        <code>@TruncateSnippet(a.SqlText, 70)</code>
+                                    </div>
+                                }
+                                @if (!string.IsNullOrEmpty(a.Details))
+                                {
+                                    <div class="audit-snippet audit-snippet-text" title="@a.Details">
+                                        <Icon Name="activity" Style="width:12px;height:12px;opacity:0.7;margin-right:3px" />
+                                        @TruncateSnippet(a.Details, 80)
+                                    </div>
+                                }
+                                <div class="audit-client-info">@a.ClientIp @(a.Executor is null ? "" : "· " + a.Executor)</div>
                             </div>
-                        }
-                        else if (!string.IsNullOrEmpty(a.DatabaseName))
-                        {
-                            <b>@a.DatabaseName</b>
-                        }
-                        else
-                        {
-                            <span class="muted">—</span>
-                        }
-                    </td>
-                    <td><span class="badge @OutcomeClass(a.Outcome)">@a.Outcome</span></td>
-                    <td class="num font-mono">@(a.RowsReturned ?? a.RowsAffected ?? 0)</td>
-                    <td class="num font-mono">@(a.DurationMs?.ToString() ?? "—")</td>
-                    <td class="audit-detail-cell">
-                        <div class="audit-cell-content">
-                            @if (!string.IsNullOrEmpty(a.SqlText))
-                            {
-                                <div class="audit-snippet" title="@a.SqlText">
-                                    <Icon Name="terminal" Style="width:12px;height:12px;color:var(--brand);margin-right:3px" />
-                                    <code>@TruncateSnippet(a.SqlText, 70)</code>
-                                </div>
-                            }
-                            @if (!string.IsNullOrEmpty(a.Details))
-                            {
-                                <div class="audit-snippet audit-snippet-text" title="@a.Details">
-                                    <Icon Name="activity" Style="width:12px;height:12px;opacity:0.7;margin-right:3px" />
-                                    @TruncateSnippet(a.Details, 80)
-                                </div>
-                            }
-                            <div class="audit-client-info">@a.ClientIp @(a.Executor is null ? "" : "· " + a.Executor)</div>
-                        </div>
-                        <button class="btn btn-sm btn-ghost audit-open-btn" type="button" title="View complete audit record in dialog" @onclick:stopPropagation @onclick="() => viewLog = a">
-                            <Icon Name="eye" />Details
-                        </button>
-                    </td>
-                </tr>
-            }
-            </tbody>
-        </table></div>
-    }
+                            <button class="btn btn-sm btn-ghost audit-open-btn" type="button" title="View complete audit record in dialog" @onclick:stopPropagation @onclick="() => viewLog = a">
+                                <Icon Name="eye" />Details
+                            </button>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table></div>
+        }
+    </div>
+    <p class="faint small audit-page-footer">Showing the latest @rows.Count matching entries (max 500).</p>
 </div>
-<p class="faint small">Showing the latest @rows.Count matching entries (max 500).</p>
 
 @if (viewLog is not null)
 {
