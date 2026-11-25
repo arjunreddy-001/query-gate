@@ -318,7 +318,10 @@
                             <span class="badge ok" style="font-size: 0.68rem; padding: 2px 7px;"><Icon Name="check" /> Connected</span>
                         </div>
                         <div class="preview-topbar-right">
-                            <span class="theme-sun" style="font-size: 0.85rem; color: var(--text-dim); display: flex;"><Icon Name="sun" /></span>
+                            <span style="font-size: 0.85rem; color: var(--text-dim); display: inline-flex;">
+                                <span class="theme-sun"><Icon Name="sun" /></span>
+                                <span class="theme-moon"><Icon Name="moon" /></span>
+                            </span>
                             <span style="position: relative; display: inline-flex; color: var(--text-dim); font-size: 0.85rem;">
                                 <Icon Name="bell" />
                                 <span class="preview-nav-badge" style="position: absolute; top: -5px; right: -5px; font-size: 8px; padding: 1px 4px;">2</span>
@@ -536,7 +539,7 @@
                                                         <td>ORD-9820</td>
                                                         <td>Vanguard Systems</td>
                                                         <td>2026-11-17</td>
-                                                        <td><span style="color: #0284c7; font-weight: 700;">Processing</span></td>
+                                                        <td><span style="color: var(--info-ink); font-weight: 700;">Processing</span></td>
                                                         <td>$1,290.00</td>
                                                     </tr>
                                                     <tr>
@@ -804,13 +807,13 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr style="border-bottom: 1px solid var(--line-subtle, var(--line));">
+                                <tr style="border-bottom: 1px solid var(--line);">
                                     <td style="padding: 6px; font-weight: 600;">Developer</td>
                                     <td style="padding: 6px; color: var(--ok);"><Icon Name="check" /> Allowed</td>
                                     <td style="padding: 6px; color: var(--warn);"><Icon Name="clock" /> Approval req</td>
                                     <td style="padding: 6px;"><span class="mask-tag">Enforced</span></td>
                                 </tr>
-                                <tr style="border-bottom: 1px solid var(--line-subtle, var(--line));">
+                                <tr style="border-bottom: 1px solid var(--line);">
                                     <td style="padding: 6px; font-weight: 600;">Data Analyst</td>
                                     <td style="padding: 6px; color: var(--ok);"><Icon Name="check" /> Allowed</td>
                                     <td style="padding: 6px; color: var(--bad);"><Icon Name="x" /> Denied</td>

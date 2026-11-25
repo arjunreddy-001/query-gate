@@ -14,7 +14,7 @@
 
 <div class="auth-wrap" style="max-width:560px;margin:40px auto;padding:24px">
     <div style="text-align:center;margin-bottom:32px">
-        <span class="brand-mark" style="display:inline-flex;width:48px;height:48px;align-items:center;justify-content:center;background:rgba(99,102,241,0.15);color:#818cf8;border-radius:12px;font-size:24px;margin-bottom:12px">
+        <span class="brand-mark" style="display:inline-flex;width:48px;height:48px;align-items:center;justify-content:center;background:var(--brand-soft);color:var(--brand-ink);border-radius:12px;font-size:24px;margin-bottom:12px">
             <Icon Name="db" />
         </span>
         <h1 style="font-size:26px;font-weight:700;margin:0 0 8px 0">Select a Workspace</h1>
@@ -42,17 +42,17 @@
         <div style="display:flex;flex-direction:column;gap:12px">
             @foreach (var ws in workspaces)
             {
-                <div class="card" style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border:1px solid var(--border-color);border-radius:10px">
-                    <div style="display:flex;align-items:center;gap:14px">
-                        <div style="display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:8px;background:rgba(99,102,241,0.12);color:#818cf8;font-size:18px">
+                <div class="card tenant-ws-card">
+                    <div style="display:flex;align-items:center;gap:14px;min-width:0;flex:1 1 240px">
+                        <div style="display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;flex-shrink:0;border-radius:8px;background:var(--brand-soft);color:var(--brand-ink);font-size:18px">
                             <Icon Name="db" />
                         </div>
-                        <div>
-                            <div style="display:flex;align-items:center;gap:8px">
+                        <div style="min-width:0">
+                            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                                 <span style="font-size:16px;font-weight:600">@ws.Name</span>
                                 @if (ws.Slug == defaultWorkspaceSlug)
                                 {
-                                    <span class="badge" style="font-size:11px;padding:2px 8px;border-radius:12px;background:rgba(16,185,129,0.15);color:#10b981;font-weight:600">
+                                    <span class="badge ok" style="font-size:11px;padding:2px 8px;border-radius:12px;font-weight:600">
                                         &#10003; Default
                                     </span>
                                 }
@@ -60,7 +60,7 @@
                             <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Path: <code>/t/@ws.Slug</code> &bull; Role: <b>@ws.Role</b></div>
                         </div>
                     </div>
-                    <div style="display:inline-flex;align-items:center;gap:8px">
+                    <div class="tenant-ws-actions">
                         @if (ws.Slug != defaultWorkspaceSlug)
                         {
                             <button type="button" class="btn btn-sm btn-secondary" @onclick="() => SetAsDefaultAsync(ws.Slug, ws.Name)" title="Set as your default workspace on sign-in">
@@ -75,9 +75,9 @@
             @if (isSuperAdmin)
             {
                 <div style="margin-top:12px;border-top:1px solid var(--border-color);padding-top:16px">
-                    <a href="/platform/tenants" rel="external" class="card" style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;text-decoration:none;color:inherit;border:1px dashed rgba(99,102,241,0.5);border-radius:10px;background:rgba(99,102,241,0.04)">
+                    <a href="/platform/tenants" rel="external" class="card" style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;text-decoration:none;color:inherit;border:1px dashed var(--brand);border-radius:10px;background:color-mix(in srgb, var(--brand-soft) 35%, var(--bg-elev))">
                         <div style="display:flex;align-items:center;gap:14px">
-                            <div style="display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:8px;background:rgba(99,102,241,0.2);color:#818cf8;font-size:18px">
+                            <div style="display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:8px;background:var(--brand-soft);color:var(--brand-ink);font-size:18px">
                                 <Icon Name="grid" />
                             </div>
                             <div>

@@ -37,7 +37,7 @@
                     <div class="perm-popover-desc">@Perm.Description(code)</div>
                     @if (isHighRisk)
                     {
-                        <div class="highrisk-warning-note" style="margin-top:6px;font-size:11px;color:var(--warn-fg, #f97316);line-height:1.4">
+                        <div class="highrisk-warning-note" style="margin-top:6px;font-size:11px;color:var(--warn-ink);line-height:1.4">
                             ⚠ @Perm.HighRiskReason(code)
                         </div>
                     }
@@ -52,7 +52,7 @@
         <div class="card-head">
             <h2>Effective permissions</h2>
             <div class="actions">
-                <select @bind="selectedDb" @bind:after="LoadEffective" style="min-width:220px">
+                <select @bind="selectedDb" @bind:after="LoadEffective" style="min-width:min(220px, 100%);max-width:100%">
                     @foreach (var d in allDatabases) { <option value="@d.Id">@d.Name (@d.Environment) · @DatabaseEngineInfo.GetDisplayName(d.Engine)</option> }
                 </select>
             </div>
@@ -93,7 +93,7 @@
                             <div class="effective-perm-name">
                                 @if (isHigh)
                                 {
-                                    <span style="color:var(--warn-fg, #f97316);font-size:12px" title="@Perm.HighRiskReason(p.PermissionCode)">⚠</span>
+                                    <span style="color:var(--warn-ink);font-size:12px" title="@Perm.HighRiskReason(p.PermissionCode)">⚠</span>
                                 }
                                 <span>@Perm.Label(p.PermissionCode)</span>
                             </div>
@@ -239,7 +239,7 @@
                     </select>
                 </div>
                 <div class="field"><label>Permissions</label>
-                    <div class="check-grid" style="grid-template-columns:1fr 1fr">
+                    <div class="check-grid check-grid-2">
                         @foreach (var code in Perm.Catalog)
                         {
                             var isHigh = Perm.IsHighRisk(code);

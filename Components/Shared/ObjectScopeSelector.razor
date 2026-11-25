@@ -9,30 +9,30 @@
         <div class="scope-chips-bar" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">
             @foreach (var s in SelectedScopes)
             {
-                <span class="badge" style="display:inline-flex;align-items:center;gap:6px;font-family:monospace;padding:3px 8px;font-size:12px;background:@(IsExclusion ? "rgba(239,68,68,0.08)" : "var(--bg-card)");border:1px solid @(IsExclusion ? "rgba(239,68,68,0.35)" : "var(--border-color)");border-radius:6px;color:@(IsExclusion ? "#ef4444" : "inherit")">
+                <span class="badge" style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);padding:3px 8px;font-size:12px;background:@(IsExclusion ? "var(--bad-soft)" : "var(--bg-card)");border:1px solid @(IsExclusion ? "color-mix(in srgb, var(--bad) 35%, transparent)" : "var(--border-color)");border-radius:6px;color:@(IsExclusion ? "var(--bad-ink)" : "inherit")">
                     @if (s == "*")
                     {
-                        <Icon Name="db" Style="@(IsExclusion ? "width:12px;height:12px;color:#ef4444" : "width:12px;height:12px;color:var(--brand)")" />
+                        <Icon Name="db" Style="@(IsExclusion ? "width:12px;height:12px;color:var(--bad-ink)" : "width:12px;height:12px;color:var(--brand-ink)")" />
                         <span>* (All Objects)</span>
                     }
                     else if (s.EndsWith(".*"))
                     {
-                        <Icon Name="grid" Style="@(IsExclusion ? "width:12px;height:12px;color:#ef4444" : "width:12px;height:12px;color:var(--brand)")" />
+                        <Icon Name="grid" Style="@(IsExclusion ? "width:12px;height:12px;color:var(--bad-ink)" : "width:12px;height:12px;color:var(--brand-ink)")" />
                         <span>@s</span>
                     }
                     else
                     {
-                        <Icon Name="table" Style="@(IsExclusion ? "width:12px;height:12px;color:#ef4444" : "width:12px;height:12px;color:var(--text-muted)")" />
+                        <Icon Name="table" Style="@(IsExclusion ? "width:12px;height:12px;color:var(--bad-ink)" : "width:12px;height:12px;color:var(--text-muted)")" />
                         <span>@s</span>
                     }
                     <button type="button"
-                            style="background:none;border:none;padding:0;cursor:pointer;color:@(IsExclusion ? "#ef4444" : "var(--text-muted)");font-size:14px;line-height:1;display:inline-flex;align-items:center"
+                            style="background:none;border:none;padding:0;cursor:pointer;color:@(IsExclusion ? "var(--bad-ink)" : "var(--text-muted)");font-size:14px;line-height:1;display:inline-flex;align-items:center"
                             @onclick="() => RemoveScope(s)"
                             @onclick:stopPropagation="true"
                             title="Remove @s">×</button>
                 </span>
             }
-            <button type="button" class="btn btn-sm btn-ghost" style="padding:1px 8px;font-size:11px;color:@(IsExclusion ? "#ef4444" : "inherit")" @onclick="ClearAll">
+            <button type="button" class="btn btn-sm btn-ghost" style="padding:1px 8px;font-size:11px;color:@(IsExclusion ? "var(--bad-ink)" : "inherit")" @onclick="ClearAll">
                 @(IsExclusion ? "Remove all exclusions" : "Clear all")
             </button>
         </div>
@@ -67,7 +67,7 @@
     @if (isOpen && !Disabled && DatabaseId != Guid.Empty)
     {
         <div class="combobox-backdrop" @onclick="CloseDropdown"></div>
-        <div class="combobox-menu" @ref="menuRef" style="max-height:250px;min-width:320px;z-index:1100">
+        <div class="combobox-menu" @ref="menuRef" style="max-height:250px;min-width:min(320px, 100%);z-index:1100">
             @if (loading)
             {
                 <div class="combobox-empty" style="padding:16px"><span class="spinner"></span> Loading database objects…</div>
@@ -471,7 +471,7 @@
 
     private static string GetTypeBadgeClass(string type) => type?.ToLowerInvariant() switch
     {
-        "view" => "badge-info",
+        "view" => "info",
         "procedure" => "warn",
         "function" => "brand",
         _ => "ok"

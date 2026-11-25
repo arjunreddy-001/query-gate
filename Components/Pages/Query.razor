@@ -26,6 +26,10 @@
 else
 {
 <div id="query-ws" class="ws @(sideOpen is null ? "side-auto" : sideOpen.Value ? "side-open" : "side-hidden")">
+    @if (sideOpen == true)
+    {
+        <button type="button" class="ws-side-backdrop" aria-label="Close workspace panel" @onclick="ToggleSide"></button>
+    }
     <aside id="workspace-panel" class="card ws-side">
         <div class="tabs" style="margin:0;padding:0 8px">
             <button class="tab @(side == "explorer" ? "active" : "")" @onclick='() => side = "explorer"'>Objects</button>
@@ -65,9 +69,9 @@ else
                             var schemaKey = "schema:" + g.Key;
                             var isSchemaExpanded = expanded.Contains(schemaKey);
                             <div class="tree-item" style="font-weight:700;background:var(--bg-sunken)" @onclick="() => Toggle(schemaKey)">
-                                <span class="tree-chevron" style="display:inline-block;width:12px;font-size:10px;color:var(--text-faint);cursor:pointer">
-                                    @(isSchemaExpanded ? "▾" : "▸")
-                                </span>
+                                <button class="tree-chevron-btn" @onclick:stopPropagation @onclick="() => Toggle(schemaKey)" title="Toggle schema">
+                                    <Icon Name="@(isSchemaExpanded ? "chevron-down" : "chevron-right")" />
+                                </button>
                                 <Icon Name="folder" />
                                 <span>@g.Key</span>
                                 <span class="faint small" style="margin-left:auto;font-size:10px">@g.Count()</span>
@@ -85,12 +89,12 @@ else
                                          @oncontextmenu="e => OpenObjectContextMenu(e, o)"
                                          @oncontextmenu:preventDefault
                                          title="Click: SELECT TOP 100 · Right-click: Menu · Double-click: Columns">
-                                        <span class="tree-chevron" style="display:inline-block;width:12px;font-size:10px;color:var(--text-faint);cursor:pointer" @onclick:stopPropagation @onclick="() => Toggle(key)" title="Toggle columns">
-                                            @(isExpanded ? "▾" : "▸")
-                                        </span>
+                                        <button class="tree-chevron-btn" @onclick:stopPropagation @onclick="() => Toggle(key)" title="Toggle columns">
+                                            <Icon Name="@(isExpanded ? "chevron-down" : "chevron-right")" />
+                                        </button>
                                         <Icon Name="@GetObjectIcon(o.Type)" />
                                         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="@key">@o.Name</span>
-                                        <span class="faint small" style="margin-left:auto;font-size:11px">@o.Type</span>
+                                        <button type="button" class="icon-btn sm tree-touch-menu-btn" title="Object actions" aria-label="Object actions for @key" @onclick:stopPropagation @onclick="e => OpenObjectContextMenu(e, o)"><Icon Name="more-horizontal" /></button>
                                     </div>
                                     @if (isExpanded)
                                     {
@@ -118,12 +122,12 @@ else
                                  @oncontextmenu="e => OpenObjectContextMenu(e, o)"
                                  @oncontextmenu:preventDefault
                                  title="Click: SELECT TOP 100 · Right-click: Menu · Double-click: Columns">
-                                <span class="tree-chevron" style="display:inline-block;width:12px;font-size:10px;color:var(--text-faint);cursor:pointer" @onclick:stopPropagation @onclick="() => Toggle(key)" title="Toggle columns">
-                                    @(isExpanded ? "▾" : "▸")
-                                </span>
+                                <button class="tree-chevron-btn" @onclick:stopPropagation @onclick="() => Toggle(key)" title="Toggle columns">
+                                    <Icon Name="@(isExpanded ? "chevron-down" : "chevron-right")" />
+                                </button>
                                 <Icon Name="@GetObjectIcon(o.Type)" />
                                 <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="@key">@key</span>
-                                <span class="faint small" style="margin-left:auto;font-size:11px">@o.Type</span>
+                                <button type="button" class="icon-btn sm tree-touch-menu-btn" title="Object actions" aria-label="Object actions for @key" @onclick:stopPropagation @onclick="e => OpenObjectContextMenu(e, o)"><Icon Name="more-horizontal" /></button>
                             </div>
                             @if (isExpanded)
                             {
@@ -214,7 +218,7 @@ else
                 <div class="ws-tab @(t.Id == activeId ? "active" : "")"
                      @onclick="() => Activate(t.Id)"
                      @ondblclick="() => StartRenameTab(t)"
-                     title="Click to switch · Double-click to rename">
+                     title="@(t.LinkedFileName is not null ? $"File: {t.LinkedFileName} · Click to switch · Double-click to rename" : "Click to switch · Double-click to rename")">
                     @if (isEditing)
                     {
                         <input class="tab-rename-input"
@@ -228,12 +232,21 @@ else
                     }
                     else
                     {
+                        @if (t.LinkedFileName is not null)
+                        {
+                            <Icon Name="file" Class="ws-tab-file" />
+                        }
                         <span>@t.Name</span>
+                        @if (t.IsDirty)
+                        {
+                            <span class="ws-tab-dirty" title="Unsaved file changes"></span>
+                        }
                     }
                     <button type="button" title="Close" @onclick:stopPropagation @onclick="() => CloseTab(t.Id)">×</button>
                 </div>
             }
             <button class="btn btn-sm btn-ghost" @onclick="NewTab"><Icon Name="plus" />New</button>
+            <InputFile id="sql-file-input" OnChange="OnSqlFileSelected" accept=".sql" style="display:none" />
         </div>
 
         <div class="row-inline ws-bar">
@@ -308,14 +321,50 @@ else
                 <button class="btn btn-primary" title="Run (F5 or Ctrl+Enter). Runs the selection if any." @onclick="Run"><Icon Name="play" />Run</button>
                 <button class="btn btn-hover-expand" title="Explain query plan" @onclick="ExplainPlan" disabled="@(Current is null)"><Icon Name="activity" /><span class="btn-lbl">Explain</span></button>
             }
-            <button class="btn btn-hover-expand" title="Format (Shift+Alt+F)" @onclick="FormatSql"><Icon Name="format" /><span class="btn-lbl">Format</span></button>
-            <button class="btn btn-hover-expand" title="Save (Ctrl+S)" @onclick="OpenSave"><Icon Name="save" /><span class="btn-lbl">Save</span></button>
-            <button class="btn btn-hover-expand" title="Editor preferences" @onclick="() => editingPreferences = true"><Icon Name="cog" /><span class="btn-lbl">Editor settings</span></button>
-            <button class="btn btn-hover-expand @(showAiPrompt ? "btn-primary" : "")" title="AI Assistant (Ctrl+I)" @onclick="ToggleAiPrompt"><Icon Name="sparkles" /><span class="btn-lbl">AI Assistant</span></button>
-            <button class="btn btn-hover-expand" title="Entity-Relationship (ER) Diagram" @onclick="() => OpenErDiagram(null)" disabled="@(Current is null)"><Icon Name="grid" /><span class="btn-lbl">ER Diagram</span></button>
-            <button class="btn btn-hover-expand @(formMode ? "btn-primary" : "")" title="Form Mode: auto-generate form for parameterized queries" @onclick="ToggleFormMode"><Icon Name="edit" /><span class="btn-lbl">Form Mode@(DetectedParameters.Count > 0 ? $" ({DetectedParameters.Count})" : "")</span></button>
-            <button class="icon-btn sm" title="@(layoutSplitHorizontal ? "Switch to stacked vertical layout" : "Switch to side-by-side horizontal layout")" @onclick="ToggleLayoutSplit"><Icon Name="@(layoutSplitHorizontal ? "rows" : "columns")" /></button>
-            <button class="icon-btn sm" title="Keyboard Shortcuts (?)" @onclick="() => showShortcutsModal = true"><Icon Name="key" /></button>
+            <div class="ws-bar-group collapsible">
+                <button class="btn btn-hover-expand" title="Format (Shift+Alt+F)" @onclick="FormatSql"><Icon Name="format" /><span class="btn-lbl">Format</span></button>
+                <button class="btn btn-hover-expand" title="Save to query library" @onclick="OpenSave"><Icon Name="save" /><span class="btn-lbl">Save</span></button>
+                @if (Current?.HasFileHandle == true)
+                {
+                    <button class="btn btn-sm @(Current.IsDirty ? "btn-primary" : "")" title="Save changes to @Current.LinkedFileName (Ctrl+S)" @onclick="SaveSqlFile">
+                        <Icon Name="save" />Save file
+                    </button>
+                }
+                <button class="btn btn-hover-expand" title="Save query to local .sql file" @onclick="DownloadSqlFile"><Icon Name="download" /><span class="btn-lbl">Save as .sql</span></button>
+                <button class="btn btn-hover-expand" title="Open .sql script file" @onclick="TriggerOpenFile"><Icon Name="file" /><span class="btn-lbl">Open .sql</span></button>
+                <button class="btn btn-hover-expand" title="Editor preferences" @onclick="() => editingPreferences = true"><Icon Name="cog" /><span class="btn-lbl">Editor settings</span></button>
+                <button class="btn btn-hover-expand @(showAiPrompt ? "btn-primary" : "")" title="AI Assistant (Ctrl+I)" @onclick="ToggleAiPrompt"><Icon Name="sparkles" /><span class="btn-lbl">AI Assistant</span></button>
+                <button class="btn btn-hover-expand" title="Entity-Relationship (ER) Diagram" @onclick="() => OpenErDiagram(null)" disabled="@(Current is null)"><Icon Name="grid" /><span class="btn-lbl">ER Diagram</span></button>
+                <button class="btn btn-hover-expand @(formMode ? "btn-primary" : "")" title="Form Mode: auto-generate form for parameterized queries" @onclick="ToggleFormMode"><Icon Name="edit" /><span class="btn-lbl">Form Mode@(DetectedParameters.Count > 0 ? $" ({DetectedParameters.Count})" : "")</span></button>
+            </div>
+            <button class="icon-btn sm ws-split-toggle" title="@(layoutSplitHorizontal ? "Switch to stacked vertical layout" : "Switch to side-by-side horizontal layout")" @onclick="ToggleLayoutSplit"><Icon Name="@(layoutSplitHorizontal ? "rows" : "columns")" /></button>
+            <button class="icon-btn sm ws-bar-desktop-only" title="Keyboard Shortcuts (?)" @onclick="() => showShortcutsModal = true"><Icon Name="key" /></button>
+            <div class="ws-bar-overflow">
+                <button class="icon-btn sm @(toolbarOverflow ? "active" : "")" type="button" title="More actions" aria-label="More actions" aria-expanded="@(toolbarOverflow ? "true" : "false")" @onclick="() => toolbarOverflow = !toolbarOverflow">
+                    <Icon Name="more-horizontal" />
+                </button>
+                @if (toolbarOverflow)
+                {
+                    <div class="ws-bar-overflow-backdrop" @onclick="() => toolbarOverflow = false"></div>
+                    <div class="ws-bar-overflow-menu">
+                        <button type="button" class="ws-overflow-item" @onclick="async () => { toolbarOverflow = false; await FormatSql(); }"><Icon Name="format" /><span>Format SQL</span></button>
+                        <button type="button" class="ws-overflow-item" @onclick="() => { toolbarOverflow = false; OpenSave(); }"><Icon Name="save" /><span>Save Query</span></button>
+                        @if (Current?.HasFileHandle == true)
+                        {
+                            <button type="button" class="ws-overflow-item" @onclick="async () => { toolbarOverflow = false; await SaveSqlFile(); }"><Icon Name="save" /><span>Save file (@Current.LinkedFileName)</span></button>
+                        }
+                        <button type="button" class="ws-overflow-item" @onclick="async () => { toolbarOverflow = false; await DownloadSqlFile(); }"><Icon Name="download" /><span>Save as .sql</span></button>
+                        <button type="button" class="ws-overflow-item" @onclick="async () => { toolbarOverflow = false; await TriggerOpenFile(); }"><Icon Name="file" /><span>Open .sql</span></button>
+                        <div class="ws-overflow-divider"></div>
+                        <button type="button" class="ws-overflow-item @(showAiPrompt ? "active" : "")" @onclick="() => { toolbarOverflow = false; ToggleAiPrompt(); }"><Icon Name="sparkles" /><span>AI Assistant</span></button>
+                        <button type="button" class="ws-overflow-item" disabled="@(Current is null)" @onclick="() => { toolbarOverflow = false; OpenErDiagram(null); }"><Icon Name="grid" /><span>ER Diagram</span></button>
+                        <button type="button" class="ws-overflow-item @(formMode ? "active" : "")" @onclick="async () => { toolbarOverflow = false; await ToggleFormMode(); }"><Icon Name="edit" /><span>Form Mode@(DetectedParameters.Count > 0 ? $" ({DetectedParameters.Count})" : "")</span></button>
+                        <div class="ws-overflow-divider"></div>
+                        <button type="button" class="ws-overflow-item" @onclick="() => { toolbarOverflow = false; editingPreferences = true; }"><Icon Name="cog" /><span>Editor settings</span></button>
+                        <button type="button" class="ws-overflow-item" @onclick="() => { toolbarOverflow = false; showShortcutsModal = true; }"><Icon Name="key" /><span>Keyboard Shortcuts</span></button>
+                    </div>
+                }
+            </div>
             <label class="chip-toggle @(impactCheck ? "active" : "")" title="Impact check: analyze affected records and confirm before executing INSERT, UPDATE, DELETE, or DROP commands">
                 <input type="checkbox" class="visually-hidden" @bind="impactCheck" />
                 <Icon Name="shield" />
@@ -334,6 +383,7 @@ else
 
         @if (showAiPrompt)
         {
+            <div class="ai-sheet-backdrop" @onclick="() => showAiPrompt = false"></div>
             <div class="ai-prompt-bar" style="padding:10px 14px;background:var(--bg-elev);border-bottom:1px solid var(--line);box-shadow:0 2px 8px rgba(0,0,0,0.04)">
                 @if (!aiConfigured)
                 {
@@ -508,6 +558,10 @@ else
                             <button class="btn btn-sm @(activeResult == idx ? "btn-primary" : "")" @onclick="() => { activeResult = idx; sortCol = null; SaveTabResultState(Current); }">Result @(idx + 1)</button>
                         }
                         <button class="btn btn-sm @(activeResult == -1 ? "btn-primary" : "")" @onclick="() => { activeResult = -1; SaveTabResultState(Current); }">Messages</button>
+                        @if (activeResult == -1)
+                        {
+                            <button class="btn btn-sm" type="button" title="Copy messages to clipboard (single click)" @onclick="CopyMessages" disabled="@(last.Messages.Count == 0)"><Icon Name="copy" />Copy Messages</button>
+                        }
                         @if (last.ExecutionPlan is not null)
                         {
                             <button class="btn btn-sm @(activeResult == -2 ? "btn-primary" : "")" @onclick="() => { activeResult = -2; SaveTabResultState(Current); }"><Icon Name="activity" />Execution Plan</button>
@@ -524,6 +578,9 @@ else
                                 var matchCount = GetProcessedRows(last.ResultSets[activeResult]).Count;
                                 <span class="badge" style="font-size:11px" title="Matching rows">@matchCount/@last.ResultSets[activeResult].Rows.Count</span>
                             }
+                            <button class="btn btn-sm" type="button" title="Copy result script/data to clipboard (single click)" @onclick="CopyActiveResultText">
+                                <Icon Name="copy" />@(last.ResultSets[activeResult].Columns.Count == 1 ? "Copy Script" : "Copy Result")
+                            </button>
                             @if (canExport)
                             {
                                 <div class="export-dropdown">
@@ -531,6 +588,9 @@ else
                                         <Icon Name="download" />Export <span style="font-size:9px;margin-left:2px">▾</span>
                                     </button>
                                     <div class="export-dropdown-menu">
+                                        <button class="export-dropdown-item" type="button" @onclick="CopyActiveResultText">
+                                            <Icon Name="copy" />@(last.ResultSets[activeResult].Columns.Count == 1 ? "Copy Script (Raw Text)" : "Copy Result (TSV)")
+                                        </button>
                                         <button class="export-dropdown-item" type="button" @onclick="ExportCsv">
                                             <Icon Name="file" />CSV (.csv)
                                         </button>
@@ -671,6 +731,9 @@ else
                 else if (activeResult == -1)
                 {
                     <div class="card-pad mono small">
+                        <div class="row-inline" style="justify-content:flex-end;margin-bottom:8px">
+                            <button class="btn btn-sm" type="button" @onclick="CopyMessages" disabled="@(last.Messages.Count == 0)"><Icon Name="copy" />Copy Messages</button>
+                        </div>
                         @foreach (var m in last.Messages) { <div>@m</div> }
                         @if (last.Messages.Count == 0) { <span class="muted">No messages.</span> }
                     </div>
@@ -898,6 +961,25 @@ else
             }
         </div>
     </div>
+    @{
+        var statusDb = Current is not null ? databases.FirstOrDefault(d => d.Id == Current.DatabaseId) : null;
+    }
+    <div class="ws-status">
+        @if (statusDb is not null)
+        {
+            <span class="ws-status-item"><Icon Name="db" /><b>@statusDb.Name</b> <span class="badge @EnvClass(statusDb.Environment)">@statusDb.Environment</span></span>
+        }
+        @if (Current?.LinkedFileName is not null)
+        {
+            <span class="ws-status-item" title="Linked SQL file"><Icon Name="file" />@Current.LinkedFileName @(Current.IsDirty ? "(Modified)" : "(Saved)")</span>
+        }
+        @if (last is not null)
+        {
+            <span class="ws-status-item"><Icon Name="clock" />@last.DurationMs ms</span>
+            <span class="ws-status-item">@last.RowsReturned row(s)</span>
+        }
+        <span class="ws-status-item ws-status-cursor">Ln @cursorLine, Col @cursorCol</span>
+    </div>
     </section>
 </div>
 }
@@ -1048,7 +1130,7 @@ else
                         @foreach (var item in impactAssessment.Items)
                         {
                             <div class="impact-item-row" style="display:flex;align-items:flex-start;gap:10px;padding:8px 10px;background:var(--bg-elev);border:1px solid var(--line);border-radius:6px">
-                                <span class="badge @(item.Severity == "danger" ? "badge-danger" : "badge-warn")" style="font-weight:700">@item.StatementType</span>
+                                <span class="badge @(item.Severity == "danger" ? "bad" : "warn")" style="font-weight:700">@item.StatementType</span>
                                 <div style="flex:1;font-size:13px;line-height:1.4">
                                     <div>@item.Summary</div>
                                     @if (!string.IsNullOrEmpty(item.TargetObject))
@@ -1136,7 +1218,7 @@ else
                     <span><kbd>Shift+Alt+F</kbd></span>
                 </div>
                 <div class="row-inline" style="justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line)">
-                    <span>Save query</span>
+                    <span>Save linked .sql file or save query</span>
                     <span><kbd>Ctrl+S</kbd></span>
                 </div>
                 <div class="row-inline" style="justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line)">
@@ -1274,7 +1356,7 @@ else
     var isExpanded = expanded.Contains(key);
 
     <div class="context-menu-backdrop" @onclick="CloseContextMenu" @oncontextmenu="CloseContextMenu" @oncontextmenu:preventDefault></div>
-    <div class="context-menu" style="left:@(contextMenuX)px;top:@(contextMenuY)px" @onclick:stopPropagation>
+    <div id="oe-context-menu" class="context-menu" style="left:@(contextMenuX)px;top:@(contextMenuY)px" @onclick:stopPropagation>
         <div class="context-menu-header">
             <Icon Name="@GetObjectIcon(o.Type)" />
             <span style="overflow:hidden;text-overflow:ellipsis">@key</span>
@@ -1342,6 +1424,15 @@ else
                OnConfirm="ConfirmDeleteSaved"
                OnCancel="() => deletingSaved = null" />
 
+<ConfirmDialog IsOpen="@(closingDirtyTab is not null)"
+               Title="Unsaved File Changes"
+               Message="@($"Discard unsaved changes to '{closingDirtyTab?.LinkedFileName}'?")"
+               Details="Your edits have not been saved back to the local .sql file yet."
+               ConfirmText="Discard & Close"
+               IsDanger="true"
+               OnConfirm="ConfirmCloseDirtyTab"
+               OnCancel="() => closingDirtyTab = null" />
+
 @if (showErModal && Current is not null)
 {
     <ErDiagramModal DatabaseId="Current.DatabaseId"
@@ -1382,7 +1473,46 @@ else
 
         [System.Text.Json.Serialization.JsonIgnore]
         public bool ShowRawPlanXml { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string? LinkedFileName { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool HasFileHandle { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string? LastSavedSql { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool IsDirty => LinkedFileName is not null && !string.Equals(Sql, LastSavedSql, StringComparison.Ordinal);
     }
+
+    private sealed class OpenSqlFileResult
+    {
+        public bool Supported { get; set; }
+        public bool Cancelled { get; set; }
+        public string? FileName { get; set; }
+        public string? Content { get; set; }
+        public string? Error { get; set; }
+    }
+
+    private sealed class SaveSqlFileResult
+    {
+        public bool Ok { get; set; }
+        public string? Reason { get; set; }
+        public string? FileName { get; set; }
+        public string? Error { get; set; }
+    }
+
+    private sealed class SaveSqlFileAsResult
+    {
+        public bool Ok { get; set; }
+        public bool Cancelled { get; set; }
+        public string? Mode { get; set; }
+        public string? FileName { get; set; }
+    }
+
+    private QueryTab? closingDirtyTab;
 
     [SupplyParameterFromQuery(Name = "db")] public Guid? DbParam { get; set; }
 
@@ -1435,6 +1565,10 @@ else
     private bool searchColumns;
     private bool layoutSplitHorizontal;
     private bool showShortcutsModal;
+    private bool toolbarOverflow;
+    private int cursorLine = 1;
+    private int cursorCol = 1;
+    [SupplyParameterFromQuery(Name = "shortcuts")] public bool? ShortcutsParam { get; set; }
     private DotNetObjectReference<Query>? self;
     private string? lastRunSql;
     private bool editingPreferences, automaticSuggestions = true, liveDiagnostics;
@@ -1514,6 +1648,7 @@ else
         var user = await db.Users.AsNoTracking().SingleAsync(u => u.Id == UserId);
         savedPreferences = new(user.EditorAutomaticSuggestions, user.EditorLiveDiagnostics, user.EditorFontSize);
         CancelPreferences();
+        if (ShortcutsParam == true) showShortcutsModal = true;
         loaded = true;
     }
 
@@ -1699,10 +1834,31 @@ else
 
     private async Task SwitchSide(string tab) { side = tab; await LoadSidePanels(); }
 
-    [JSInvokable] public Task OnChanged(string value) { if (Current is not null) Current.Sql = value; return Task.CompletedTask; }
+    [JSInvokable]
+    public Task OnChanged(string value)
+    {
+        if (Current is null) return Task.CompletedTask;
+        var wasDirty = Current.IsDirty;
+        Current.Sql = value;
+        if (Current.IsDirty != wasDirty) return InvokeAsync(StateHasChanged);
+        return Task.CompletedTask;
+    }
+    [JSInvokable] public Task OnCursorChanged(int line, int column) { cursorLine = line; cursorCol = column; return InvokeAsync(StateHasChanged); }
     [JSInvokable] public Task OnRun() => InvokeAsync(Run);
     [JSInvokable] public Task OnFormat() => InvokeAsync(FormatSql);
-    [JSInvokable] public Task OnSave() => InvokeAsync(() => { OpenSave(); StateHasChanged(); });
+    [JSInvokable]
+    public Task OnSave() => InvokeAsync(async () =>
+    {
+        if (Current?.HasFileHandle == true)
+        {
+            await SaveSqlFile();
+        }
+        else
+        {
+            OpenSave();
+        }
+        StateHasChanged();
+    });
 
     private async Task PersistAsync()
     {
@@ -1738,7 +1894,36 @@ else
 
     private async Task CloseTab(string id)
     {
-        if (tabs.Count == 1) { Current!.Sql = ""; await JS.InvokeVoidAsync("dbam.editorSet", "main", ""); return; }
+        var target = tabs.FirstOrDefault(t => t.Id == id);
+        if (target is not null && target.IsDirty)
+        {
+            closingDirtyTab = target;
+            return;
+        }
+        await ForceCloseTab(id);
+    }
+
+    private async Task ConfirmCloseDirtyTab()
+    {
+        if (closingDirtyTab is null) return;
+        var id = closingDirtyTab.Id;
+        closingDirtyTab = null;
+        await ForceCloseTab(id);
+    }
+
+    private async Task ForceCloseTab(string id)
+    {
+        try { await JS.InvokeVoidAsync("dbam.releaseTabFileHandle", id); } catch { }
+        if (tabs.Count == 1)
+        {
+            Current!.Sql = "";
+            Current.LinkedFileName = null;
+            Current.HasFileHandle = false;
+            Current.LastSavedSql = null;
+            await JS.InvokeVoidAsync("dbam.editorSet", "main", "");
+            await PersistAsync();
+            return;
+        }
         var wasActive = id == activeId;
         tabs.RemoveAll(t => t.Id == id);
         if (wasActive)
@@ -1865,11 +2050,21 @@ else
     private double contextMenuY;
     private DbObjectInfo? contextMenuObject;
 
-    private void OpenObjectContextMenu(MouseEventArgs e, DbObjectInfo o)
+    private async Task OpenObjectContextMenu(MouseEventArgs e, DbObjectInfo o)
     {
         contextMenuObject = o;
         contextMenuX = Math.Min(e.ClientX, 400);
         contextMenuY = Math.Min(e.ClientY, 650);
+        try
+        {
+            var clamped = await JS.InvokeAsync<double[]>("dbam.clampMenuCoords", e.ClientX, e.ClientY, 240, 340);
+            if (clamped is { Length: 2 })
+            {
+                contextMenuX = clamped[0];
+                contextMenuY = clamped[1];
+            }
+        }
+        catch { }
         contextMenuVisible = true;
     }
 
@@ -2590,7 +2785,7 @@ else
         <div style="@(node.ParentNodeId.HasValue ? "padding-left:24px;border-left:2px dashed var(--line-strong);margin-left:12px;margin-top:6px;" : "margin-top:6px;")">
             <div class="plan-node-card @(isSelected ? "selected" : "") @(isHighCost ? "bottleneck" : "")"
                  @onclick="() => selectedPlanNodeId = (selectedPlanNodeId == node.NodeId ? null : node.NodeId)"
-                 style="display:inline-flex;align-items:center;justify-content:space-between;gap:12px;background:var(--bg-elev);border:1px solid @(isHighCost ? "#ef4444" : isSelected ? "var(--brand)" : "var(--line)");border-radius:6px;padding:8px 12px;box-shadow:0 2px 6px rgba(0,0,0,0.04);cursor:pointer;max-width:700px">
+                 style="display:inline-flex;align-items:center;justify-content:space-between;gap:12px;background:var(--bg-elev);border:1px solid @(isHighCost ? "var(--bad)" : isSelected ? "var(--brand)" : "var(--line)");border-radius:6px;padding:8px 12px;box-shadow:0 2px 6px rgba(0,0,0,0.04);cursor:pointer;max-width:700px">
                 <div class="row-inline" style="gap:8px">
                     <span class="badge" style="font-family:monospace;font-size:10px">#@node.NodeId</span>
                     <b>@node.PhysicalOp</b>
@@ -2945,5 +3140,213 @@ else
         var min = numericValues.Min();
         var max = numericValues.Max();
         return new(rows.Count, distinctValues.Count, sum, avg, min, max, true);
+    }
+
+    // SQL File Drag & Drop, Browse, Save & Single-Click Copy
+    private async Task TriggerOpenFile()
+    {
+        if (Current is null) return;
+        var res = await JS.InvokeAsync<OpenSqlFileResult>("dbam.openSqlFile", Current.Id);
+        if (!res.Supported)
+        {
+            await JS.InvokeVoidAsync("dbam.triggerFileInput", "sql-file-input");
+            return;
+        }
+        if (res.Cancelled) return;
+        if (!string.IsNullOrWhiteSpace(res.Error))
+        {
+            Say($"Failed to open SQL file: {res.Error}");
+            return;
+        }
+        if (res.FileName is null || res.Content is null) return;
+        if (!res.FileName.EndsWith(".sql", StringComparison.OrdinalIgnoreCase))
+        {
+            await JS.InvokeVoidAsync("dbam.releaseTabFileHandle", Current.Id);
+            Say($"Only .sql files are allowed. '{res.FileName}' was rejected.");
+            return;
+        }
+        await LoadOpenedFileIntoCurrentTab(res.FileName, res.Content, hasHandle: true);
+    }
+
+    private async Task OnSqlFileSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+        if (!file.Name.EndsWith(".sql", StringComparison.OrdinalIgnoreCase))
+        {
+            Say($"Only .sql files are allowed. '{file.Name}' was rejected.");
+            return;
+        }
+        try
+        {
+            using var stream = file.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024);
+            using var reader = new StreamReader(stream, System.Text.Encoding.UTF8);
+            var content = await reader.ReadToEndAsync();
+            await LoadOpenedFileIntoCurrentTab(file.Name, content, hasHandle: false);
+        }
+        catch (Exception ex)
+        {
+            Say($"Failed to open SQL file: {ex.Message}");
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnSqlFileDropped(string fileName, string content, bool hasHandle = false)
+    {
+        if (Current is null) return;
+        if (hasHandle)
+        {
+            hasHandle = await JS.InvokeAsync<bool>("dbam.bindPendingDropHandle", Current.Id);
+        }
+        await LoadOpenedFileIntoCurrentTab(fileName, content, hasHandle);
+    }
+
+    private async Task LoadOpenedFileIntoCurrentTab(string fileName, string content, bool hasHandle)
+    {
+        if (Current is null) return;
+        if (!hasHandle)
+        {
+            await JS.InvokeVoidAsync("dbam.releaseTabFileHandle", Current.Id);
+        }
+        Current.Sql = content;
+        Current.LinkedFileName = fileName;
+        Current.HasFileHandle = hasHandle;
+        Current.LastSavedSql = content;
+        await JS.InvokeVoidAsync("dbam.editorSet", "main", content);
+        if (Current.Name.StartsWith("Query ") || Current.Name == "New tab")
+        {
+            var baseName = System.IO.Path.GetFileNameWithoutExtension(fileName);
+            if (!string.IsNullOrWhiteSpace(baseName)) Current.Name = baseName;
+        }
+        await PersistAsync();
+        Say($"Opened {fileName}");
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void OnDropFileRejected(string fileName)
+    {
+        Say($"Only .sql files are allowed. '{fileName}' was rejected.");
+    }
+
+    private async Task<string?> GetCurrentEditorSqlAsync()
+    {
+        var sql = await JS.InvokeAsync<string>("dbam.editorGet", "main");
+        if (string.IsNullOrWhiteSpace(sql) && Current is not null) sql = Current.Sql;
+        return sql;
+    }
+
+    private static string BuildSafeSqlFileName(string? baseName)
+    {
+        if (string.IsNullOrWhiteSpace(baseName) || baseName.StartsWith("Query "))
+        {
+            baseName = "query-" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        }
+        var safeName = string.Join("_", baseName.Split(System.IO.Path.GetInvalidFileNameChars())).Trim();
+        if (!safeName.EndsWith(".sql", StringComparison.OrdinalIgnoreCase)) safeName += ".sql";
+        return safeName;
+    }
+
+    private async Task SaveSqlFile()
+    {
+        if (Current is null) return;
+        if (!Current.HasFileHandle)
+        {
+            await DownloadSqlFile();
+            return;
+        }
+        var sql = await GetCurrentEditorSqlAsync() ?? "";
+        var res = await JS.InvokeAsync<SaveSqlFileResult>("dbam.saveSqlFile", Current.Id, sql);
+        if (res.Ok)
+        {
+            Current.Sql = sql;
+            Current.LastSavedSql = sql;
+            if (!string.IsNullOrWhiteSpace(res.FileName)) Current.LinkedFileName = res.FileName;
+            await PersistAsync();
+            Say($"Saved {Current.LinkedFileName}");
+            StateHasChanged();
+            return;
+        }
+        if (res.Reason == "permission-denied")
+        {
+            Say("Write permission denied for the linked file.");
+            return;
+        }
+        if (res.Reason == "no-handle")
+        {
+            Current.HasFileHandle = false;
+            await DownloadSqlFile();
+            return;
+        }
+        Say($"Failed to save file: {res.Error}");
+    }
+
+    private async Task DownloadSqlFile()
+    {
+        var sql = await GetCurrentEditorSqlAsync();
+        if (string.IsNullOrWhiteSpace(sql))
+        {
+            Say("Editor is empty.");
+            return;
+        }
+        var safeName = BuildSafeSqlFileName(Current?.LinkedFileName ?? Current?.Name);
+        var res = await JS.InvokeAsync<SaveSqlFileAsResult>("dbam.saveSqlFileAs", Current?.Id ?? "", sql, safeName);
+        if (res.Cancelled) return;
+        if (res.Ok && res.Mode == "picker" && Current is not null && !string.IsNullOrWhiteSpace(res.FileName))
+        {
+            Current.Sql = sql;
+            Current.LinkedFileName = res.FileName;
+            Current.HasFileHandle = true;
+            Current.LastSavedSql = sql;
+            if (Current.Name.StartsWith("Query ") || Current.Name == "New tab")
+            {
+                var baseName = System.IO.Path.GetFileNameWithoutExtension(res.FileName);
+                if (!string.IsNullOrWhiteSpace(baseName)) Current.Name = baseName;
+            }
+            await PersistAsync();
+            Say($"Saved {res.FileName}");
+            StateHasChanged();
+            return;
+        }
+        Say($"Saved query to {safeName}");
+    }
+
+    private async Task CopyActiveResultText()
+    {
+        if (last is null || activeResult < 0 || activeResult >= last.ResultSets.Count) return;
+        var rs = last.ResultSets[activeResult];
+        string text;
+        if (rs.Columns.Count == 1)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var row in rs.Rows)
+            {
+                var val = row.Length > 0 ? Convert.ToString(row[0], System.Globalization.CultureInfo.InvariantCulture) ?? "" : "";
+                sb.Append(val);
+                if (!val.EndsWith("\n") && !val.EndsWith("\r"))
+                    sb.AppendLine();
+            }
+            text = sb.ToString();
+        }
+        else
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine(string.Join("\t", rs.Columns));
+            foreach (var row in rs.Rows)
+            {
+                sb.AppendLine(string.Join("\t", row.Select(c => c is null ? "NULL" : Convert.ToString(c, System.Globalization.CultureInfo.InvariantCulture))));
+            }
+            text = sb.ToString();
+        }
+        await JS.InvokeVoidAsync("dbam.copy", text);
+        Say(rs.Columns.Count == 1 ? "Script copied to clipboard." : "Result copied to clipboard.");
+    }
+
+    private async Task CopyMessages()
+    {
+        if (last is null || last.Messages.Count == 0) return;
+        var text = string.Join(Environment.NewLine, last.Messages);
+        await JS.InvokeVoidAsync("dbam.copy", text);
+        Say("Messages copied to clipboard.");
     }
 }

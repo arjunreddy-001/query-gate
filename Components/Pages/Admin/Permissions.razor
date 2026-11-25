@@ -42,26 +42,26 @@
 </div>
 
 <div class="toolbar flex-wrap" style="gap:14px;align-items:flex-end">
-    <div class="field" style="margin:0">
+    <div class="field perm-filter-field">
         <label class="small muted">Environment</label>
-        <select @bind="filterEnv" @bind:after="OnFilterEnvChanged" style="width:280px;min-width:280px">
+        <select class="perm-filter-control" @bind="filterEnv" @bind:after="OnFilterEnvChanged">
             <option value="">Select environment…</option>
             @foreach (var env in environments) { <option value="@env.Name">@env.Name</option> }
         </select>
     </div>
-    <div class="field field-gated" style="margin:0;cursor:@(!IsEnvSelected ? "pointer" : "default")" @onclick="OnDatabaseFieldClicked">
+    <div class="field field-gated perm-filter-field" style="cursor:@(!IsEnvSelected ? "pointer" : "default")" @onclick="OnDatabaseFieldClicked">
         <label class="small muted">Database</label>
         <div class="gated-control-wrap @(!IsEnvSelected ? "is-locked" : "")">
-            <select @bind="dbId" @bind:after="OnFilterDbChanged" style="width:280px;min-width:280px" disabled="@(!IsEnvSelected)">
+            <select class="perm-filter-control" @bind="dbId" @bind:after="OnFilterDbChanged" disabled="@(!IsEnvSelected)">
                 <option value="@Guid.Empty">Select database…</option>
                 @foreach (var d in FilteredDatabases) { <option value="@d.Id">@d.Name (@d.Environment) · @DatabaseEngineInfo.GetDisplayName(d.Engine)</option> }
             </select>
         </div>
     </div>
-    <div class="field field-gated" style="margin:0;position:relative;cursor:@(!IsDbSelected ? "pointer" : "default")" @onclick="OnSubjectFieldClicked">
+    <div class="field field-gated perm-filter-field" style="position:relative;cursor:@(!IsDbSelected ? "pointer" : "default")" @onclick="OnSubjectFieldClicked">
         <label class="small muted">Role / User</label>
         <div class="gated-control-wrap @(!IsDbSelected ? "is-locked" : "")">
-            <div class="combobox-wrapper" style="width:280px;min-width:280px">
+            <div class="combobox-wrapper perm-filter-control">
                 <div class="combobox-input-wrap">
                     <input type="text"
                            class="combobox-input"

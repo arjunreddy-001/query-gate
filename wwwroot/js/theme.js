@@ -6,18 +6,51 @@
     };
     function theme() {
         var t = store.get('dbam-theme');
-        if (!t) t = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        return t;
+        if (t === 'dark' || t === 'light') return t;
+        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     }
     function nav() { return store.get('dbam-nav') === 'pinned' ? 'pinned' : 'compact'; }
+    function syncMonaco(t) {
+        if (window.monaco && window.monaco.editor) {
+            window.monaco.editor.setTheme(t === 'dark' ? 'vs-dark' : 'vs');
+        }
+    }
     function apply() {
-        if (root.getAttribute('data-theme') !== theme()) root.setAttribute('data-theme', theme());
+        var t = theme();
+        if (root.getAttribute('data-theme') !== t) root.setAttribute('data-theme', t);
         if (root.getAttribute('data-nav') !== nav()) root.setAttribute('data-nav', nav());
     }
+    function setTheme(next) {
+        var normalized = next === 'dark' ? 'dark' : 'light';
+        store.set('dbam-theme', normalized);
+        apply();
+        syncMonaco(normalized);
+        return normalized;
+    }
+    function toggleTheme() {
+        return setTheme(theme() === 'dark' ? 'light' : 'dark');
+    }
+    window.dbamTheme = {
+        get: theme,
+        set: setTheme,
+        toggle: toggleTheme
+    };
     apply();
 
     // Enhanced navigation to static pages can reset <html> attributes; re-apply the saved state.
     new MutationObserver(apply).observe(root, { attributes: true, attributeFilter: ['data-theme', 'data-nav'] });
+
+    if (window.matchMedia) {
+        var mq = window.matchMedia('(prefers-color-scheme: dark)');
+        var onSystemThemeChange = function () {
+            if (!store.get('dbam-theme')) {
+                apply();
+                syncMonaco(theme());
+            }
+        };
+        if (mq.addEventListener) mq.addEventListener('change', onSystemThemeChange);
+        else if (mq.addListener) mq.addListener(onSystemThemeChange);
+    }
 
     function closeMobileNav() {
         root.removeAttribute('data-mobile-nav');
@@ -87,6 +120,23 @@
 
     // Inline handlers are blocked by the CSP, so clicks are delegated from the document.
     document.addEventListener('click', function (e) {
+        var exportMenuBtn = e.target.closest && e.target.closest('.export-dropdown > button');
+        if (exportMenuBtn) {
+            var dd = exportMenuBtn.closest('.export-dropdown');
+            var willOpen = dd && !dd.classList.contains('is-open');
+            document.querySelectorAll('.export-dropdown.is-open').forEach(function (el) {
+                el.classList.remove('is-open');
+            });
+            if (dd && willOpen) dd.classList.add('is-open');
+            return;
+        }
+        var exportItem = e.target.closest && e.target.closest('.export-dropdown-item');
+        if (exportItem || !(e.target.closest && e.target.closest('.export-dropdown'))) {
+            document.querySelectorAll('.export-dropdown.is-open').forEach(function (el) {
+                el.classList.remove('is-open');
+            });
+        }
+
         var navToggle = e.target.closest && e.target.closest('[data-mobile-nav-toggle]');
         if (navToggle) {
             toggleMobileNav();
@@ -107,10 +157,7 @@
         var t = e.target.closest && e.target.closest('[data-theme-toggle],[data-nav-toggle]');
         if (!t) return;
         if (t.hasAttribute('data-theme-toggle')) {
-            var next = theme() === 'dark' ? 'light' : 'dark';
-            store.set('dbam-theme', next);
-            apply();
-            if (window.monaco) window.monaco.editor.setTheme(next === 'dark' ? 'vs-dark' : 'vs');
+            toggleTheme();
         } else {
             store.set('dbam-nav', nav() === 'pinned' ? 'compact' : 'pinned');
             apply();
@@ -141,40 +188,38 @@
 
     // Draggable splitter between the SQL editor and the results.
     var drag = null;
-    document.addEventListener('mousedown', function (e) {
-        var s = e.target.closest && e.target.closest('.ws-split');
-        if (!s) return;
+    function startSplitDrag(s, clientX, clientY) {
         var pane = s.closest('.ws-body') ? s.closest('.ws-body').querySelector('.ws-editor-pane') : document.getElementById('sql-editor');
-        if (!pane) return;
+        if (!pane) return false;
         var isHoriz = !!s.closest('.ws-body-horizontal');
         drag = {
             isHoriz: isHoriz,
-            x: e.clientX,
-            y: e.clientY,
+            x: clientX,
+            y: clientY,
             w: pane.getBoundingClientRect().width,
             h: pane.getBoundingClientRect().height,
             pane: pane
         };
         document.body.style.userSelect = 'none';
-        e.preventDefault();
-    });
-    document.addEventListener('mousemove', function (e) {
+        return true;
+    }
+    function moveSplitDrag(clientX, clientY) {
         if (!drag) return;
         if (drag.isHoriz) {
             var parentW = drag.pane.parentElement ? drag.pane.parentElement.getBoundingClientRect().width : 800;
             var maxW = Math.max(160, parentW - 160);
-            var w = Math.min(maxW, Math.max(160, drag.w + (e.clientX - drag.x)));
+            var w = Math.min(maxW, Math.max(160, drag.w + (clientX - drag.x)));
             drag.pane.dataset.hFlex = w + 'px';
             drag.pane.style.flex = '0 0 ' + w + 'px';
         } else {
             var parentH = drag.pane.parentElement ? drag.pane.parentElement.getBoundingClientRect().height : 600;
             var maxH = Math.max(80, parentH - 100);
-            var h = Math.min(maxH, Math.max(80, drag.h + (e.clientY - drag.y)));
+            var h = Math.min(maxH, Math.max(80, drag.h + (clientY - drag.y)));
             drag.pane.dataset.vFlex = h + 'px';
             drag.pane.style.flex = '0 0 ' + h + 'px';
         }
-    });
-    document.addEventListener('mouseup', function () {
+    }
+    function endSplitDrag() {
         if (drag) {
             drag = null;
             document.body.style.userSelect = '';
@@ -182,7 +227,28 @@
                 window.dbam.editorLayout('main');
             }
         }
+    }
+    document.addEventListener('mousedown', function (e) {
+        var s = e.target.closest && e.target.closest('.ws-split');
+        if (s && startSplitDrag(s, e.clientX, e.clientY)) e.preventDefault();
     });
+    document.addEventListener('mousemove', function (e) {
+        moveSplitDrag(e.clientX, e.clientY);
+    });
+    document.addEventListener('mouseup', endSplitDrag);
+
+    document.addEventListener('touchstart', function (e) {
+        var s = e.target.closest && e.target.closest('.ws-split');
+        if (!s || !e.touches || !e.touches.length) return;
+        if (startSplitDrag(s, e.touches[0].clientX, e.touches[0].clientY)) e.preventDefault();
+    }, { passive: false });
+    document.addEventListener('touchmove', function (e) {
+        if (!drag || !e.touches || !e.touches.length) return;
+        e.preventDefault();
+        moveSplitDrag(e.touches[0].clientX, e.touches[0].clientY);
+    }, { passive: false });
+    document.addEventListener('touchend', endSplitDrag);
+    document.addEventListener('touchcancel', endSplitDrag);
 
     // Keep split layout flex-basis synced when orientation toggles
     var lastHorizState = null;

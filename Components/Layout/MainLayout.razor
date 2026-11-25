@@ -92,22 +92,22 @@
                             <div style="padding:6px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">Switch Workspace</div>
                             @foreach (var t in userTenants)
                             {
-                                <a href="@GetSwitchWorkspaceUrl(t.Slug)" rel="external" style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;text-decoration:none;color:inherit;background:@(t.Slug == currentTenantSlug ? "rgba(99,102,241,0.08)" : "transparent")">
+                                <a href="@GetSwitchWorkspaceUrl(t.Slug)" rel="external" style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;text-decoration:none;color:inherit;background:@(t.Slug == currentTenantSlug ? "var(--brand-soft)" : "transparent")">
                                     <span>@t.Name</span>
                                     @if (t.Slug == currentTenantSlug)
                                     {
-                                        <span style="color:#10b981;font-size:12px">&#10003;</span>
+                                        <span style="color:var(--ok-ink);font-size:12px">&#10003;</span>
                                     }
                                 </a>
                             }
                             @if (isSuperAdmin)
                             {
                                 <div style="border-top:1px solid var(--border-color);margin:4px 0"></div>
-                                <a href="/platform/tenants" rel="external" style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;text-decoration:none;color:#818cf8;background:@(currentTenantSlug == "platform" ? "rgba(99,102,241,0.08)" : "transparent")">
+                                <a href="/platform/tenants" rel="external" style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;text-decoration:none;color:var(--brand-ink);background:@(currentTenantSlug == "platform" ? "var(--brand-soft)" : "transparent")">
                                     <span style="display:inline-flex;align-items:center;gap:8px"><Icon Name="grid" />Platform Admin</span>
                                     @if (currentTenantSlug == "platform")
                                     {
-                                        <span style="color:#10b981;font-size:12px">&#10003;</span>
+                                        <span style="color:var(--ok-ink);font-size:12px">&#10003;</span>
                                     }
                                 </a>
                             }
@@ -161,7 +161,7 @@
 
         @if (idleMinutesLeft is not null)
         {
-            <div class="alert warn" style="margin:16px 28px 0">You will be signed out in about @idleMinutesLeft minute(s) due to inactivity. Move the mouse or press a key to stay signed in.</div>
+            <div class="alert warn idle-alert">You will be signed out in about @idleMinutesLeft minute(s) due to inactivity. Move the mouse or press a key to stay signed in.</div>
         }
 
         <main class="content">

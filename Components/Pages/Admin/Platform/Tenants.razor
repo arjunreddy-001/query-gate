@@ -23,9 +23,9 @@
     </div>
 
     <div class="card" style="margin-bottom:20px">
-        <div style="display:flex;gap:12px;padding:16px">
-            <input type="text" class="input" placeholder="Search by name, slug, or contact email..." @bind="searchQuery" @bind:event="oninput" style="max-width:360px" />
-            <select class="input" style="max-width:180px" @bind="statusFilter">
+        <div class="tenant-filter-bar">
+            <input type="text" class="input tenant-filter-search" placeholder="Search by name, slug, or contact email..." @bind="searchQuery" @bind:event="oninput" />
+            <select class="input tenant-filter-status" @bind="statusFilter">
                 <option value="All">All statuses</option>
                 <option value="Active">Active only</option>
                 <option value="Inactive">Inactive only</option>
@@ -74,7 +74,7 @@
                                 }
                             </td>
                             <td>
-                                <code style="font-size:12px;padding:2px 6px;background:rgba(99,102,241,0.1);color:#818cf8;border-radius:4px">/t/@t.Slug</code>
+                                <code style="font-size:12px;padding:2px 6px;background:var(--brand-soft);color:var(--brand-ink);border-radius:4px">/t/@t.Slug</code>
                             </td>
                             <td>
                                 @if (item.Domains.Count == 0)
@@ -262,41 +262,29 @@
 
 <style>
     .modal-backdrop {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.65);
-        display: flex;
-        align-items: center;
-        justify-content: center;
         z-index: 9999;
-        backdrop-filter: blur(2px);
     }
     .modal-dialog {
-        background: var(--bg-card);
-        border: 1px solid var(--border-color);
-        border-radius: 12px;
         padding: 24px;
-        width: 100%;
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
     }
     .modal-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
+        padding: 0;
+        border-bottom: 0;
         margin-bottom: 16px;
     }
     .modal-header h3 {
-        margin: 0;
         font-size: 18px;
         font-weight: 700;
     }
     .badge-success {
-        background: rgba(16, 185, 129, 0.15);
-        border: 1px solid rgba(16, 185, 129, 0.3);
+        background: var(--ok-soft);
+        color: var(--ok-ink);
+        border: 1px solid color-mix(in srgb, var(--ok) 30%, transparent);
     }
     .badge-danger {
-        background: rgba(239, 68, 68, 0.15);
-        border: 1px solid rgba(239, 68, 68, 0.3);
+        background: var(--bad-soft);
+        color: var(--bad-ink);
+        border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent);
     }
 </style>
 

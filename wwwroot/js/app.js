@@ -5,6 +5,8 @@ window.dbam = (function () {
   let metadata = [];
   let providerRegistered = false;
   let sideResizeBound = false;
+  const tabFileHandles = new Map();
+  let pendingDropHandle = null;
 
   function loadScript(src) {
     return new Promise((resolve, reject) => {
@@ -100,10 +102,22 @@ window.dbam = (function () {
     "ROLLBACK",
   ];
   const SNIPPETS = [
-    { label: "SELECT query", text: "SELECT ${1:*}\nFROM ${2:dbo.TableName}\nWHERE ${3:condition};" },
-    { label: "JOIN clause", text: "JOIN ${1:dbo.TableName} AS ${2:t}\n  ON ${3:condition}" },
-    { label: "CASE expression", text: "CASE WHEN ${1:condition} THEN ${2:value} ELSE ${3:value} END" },
-    { label: "CTE", text: "WITH ${1:cte} AS (\n    SELECT ${2:*} FROM ${3:dbo.TableName}\n)\nSELECT * FROM ${1:cte};" },
+    {
+      label: "SELECT query",
+      text: "SELECT ${1:*}\nFROM ${2:dbo.TableName}\nWHERE ${3:condition};",
+    },
+    {
+      label: "JOIN clause",
+      text: "JOIN ${1:dbo.TableName} AS ${2:t}\n  ON ${3:condition}",
+    },
+    {
+      label: "CASE expression",
+      text: "CASE WHEN ${1:condition} THEN ${2:value} ELSE ${3:value} END",
+    },
+    {
+      label: "CTE",
+      text: "WITH ${1:cte} AS (\n    SELECT ${2:*} FROM ${3:dbo.TableName}\n)\nSELECT * FROM ${1:cte};",
+    },
   ];
 
   function registerProvider(monaco) {
@@ -121,7 +135,9 @@ window.dbam = (function () {
         };
         const K = monaco.languages.CompletionItemKind;
         const result = window.queryGateCompletion.analyze(
-          model.getValue(), model.getOffsetAt(position), metadata,
+          model.getValue(),
+          model.getOffsetAt(position),
+          metadata,
         );
         if (result.replacement) {
           const start = model.getPositionAt(result.replacement.start);
@@ -133,24 +149,41 @@ window.dbam = (function () {
         }
         const suggestions = result.suggestions.map((item) => ({
           label: item.label,
-          kind: item.kind === "column" ? K.Field : item.kind === "join" ? K.Reference : item.kind === "variable" ? K.Variable : K.Class,
+          kind:
+            item.kind === "column"
+              ? K.Field
+              : item.kind === "join"
+                ? K.Reference
+                : item.kind === "variable"
+                  ? K.Variable
+                  : K.Class,
           insertText: item.insertText,
           detail: item.detail,
           sortText: "0" + item.label,
           range,
         }));
-        if (result.context === "expression") suggestions.push(...KEYWORDS.map((k) => ({
-          label: k,
-          kind: K.Keyword,
-          insertText: k,
-          sortText: "1" + k,
-          range,
-        })));
-        if (result.context === "expression") suggestions.push(...SNIPPETS.map((s) => ({
-          label: s.label, kind: K.Snippet, insertText: s.text,
-          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-          sortText: "2" + s.label, range,
-        })));
+        if (result.context === "expression")
+          suggestions.push(
+            ...KEYWORDS.map((k) => ({
+              label: k,
+              kind: K.Keyword,
+              insertText: k,
+              sortText: "1" + k,
+              range,
+            })),
+          );
+        if (result.context === "expression")
+          suggestions.push(
+            ...SNIPPETS.map((s) => ({
+              label: s.label,
+              kind: K.Snippet,
+              insertText: s.text,
+              insertTextRules:
+                monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+              sortText: "2" + s.label,
+              range,
+            })),
+          );
         return { suggestions };
       },
     });
@@ -159,20 +192,43 @@ window.dbam = (function () {
         const word = model.getWordAtPosition(position);
         if (!word) return null;
         const end = { lineNumber: position.lineNumber, column: word.endColumn };
-        const result = window.queryGateCompletion.analyze(model.getValue(), model.getOffsetAt(end), metadata);
-        const matches = result.suggestions.filter(s => s.kind === "column" && s.label.toLowerCase() === word.word.toLowerCase());
+        const result = window.queryGateCompletion.analyze(
+          model.getValue(),
+          model.getOffsetAt(end),
+          metadata,
+        );
+        const matches = result.suggestions.filter(
+          (s) =>
+            s.kind === "column" &&
+            s.label.toLowerCase() === word.word.toLowerCase(),
+        );
         let detail = matches.length === 1 ? matches[0].detail : null;
         if (!detail && matches.length === 0) {
-          const prefix = model.getLineContent(position.lineNumber).slice(0, word.startColumn - 1);
+          const prefix = model
+            .getLineContent(position.lineNumber)
+            .slice(0, word.startColumn - 1);
           const schema = /(?:\[([^\]]+)\]|([a-z_]\w*))\.\s*$/i.exec(prefix);
-          const hits = metadata.filter(o => o.name.toLowerCase() === word.word.toLowerCase() &&
-            (!schema || o.schema.toLowerCase() === (schema[1] || schema[2]).toLowerCase()));
-          if (hits.length === 1) detail = hits[0].schema + "." + hits[0].name + " / " + hits[0].type;
+          const hits = metadata.filter(
+            (o) =>
+              o.name.toLowerCase() === word.word.toLowerCase() &&
+              (!schema ||
+                o.schema.toLowerCase() ===
+                  (schema[1] || schema[2]).toLowerCase()),
+          );
+          if (hits.length === 1)
+            detail = hits[0].schema + "." + hits[0].name + " / " + hits[0].type;
         }
         if (!detail) return null;
         detail = detail.replace(/[\\`*_{}\[\]()#+.!|>~-]/g, "\\$&");
-        return { range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
-          contents: [{ value: detail }] };
+        return {
+          range: new monaco.Range(
+            position.lineNumber,
+            word.startColumn,
+            position.lineNumber,
+            word.endColumn,
+          ),
+          contents: [{ value: detail }],
+        };
       },
     });
   }
@@ -186,17 +242,43 @@ window.dbam = (function () {
     entry.diagnosticTimer = setTimeout(async () => {
       try {
         const sql = model.getValue();
-        const errors = sql.length > 4000
-          ? [{ line: 1, column: 1, message: "Live diagnostics are unavailable for SQL over 4,000 characters." }]
-          : await entry.ref.invokeMethodAsync("GetSyntaxDiagnostics", sql);
-        if (entry.editor.getModel() !== model || model.isDisposed() || model.getVersionId() !== version || !entry.diagnostics) return;
-        window.monaco.editor.setModelMarkers(model, "dbam-syntax", errors.map(e => {
-          const line = Math.max(1, Math.min(e.line, model.getLineCount()));
-          const column = Math.max(1, Math.min(e.column, model.getLineMaxColumn(line)));
-          return { severity: window.monaco.MarkerSeverity.Warning, message: e.message,
-            startLineNumber: line, endLineNumber: line, startColumn: column,
-            endColumn: Math.min(column + 1, model.getLineMaxColumn(line)) };
-        }));
+        const errors =
+          sql.length > 4000
+            ? [
+                {
+                  line: 1,
+                  column: 1,
+                  message:
+                    "Live diagnostics are unavailable for SQL over 4,000 characters.",
+                },
+              ]
+            : await entry.ref.invokeMethodAsync("GetSyntaxDiagnostics", sql);
+        if (
+          entry.editor.getModel() !== model ||
+          model.isDisposed() ||
+          model.getVersionId() !== version ||
+          !entry.diagnostics
+        )
+          return;
+        window.monaco.editor.setModelMarkers(
+          model,
+          "dbam-syntax",
+          errors.map((e) => {
+            const line = Math.max(1, Math.min(e.line, model.getLineCount()));
+            const column = Math.max(
+              1,
+              Math.min(e.column, model.getLineMaxColumn(line)),
+            );
+            return {
+              severity: window.monaco.MarkerSeverity.Warning,
+              message: e.message,
+              startLineNumber: line,
+              endLineNumber: line,
+              startColumn: column,
+              endColumn: Math.min(column + 1, model.getLineMaxColumn(line)),
+            };
+          }),
+        );
       } catch (error) {
         console.error("Could not check SQL syntax", error);
         entry.ref.invokeMethodAsync("OnDiagnosticsError").catch(console.error);
@@ -208,15 +290,76 @@ window.dbam = (function () {
     return Math.max(180, Math.min(520, width));
   }
 
+  function setupEditorFileDrop(el, ref) {
+    if (!el || el._hasFileDrop) return;
+    el._hasFileDrop = true;
+
+    el.addEventListener("dragover", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      el.classList.add("drag-over");
+    });
+
+    el.addEventListener("dragleave", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      el.classList.remove("drag-over");
+    });
+
+    el.addEventListener("drop", async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      el.classList.remove("drag-over");
+      const item = ev.dataTransfer?.items?.[0];
+      const handlePromise =
+        item && typeof item.getAsFileSystemHandle === "function"
+          ? item.getAsFileSystemHandle().catch(() => null)
+          : null;
+      const fallbackFile = ev.dataTransfer?.files?.[0] || null;
+
+      if (handlePromise) {
+        const handle = await handlePromise;
+        if (handle && handle.kind === "file") {
+          if (!handle.name.toLowerCase().endsWith(".sql")) {
+            ref.invokeMethodAsync("OnDropFileRejected", handle.name);
+            return;
+          }
+          const file = await handle.getFile();
+          const content = await file.text();
+          pendingDropHandle = handle;
+          ref.invokeMethodAsync("OnSqlFileDropped", file.name, content, true);
+          return;
+        }
+      }
+
+      if (!fallbackFile) return;
+      if (!fallbackFile.name.toLowerCase().endsWith(".sql")) {
+        ref.invokeMethodAsync("OnDropFileRejected", fallbackFile.name);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const content = e.target.result;
+        pendingDropHandle = null;
+        ref.invokeMethodAsync(
+          "OnSqlFileDropped",
+          fallbackFile.name,
+          content,
+          false,
+        );
+      };
+      reader.readAsText(fallbackFile);
+    });
+  }
+
   function ensureSideResizeHandlers() {
     if (sideResizeBound) return;
     sideResizeBound = true;
 
     let drag = null;
-    document.addEventListener("mousedown", (ev) => {
-      const splitter = ev.target.closest && ev.target.closest(".ws-side-split");
+    function startSideDrag(splitter, clientX) {
       const ws = splitter && splitter.closest(".ws");
-      if (!splitter || !ws) return;
+      if (!splitter || !ws) return false;
       const bounds = ws.getBoundingClientRect();
       const current = parseInt(
         getComputedStyle(ws).getPropertyValue("--ws-side-w"),
@@ -224,24 +367,20 @@ window.dbam = (function () {
       );
       drag = {
         ws,
-        startX: ev.clientX,
+        startX: clientX,
         startWidth: Number.isFinite(current)
           ? current
           : Math.round(bounds.width * 0.24),
       };
       document.body.style.userSelect = "none";
-      ev.preventDefault();
-    });
-
-    document.addEventListener("mousemove", (ev) => {
+      return true;
+    }
+    function moveSideDrag(clientX) {
       if (!drag) return;
-      const width = clampSideWidth(
-        drag.startWidth + (ev.clientX - drag.startX),
-      );
+      const width = clampSideWidth(drag.startWidth + (clientX - drag.startX));
       drag.ws.style.setProperty("--ws-side-w", width + "px");
-    });
-
-    document.addEventListener("mouseup", () => {
+    }
+    function endSideDrag() {
       if (!drag) return;
       const width = parseInt(
         getComputedStyle(drag.ws).getPropertyValue("--ws-side-w"),
@@ -252,14 +391,57 @@ window.dbam = (function () {
       } catch (e) {}
       drag = null;
       document.body.style.userSelect = "";
+    }
+
+    document.addEventListener("mousedown", (ev) => {
+      const splitter = ev.target.closest && ev.target.closest(".ws-side-split");
+      if (splitter && startSideDrag(splitter, ev.clientX)) ev.preventDefault();
     });
+    document.addEventListener("mousemove", (ev) => moveSideDrag(ev.clientX));
+    document.addEventListener("mouseup", endSideDrag);
+
+    document.addEventListener(
+      "touchstart",
+      (ev) => {
+        const splitter =
+          ev.target.closest && ev.target.closest(".ws-side-split");
+        if (!splitter || !ev.touches || !ev.touches.length) return;
+        if (startSideDrag(splitter, ev.touches[0].clientX)) ev.preventDefault();
+      },
+      { passive: false },
+    );
+    document.addEventListener(
+      "touchmove",
+      (ev) => {
+        if (!drag || !ev.touches || !ev.touches.length) return;
+        ev.preventDefault();
+        moveSideDrag(ev.touches[0].clientX);
+      },
+      { passive: false },
+    );
+    document.addEventListener("touchend", endSideDrag);
+    document.addEventListener("touchcancel", endSideDrag);
   }
 
   return {
-    isNarrowViewport: () => window.matchMedia("(max-width: 860px)").matches,
+    isNarrowViewport: () =>
+      window.matchMedia(
+        "(max-width: 960px), (max-width: 1024px) and (pointer: coarse)",
+      ).matches,
+    clampMenuCoords: (x, y, w, h) => {
+      const vw = window.innerWidth || 800;
+      const vh = window.innerHeight || 600;
+      const pad = 8;
+      const cx = Math.max(pad, Math.min(x, vw - (w || 240) - pad));
+      const cy = Math.max(pad, Math.min(y, vh - (h || 320) - pad));
+      return [cx, cy];
+    },
     getTheme: () =>
-      document.documentElement.getAttribute("data-theme") || "light",
+      window.dbamTheme
+        ? window.dbamTheme.get()
+        : document.documentElement.getAttribute("data-theme") || "light",
     toggleTheme: function () {
+      if (window.dbamTheme) return window.dbamTheme.toggle();
       const next = this.getTheme() === "dark" ? "light" : "dark";
       document.documentElement.setAttribute("data-theme", next);
       try {
@@ -303,7 +485,8 @@ window.dbam = (function () {
     },
     scrollHighlightedOption: function (target, index) {
       try {
-        const menu = typeof target === "string" ? document.querySelector(target) : target;
+        const menu =
+          typeof target === "string" ? document.querySelector(target) : target;
         if (!menu) return;
         const option = menu.querySelector(`[data-index="${index}"]`);
         if (option) {
@@ -316,6 +499,125 @@ window.dbam = (function () {
         ? navigator.clipboard.writeText(text)
         : Promise.resolve(),
     submitForm: (id) => document.getElementById(id)?.submit(),
+    triggerFileInput: (id) => document.getElementById(id)?.click(),
+    openSqlFile: async function (tabId) {
+      if (typeof window.showOpenFilePicker !== "function") {
+        return {
+          supported: false,
+          cancelled: false,
+          fileName: null,
+          content: null,
+        };
+      }
+      try {
+        const [handle] = await window.showOpenFilePicker({
+          types: [
+            {
+              description: "SQL Files",
+              accept: { "application/sql": [".sql"], "text/plain": [".sql"] },
+            },
+          ],
+          multiple: false,
+        });
+        if (!handle)
+          return {
+            supported: true,
+            cancelled: true,
+            fileName: null,
+            content: null,
+          };
+        const file = await handle.getFile();
+        const content = await file.text();
+        if (tabId) tabFileHandles.set(tabId, handle);
+        return {
+          supported: true,
+          cancelled: false,
+          fileName: file.name,
+          content,
+        };
+      } catch (e) {
+        if (e && e.name === "AbortError") {
+          return {
+            supported: true,
+            cancelled: true,
+            fileName: null,
+            content: null,
+          };
+        }
+        return {
+          supported: true,
+          cancelled: false,
+          error: e?.message || "Failed to open file.",
+        };
+      }
+    },
+    bindPendingDropHandle: function (tabId) {
+      if (!tabId || !pendingDropHandle) return false;
+      tabFileHandles.set(tabId, pendingDropHandle);
+      pendingDropHandle = null;
+      return true;
+    },
+    saveSqlFile: async function (tabId, content) {
+      const handle = tabId ? tabFileHandles.get(tabId) : null;
+      if (!handle) return { ok: false, reason: "no-handle" };
+      try {
+        let perm = await handle.queryPermission({ mode: "readwrite" });
+        if (perm !== "granted") {
+          perm = await handle.requestPermission({ mode: "readwrite" });
+        }
+        if (perm !== "granted")
+          return { ok: false, reason: "permission-denied" };
+        const writable = await handle.createWritable();
+        await writable.write(content);
+        await writable.close();
+        return { ok: true, fileName: handle.name };
+      } catch (e) {
+        return {
+          ok: false,
+          reason: "error",
+          error: e?.message || "Failed to write file.",
+        };
+      }
+    },
+    saveSqlFileAs: async function (tabId, content, suggestedName) {
+      if (typeof window.showSaveFilePicker === "function") {
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: suggestedName || "query.sql",
+            types: [
+              {
+                description: "SQL Files",
+                accept: { "application/sql": [".sql"], "text/plain": [".sql"] },
+              },
+            ],
+          });
+          const writable = await handle.createWritable();
+          await writable.write(content);
+          await writable.close();
+          if (tabId) tabFileHandles.set(tabId, handle);
+          return {
+            ok: true,
+            cancelled: false,
+            mode: "picker",
+            fileName: handle.name,
+          };
+        } catch (e) {
+          if (e && e.name === "AbortError") {
+            return { ok: false, cancelled: true, mode: "picker" };
+          }
+        }
+      }
+      this.download(suggestedName || "query.sql", content, "application/sql");
+      return {
+        ok: true,
+        cancelled: false,
+        mode: "download",
+        fileName: suggestedName || "query.sql",
+      };
+    },
+    releaseTabFileHandle: function (tabId) {
+      if (tabId) tabFileHandles.delete(tabId);
+    },
 
     startIdle: function (ref, warnMs, expireMs) {
       let warned = false,
@@ -401,13 +703,34 @@ window.dbam = (function () {
             ref.invokeMethodAsync("OnRun");
           }
         });
-        const entry = { kind: "monaco", editor, ref, diagnostics: preferences.liveDiagnostics };
+        const entry = {
+          kind: "monaco",
+          editor,
+          ref,
+          diagnostics: preferences.liveDiagnostics,
+          cursorTimer: null,
+        };
         editors[id] = entry;
         editor.onDidChangeModelContent(() => {
           ref.invokeMethodAsync("OnChanged", editor.getValue());
           scheduleDiagnostics(entry);
         });
+        editor.onDidChangeCursorPosition((ev) => {
+          clearTimeout(entry.cursorTimer);
+          entry.cursorTimer = setTimeout(() => {
+            if (editors[id] === entry) {
+              ref
+                .invokeMethodAsync(
+                  "OnCursorChanged",
+                  ev.position.lineNumber,
+                  ev.position.column,
+                )
+                .catch(() => {});
+            }
+          }, 120);
+        });
         scheduleDiagnostics(entry);
+        setupEditorFileDrop(el, ref);
         return true;
       } catch (e) {
         console.warn("Monaco unavailable, using plain editor", e);
@@ -427,6 +750,7 @@ window.dbam = (function () {
         });
         el.appendChild(ta);
         editors[id] = { kind: "plain", ta };
+        setupEditorFileDrop(el, ref);
         return false;
       }
     },
@@ -476,7 +800,10 @@ window.dbam = (function () {
     },
     editorDispose: function (id) {
       const e = editors[id];
-      if (e && e.kind === "monaco") { clearTimeout(e.diagnosticTimer); e.editor.dispose(); }
+      if (e && e.kind === "monaco") {
+        clearTimeout(e.diagnosticTimer);
+        e.editor.dispose();
+      }
       delete editors[id];
       metadata = [];
     },
@@ -484,11 +811,18 @@ window.dbam = (function () {
       const e = editors[id];
       if (!e || e.kind !== "monaco") return;
       e.diagnostics = preferences.liveDiagnostics;
-      e.editor.updateOptions({ fontSize: preferences.fontSize, quickSuggestions: preferences.automaticSuggestions,
-        suggestOnTriggerCharacters: preferences.automaticSuggestions });
+      e.editor.updateOptions({
+        fontSize: preferences.fontSize,
+        quickSuggestions: preferences.automaticSuggestions,
+        suggestOnTriggerCharacters: preferences.automaticSuggestions,
+      });
       if (!e.diagnostics) {
         clearTimeout(e.diagnosticTimer);
-        window.monaco.editor.setModelMarkers(e.editor.getModel(), "dbam-syntax", []);
+        window.monaco.editor.setModelMarkers(
+          e.editor.getModel(),
+          "dbam-syntax",
+          [],
+        );
       } else scheduleDiagnostics(e);
     },
     editorLayout: function (id) {
@@ -501,9 +835,13 @@ window.dbam = (function () {
       const panes = document.querySelectorAll(".ws-body .ws-editor-pane");
       panes.forEach((pane) => {
         if (isHoriz) {
-          pane.style.flex = pane.dataset.hFlex ? "0 0 " + pane.dataset.hFlex : "";
+          pane.style.flex = pane.dataset.hFlex
+            ? "0 0 " + pane.dataset.hFlex
+            : "";
         } else {
-          pane.style.flex = pane.dataset.vFlex ? "0 0 " + pane.dataset.vFlex : "";
+          pane.style.flex = pane.dataset.vFlex
+            ? "0 0 " + pane.dataset.vFlex
+            : "";
         }
       });
       setTimeout(() => {
@@ -520,47 +858,51 @@ window.dbam = (function () {
 /* ── Password-peek toggle (SSR-safe, auto-attaches) ── */
 (function () {
   function attachPasswordToggles() {
-    document.querySelectorAll('.btn-toggle-password[data-password-input]').forEach(function (btn) {
-      if (btn._pwAttached) return;
-      btn._pwAttached = true;
+    document
+      .querySelectorAll(".btn-toggle-password[data-password-input]")
+      .forEach(function (btn) {
+        if (btn._pwAttached) return;
+        btn._pwAttached = true;
 
-      var inputId = btn.getAttribute('data-password-input');
-      var input = document.getElementById(inputId);
-      if (!input) return;
+        var inputId = btn.getAttribute("data-password-input");
+        var input = document.getElementById(inputId);
+        if (!input) return;
 
-      function setVisibility(show) {
-        input.type = show ? 'text' : 'password';
-        if (show) {
-          btn.classList.add('is-visible');
-          btn.setAttribute('aria-label', 'Hide password');
-          btn.setAttribute('title', 'Hide password');
-          btn.setAttribute('aria-pressed', 'true');
-        } else {
-          btn.classList.remove('is-visible');
-          btn.setAttribute('aria-label', 'Show password');
-          btn.setAttribute('title', 'Show password');
-          btn.setAttribute('aria-pressed', 'false');
+        function setVisibility(show) {
+          input.type = show ? "text" : "password";
+          if (show) {
+            btn.classList.add("is-visible");
+            btn.setAttribute("aria-label", "Hide password");
+            btn.setAttribute("title", "Hide password");
+            btn.setAttribute("aria-pressed", "true");
+          } else {
+            btn.classList.remove("is-visible");
+            btn.setAttribute("aria-label", "Show password");
+            btn.setAttribute("title", "Show password");
+            btn.setAttribute("aria-pressed", "false");
+          }
         }
-      }
 
-      btn.addEventListener('click', function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        var isShowing = input.type === 'text';
-        setVisibility(!isShowing);
+        btn.addEventListener("click", function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          var isShowing = input.type === "text";
+          setVisibility(!isShowing);
+        });
       });
-    });
   }
 
   /* ── Show passkey buttons only when WebAuthn is supported ── */
   function revealPasskeyButtons() {
     if (
-      typeof navigator.credentials !== 'undefined' &&
-      typeof window.PublicKeyCredential !== 'undefined'
+      typeof navigator.credentials !== "undefined" &&
+      typeof window.PublicKeyCredential !== "undefined"
     ) {
-      document.querySelectorAll('[data-passkey-btn], [data-passkey-section]').forEach(function (btn) {
-        btn.style.display = '';
-      });
+      document
+        .querySelectorAll("[data-passkey-btn], [data-passkey-section]")
+        .forEach(function (btn) {
+          btn.style.display = "";
+        });
     }
   }
 
@@ -568,56 +910,69 @@ window.dbam = (function () {
   function attachDocsNavHighlight() {
     // If a previous scroll handler was attached, clean it up first
     if (window._docsScrollHandler) {
-      window.removeEventListener('scroll', window._docsScrollHandler);
+      window.removeEventListener("scroll", window._docsScrollHandler);
       window._docsScrollHandler = null;
     }
 
-    var docsContent = document.querySelector('.docs-content');
+    var docsContent = document.querySelector(".docs-content");
     if (!docsContent) return;
 
-    var allLinks = document.querySelectorAll('.docs-nav a[href*="#"], #docsMobileDropdown a[href*="#"]');
+    var allLinks = document.querySelectorAll(
+      '.docs-nav a[href*="#"], #docsMobileDropdown a[href*="#"]',
+    );
     if (!allLinks.length) return;
 
     // Collect all target section elements in actual DOM order
-    var candidateElements = docsContent.querySelectorAll('section[id], .docs-subsection[id]');
+    var candidateElements = docsContent.querySelectorAll(
+      "section[id], .docs-subsection[id]",
+    );
     var sections = [];
 
     candidateElements.forEach(function (el) {
       var id = el.id;
       if (!id) return;
-      var matchingLinks = Array.from(document.querySelectorAll(
-        '.docs-nav a[href$="#' + id + '"], #docsMobileDropdown a[href$="#' + id + '"]'
-      ));
+      var matchingLinks = Array.from(
+        document.querySelectorAll(
+          '.docs-nav a[href$="#' +
+            id +
+            '"], #docsMobileDropdown a[href$="#' +
+            id +
+            '"]',
+        ),
+      );
       if (matchingLinks.length) {
-        var heading = el.querySelector('h2, h3');
-        var title = (matchingLinks[0].textContent || '').replace(/[\n\r]+/g, ' ').replace(/✓/g, '').trim();
-        title = title.replace(/\b(Fast|Recommended)\b/gi, '').trim();
+        var heading = el.querySelector("h2, h3");
+        var title = (matchingLinks[0].textContent || "")
+          .replace(/[\n\r]+/g, " ")
+          .replace(/✓/g, "")
+          .trim();
+        title = title.replace(/\b(Fast|Recommended)\b/gi, "").trim();
         if (!title && heading) {
-          title = (heading.textContent || '').trim();
+          title = (heading.textContent || "").trim();
         }
         sections.push({
           id: id,
           el: el,
           title: title,
-          links: matchingLinks
+          links: matchingLinks,
         });
       }
     });
 
     if (!sections.length) return;
 
-    var currentTitleEl = document.querySelector('.docs-mobile-current-title');
-    var backToTopBtn = document.getElementById('docsBackToTop');
+    var currentTitleEl = document.querySelector(".docs-mobile-current-title");
+    var backToTopBtn = document.getElementById("docsBackToTop");
 
     function updateActiveSection(activeSection) {
       if (!activeSection) return;
       sections.forEach(function (item) {
-        var isActive = (item.id === activeSection.id);
+        var isActive = item.id === activeSection.id;
         item.links.forEach(function (link) {
           if (isActive) {
-            link.classList.add('active');
+            link.classList.add("active");
           } else {
-            link.classList.remove('active');
+            link.classList.remove("active");
           }
         });
       });
@@ -627,7 +982,9 @@ window.dbam = (function () {
     }
 
     function onScroll() {
-      var isBottom = (window.innerHeight + window.scrollY) >= (document.documentElement.scrollHeight - 60);
+      var isBottom =
+        window.innerHeight + window.scrollY >=
+        document.documentElement.scrollHeight - 60;
       var activeSection = sections[0];
 
       if (isBottom) {
@@ -646,20 +1003,22 @@ window.dbam = (function () {
 
       if (backToTopBtn) {
         if (window.scrollY > 350) {
-          backToTopBtn.classList.add('visible');
+          backToTopBtn.classList.add("visible");
         } else {
-          backToTopBtn.classList.remove('visible');
+          backToTopBtn.classList.remove("visible");
         }
       }
     }
 
     window._docsScrollHandler = onScroll;
-    window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('resize', onScroll, { passive: true });
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
     onScroll();
 
     window._updateActiveDocsSectionById = function (id) {
-      var found = sections.find(function (s) { return s.id === id; });
+      var found = sections.find(function (s) {
+        return s.id === id;
+      });
       if (found) {
         updateActiveSection(found);
       }
@@ -679,37 +1038,40 @@ window.dbam = (function () {
     if (mobileTocHandlerAttached) return;
     mobileTocHandlerAttached = true;
 
-    document.addEventListener('click', function (e) {
-      var mobileToc = document.getElementById('docsMobileToc');
+    document.addEventListener("click", function (e) {
+      var mobileToc = document.getElementById("docsMobileToc");
       if (!mobileToc) return;
-      var trigger = document.getElementById('docsMobileTocTrigger');
+      var trigger = document.getElementById("docsMobileTocTrigger");
 
       // Tapping the dropdown trigger button
       if (trigger && (trigger === e.target || trigger.contains(e.target))) {
-        var isOpen = mobileToc.classList.toggle('is-open');
-        trigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        var isOpen = mobileToc.classList.toggle("is-open");
+        trigger.setAttribute("aria-expanded", isOpen ? "true" : "false");
         return;
       }
 
       // Tapping any option inside the dropdown immediately closes it and updates active selection
-      var link = e.target.closest('#docsMobileDropdown a');
+      var link = e.target.closest("#docsMobileDropdown a");
       if (link) {
-        var href = link.getAttribute('href') || '';
-        var hash = href.split('#')[1];
+        var href = link.getAttribute("href") || "";
+        var hash = href.split("#")[1];
         if (hash && window._updateActiveDocsSectionById) {
           window._updateActiveDocsSectionById(hash);
         }
-        if (mobileToc.classList.contains('is-open')) {
-          mobileToc.classList.remove('is-open');
-          if (trigger) trigger.setAttribute('aria-expanded', 'false');
+        if (mobileToc.classList.contains("is-open")) {
+          mobileToc.classList.remove("is-open");
+          if (trigger) trigger.setAttribute("aria-expanded", "false");
         }
         return;
       }
 
       // Tapping outside closes the dropdown
-      if (mobileToc.classList.contains('is-open') && !mobileToc.contains(e.target)) {
-        mobileToc.classList.remove('is-open');
-        if (trigger) trigger.setAttribute('aria-expanded', 'false');
+      if (
+        mobileToc.classList.contains("is-open") &&
+        !mobileToc.contains(e.target)
+      ) {
+        mobileToc.classList.remove("is-open");
+        if (trigger) trigger.setAttribute("aria-expanded", "false");
       }
     });
   }
@@ -720,28 +1082,33 @@ window.dbam = (function () {
     if (copyHandlerAttached) return;
     copyHandlerAttached = true;
 
-    document.addEventListener('click', function (e) {
-      var btn = e.target.closest('.btn-code-copy, .btn-inline-copy');
+    document.addEventListener("click", function (e) {
+      var btn = e.target.closest(".btn-code-copy, .btn-inline-copy");
       if (!btn) return;
-      var textToCopy = btn.getAttribute('data-copy');
+      var textToCopy = btn.getAttribute("data-copy");
       if (!textToCopy) {
-        var pre = btn.closest('.docs-code-block') ? btn.closest('.docs-code-block').querySelector('pre code') : null;
-        textToCopy = pre ? pre.innerText.trim() : '';
+        var pre = btn.closest(".docs-code-block")
+          ? btn.closest(".docs-code-block").querySelector("pre code")
+          : null;
+        textToCopy = pre ? pre.innerText.trim() : "";
       }
       if (!textToCopy) return;
 
-      navigator.clipboard.writeText(textToCopy).then(function () {
-        btn.classList.add('copied');
-        var span = btn.querySelector('span');
-        var originalText = span ? span.innerText : '';
-        if (span) span.innerText = 'Copied!';
-        setTimeout(function () {
-          btn.classList.remove('copied');
-          if (span) span.innerText = originalText || 'Copy';
-        }, 2000);
-      }).catch(function (err) {
-        console.error('Copy failed', err);
-      });
+      navigator.clipboard
+        .writeText(textToCopy)
+        .then(function () {
+          btn.classList.add("copied");
+          var span = btn.querySelector("span");
+          var originalText = span ? span.innerText : "";
+          if (span) span.innerText = "Copied!";
+          setTimeout(function () {
+            btn.classList.remove("copied");
+            if (span) span.innerText = originalText || "Copy";
+          }, 2000);
+        })
+        .catch(function (err) {
+          console.error("Copy failed", err);
+        });
     });
   }
 
@@ -750,7 +1117,11 @@ window.dbam = (function () {
     if (comboboxHandlerAttached) return;
     comboboxHandlerAttached = true;
     document.addEventListener("keydown", function (e) {
-      if (e.target && e.target.classList && e.target.classList.contains("combobox-input")) {
+      if (
+        e.target &&
+        e.target.classList &&
+        e.target.classList.contains("combobox-input")
+      ) {
         if (e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowUp") {
           e.preventDefault();
         }
@@ -774,16 +1145,18 @@ window.dbam = (function () {
   };
 
   window.toggleTheme = function () {
+    if (window.dbamTheme) return window.dbamTheme.toggle();
     const root = document.documentElement;
     const current = root.getAttribute("data-theme") || "light";
     const next = current === "dark" ? "light" : "dark";
     root.setAttribute("data-theme", next);
     try {
-      localStorage.setItem("theme", next);
+      localStorage.setItem("dbam-theme", next);
     } catch (e) {}
     if (window.monaco) {
       window.monaco.editor.setTheme(next === "dark" ? "vs-dark" : "vs");
     }
+    return next;
   };
 
   window.initTableColumnResizing = function (tableContainerId) {
@@ -797,17 +1170,24 @@ window.dbam = (function () {
         resizer.className = "th-resizer";
         th.appendChild(resizer);
       }
+
+      function beginResize(startX) {
+        const startWidth = th.offsetWidth;
+        resizer.classList.add("resizing");
+        return function applyWidth(pageX) {
+          const newWidth = Math.max(50, startWidth + (pageX - startX));
+          th.style.width = newWidth + "px";
+          th.style.minWidth = newWidth + "px";
+        };
+      }
+
       resizer.onmousedown = function (e) {
         e.preventDefault();
         e.stopPropagation();
-        const startX = e.pageX;
-        const startWidth = th.offsetWidth;
-        resizer.classList.add("resizing");
+        const applyWidth = beginResize(e.pageX);
 
         function onMouseMove(ev) {
-          const newWidth = Math.max(50, startWidth + (ev.pageX - startX));
-          th.style.width = newWidth + "px";
-          th.style.minWidth = newWidth + "px";
+          applyWidth(ev.pageX);
         }
 
         function onMouseUp() {
@@ -819,32 +1199,92 @@ window.dbam = (function () {
         document.addEventListener("mousemove", onMouseMove);
         document.addEventListener("mouseup", onMouseUp);
       };
+
+      resizer.ontouchstart = function (e) {
+        if (!e.touches || !e.touches.length) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const applyWidth = beginResize(e.touches[0].pageX);
+
+        function onTouchMove(ev) {
+          if (!ev.touches || !ev.touches.length) return;
+          ev.preventDefault();
+          applyWidth(ev.touches[0].pageX);
+        }
+
+        function onTouchEnd() {
+          resizer.classList.remove("resizing");
+          document.removeEventListener("touchmove", onTouchMove);
+          document.removeEventListener("touchend", onTouchEnd);
+          document.removeEventListener("touchcancel", onTouchEnd);
+        }
+
+        document.addEventListener("touchmove", onTouchMove, { passive: false });
+        document.addEventListener("touchend", onTouchEnd);
+        document.addEventListener("touchcancel", onTouchEnd);
+      };
     });
   };
 
   window.renderQueryChart = function (containerId, config) {
     const container = document.getElementById(containerId);
     if (!container) return;
+
+    container._lastChartConfig = config;
+    if (!container._chartObserver && typeof ResizeObserver !== "undefined") {
+      let resizeTimer = null;
+      container._chartObserver = new ResizeObserver(() => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          if (container._lastChartConfig && document.body.contains(container)) {
+            window.renderQueryChart(containerId, container._lastChartConfig);
+          }
+        }, 120);
+      });
+      container._chartObserver.observe(container);
+    }
+
     container.innerHTML = "";
 
     const labels = config.labels || [];
     const values = config.values || [];
     const chartType = config.chartType || "bar";
     const colors = [
-      "#5b5bf0", "#18b6e8", "#12a36b", "#d98a06",
-      "#e03e52", "#8b5cf6", "#ec4899", "#f97316"
+      "#5b5bf0",
+      "#18b6e8",
+      "#12a36b",
+      "#d98a06",
+      "#e03e52",
+      "#8b5cf6",
+      "#ec4899",
+      "#f97316",
     ];
 
     if (!labels.length || !values.length) {
-      container.innerHTML = "<div class='muted small' style='padding:20px;text-align:center'>No numeric data available to chart.</div>";
+      container.innerHTML =
+        "<div class='muted small' style='padding:20px;text-align:center'>No numeric data available to chart.</div>";
       return;
     }
 
-    const width = container.clientWidth || 600;
-    const height = Math.max(260, container.clientHeight || 300);
-    const padding = { top: 30, right: 30, bottom: 50, left: 60 };
-    const chartWidth = width - padding.left - padding.right;
-    const chartHeight = height - padding.top - padding.bottom;
+    const width = Math.max(240, container.clientWidth || 600);
+    const height = Math.max(150, container.clientHeight || 260);
+    const isNarrowChart = width < 420;
+    const isShortChart = height < 210;
+    const padding = isNarrowChart
+      ? {
+          top: isShortChart ? 12 : 20,
+          right: 16,
+          bottom: isShortChart ? 28 : 38,
+          left: 40,
+        }
+      : {
+          top: isShortChart ? 16 : 30,
+          right: 30,
+          bottom: isShortChart ? 32 : 48,
+          left: 56,
+        };
+    const chartWidth = Math.max(120, width - padding.left - padding.right);
+    const chartHeight = Math.max(120, height - padding.top - padding.bottom);
 
     const maxVal = Math.max(...values, 0) || 1;
     const minVal = Math.min(...values, 0);
@@ -879,17 +1319,24 @@ window.dbam = (function () {
         const iy2 = centerY + innerRadius * Math.sin(startAngle);
 
         const largeArc = sliceAngle > Math.PI ? 1 : 0;
-        const d = innerRadius > 0
-          ? `M ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} L ${ix1} ${iy1} A ${innerRadius} ${innerRadius} 0 ${largeArc} 0 ${ix2} ${iy2} Z`
-          : `M ${centerX} ${centerY} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z`;
+        const d =
+          innerRadius > 0
+            ? `M ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} L ${ix1} ${iy1} A ${innerRadius} ${innerRadius} 0 ${largeArc} 0 ${ix2} ${iy2} Z`
+            : `M ${centerX} ${centerY} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z`;
 
-        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        const path = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "path",
+        );
         path.setAttribute("d", d);
         path.setAttribute("fill", colors[i % colors.length]);
         path.setAttribute("stroke", "var(--bg-elev)");
         path.setAttribute("stroke-width", "2");
 
-        const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+        const title = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "title",
+        );
         title.textContent = `${labels[i] || ""}: ${val} (${((val / total) * 100).toFixed(1)}%)`;
         path.appendChild(title);
 
@@ -901,7 +1348,10 @@ window.dbam = (function () {
       for (let s = 0; s <= 4; s++) {
         const y = padding.top + (chartHeight * s) / 4;
         const val = maxVal - (maxVal / 4) * s;
-        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        const line = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "line",
+        );
         line.setAttribute("x1", padding.left);
         line.setAttribute("x2", width - padding.right);
         line.setAttribute("y1", y);
@@ -910,7 +1360,10 @@ window.dbam = (function () {
         line.setAttribute("stroke-dasharray", "3,3");
         svg.appendChild(line);
 
-        const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        const txt = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "text",
+        );
         txt.setAttribute("x", padding.left - 8);
         txt.setAttribute("y", y + 4);
         txt.setAttribute("text-anchor", "end");
@@ -926,17 +1379,25 @@ window.dbam = (function () {
         return { x, y, val, label: labels[i] };
       });
 
-      const pathData = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+      const pathData = points
+        .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`)
+        .join(" ");
 
       if (chartType === "area") {
         const areaData = `${pathData} L ${points[points.length - 1].x} ${padding.top + chartHeight} L ${points[0].x} ${padding.top + chartHeight} Z`;
-        const areaPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        const areaPath = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "path",
+        );
         areaPath.setAttribute("d", areaData);
-        areaPath.setAttribute("fill", "rgba(91, 91, 240, 0.15)");
+        areaPath.setAttribute("fill", "color-mix(in srgb, var(--brand) 18%, transparent)");
         svg.appendChild(areaPath);
       }
 
-      const linePath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      const linePath = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "path",
+      );
       linePath.setAttribute("d", pathData);
       linePath.setAttribute("fill", "none");
       linePath.setAttribute("stroke", colors[0]);
@@ -945,7 +1406,10 @@ window.dbam = (function () {
 
       // Points
       points.forEach((p) => {
-        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        const circle = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "circle",
+        );
         circle.setAttribute("cx", p.x);
         circle.setAttribute("cy", p.y);
         circle.setAttribute("r", "4");
@@ -953,20 +1417,29 @@ window.dbam = (function () {
         circle.setAttribute("stroke", "var(--bg-elev)");
         circle.setAttribute("stroke-width", "2");
 
-        const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+        const title = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "title",
+        );
         title.textContent = `${p.label}: ${p.val}`;
         circle.appendChild(title);
         svg.appendChild(circle);
       });
     } else {
       // Default: Bar Chart
-      const barWidth = Math.min(48, Math.max(12, (chartWidth / values.length) * 0.7));
+      const barWidth = Math.min(
+        48,
+        Math.max(12, (chartWidth / values.length) * 0.7),
+      );
 
       // Y Grid lines
       for (let s = 0; s <= 4; s++) {
         const y = padding.top + (chartHeight * s) / 4;
         const val = maxVal - (maxVal / 4) * s;
-        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        const line = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "line",
+        );
         line.setAttribute("x1", padding.left);
         line.setAttribute("x2", width - padding.right);
         line.setAttribute("y1", y);
@@ -975,7 +1448,10 @@ window.dbam = (function () {
         line.setAttribute("stroke-dasharray", "3,3");
         svg.appendChild(line);
 
-        const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        const txt = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "text",
+        );
         txt.setAttribute("x", padding.left - 8);
         txt.setAttribute("y", y + 4);
         txt.setAttribute("text-anchor", "end");
@@ -987,10 +1463,16 @@ window.dbam = (function () {
 
       values.forEach((val, i) => {
         const barHeight = (val / maxVal) * chartHeight;
-        const x = padding.left + (chartWidth / values.length) * i + (chartWidth / values.length - barWidth) / 2;
+        const x =
+          padding.left +
+          (chartWidth / values.length) * i +
+          (chartWidth / values.length - barWidth) / 2;
         const y = padding.top + chartHeight - barHeight;
 
-        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        const rect = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "rect",
+        );
         rect.setAttribute("x", x);
         rect.setAttribute("y", y);
         rect.setAttribute("width", barWidth);
@@ -998,20 +1480,31 @@ window.dbam = (function () {
         rect.setAttribute("rx", "3");
         rect.setAttribute("fill", colors[i % colors.length]);
 
-        const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+        const title = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "title",
+        );
         title.textContent = `${labels[i] || ""}: ${val}`;
         rect.appendChild(title);
         svg.appendChild(rect);
 
-        // X Axis labels
-        if (values.length <= 25) {
-          const lbl = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        // X Axis labels (thin dynamically on narrow containers to prevent overlap)
+        const maxLabels = Math.max(4, Math.floor(chartWidth / 56));
+        const labelStep = Math.max(1, Math.ceil(values.length / maxLabels));
+        if (i % labelStep === 0) {
+          const lbl = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "text",
+          );
           lbl.setAttribute("x", x + barWidth / 2);
           lbl.setAttribute("y", height - padding.bottom + 16);
           lbl.setAttribute("text-anchor", "middle");
           lbl.setAttribute("fill", "var(--text-dim)");
-          lbl.setAttribute("font-size", "10.5px");
-          lbl.textContent = (labels[i] || "").substring(0, 10);
+          lbl.setAttribute("font-size", isNarrowChart ? "9.5px" : "10.5px");
+          lbl.textContent = (labels[i] || "").substring(
+            0,
+            isNarrowChart ? 7 : 10,
+          );
           svg.appendChild(lbl);
         }
       });
@@ -1029,17 +1522,20 @@ window.dbam = (function () {
     attachComboboxKeydownHandler();
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
   } else {
     init();
   }
-  document.addEventListener('blazor:enhancedload', init);
+  document.addEventListener("blazor:enhancedload", init);
 
   // Auto-detect when docs content is rendered by client-side Blazor routing
   try {
     var observer = new MutationObserver(function () {
-      if (document.querySelector('.docs-content') && !window._docsScrollHandler) {
+      if (
+        document.querySelector(".docs-content") &&
+        !window._docsScrollHandler
+      ) {
         init();
       }
     });

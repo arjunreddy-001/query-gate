@@ -199,6 +199,7 @@
         // Actions Group
         items.Add(new("Actions", "Toggle Dark / Light Theme", "Switch between visual themes", "sun", Action: async () => await JS.InvokeVoidAsync("toggleTheme")));
         items.Add(new("Actions", "New Query Tab", "Open a fresh query tab in the workspace", "plus", "/query"));
+        items.Add(new("Actions", "Keyboard Shortcuts", "View query workspace keyboard shortcuts", "key", "/query?shortcuts=true"));
 
         allItems = items;
     }

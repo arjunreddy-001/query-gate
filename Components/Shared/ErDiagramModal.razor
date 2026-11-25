@@ -3,10 +3,10 @@
 @inject IJSRuntime JS
 @implements IDisposable
 
-<div class="modal-back" @onclick="Close" style="z-index:1100">
-    <div class="modal card" @onclick:stopPropagation style="max-width:94vw;width:1300px;max-height:92vh;display:flex;flex-direction:column;padding:0;overflow:hidden">
-        <div class="row-inline" style="justify-content:space-between;padding:12px 18px;border-bottom:1px solid var(--line);background:var(--bg-elev)">
-            <div class="row-inline" style="gap:10px">
+<div class="modal-back" @onclick="Close" style="z-index:1100;@(isMaximized ? "padding:0;margin:0" : "")">
+    <div class="modal card er-modal @(isMaximized ? "er-maximized" : "")" @onclick:stopPropagation>
+        <div class="er-modal-head">
+            <div class="er-modal-title">
                 <Icon Name="grid" />
                 <h3 style="margin:0;font-size:15px;font-weight:700">Entity-Relationship (ER) Diagram</h3>
                 <span class="badge" style="font-size:11px">@DatabaseName</span>
@@ -16,10 +16,10 @@
                 }
             </div>
 
-            <div class="row-inline" style="gap:8px">
+            <div class="er-modal-controls">
                 <div class="row-inline" style="gap:4px">
                     <span class="muted small" style="margin-right:4px">Focus:</span>
-                    <select class="form-control" style="height:28px;padding:2px 8px;font-size:12px;width:170px" value="@focusTable" @onchange="OnFocusChanged">
+                    <select class="form-control er-focus-select" value="@focusTable" @onchange="OnFocusChanged">
                         @foreach (var t in availableTables)
                         {
                             <option value="@t">@t</option>
@@ -33,17 +33,20 @@
                     <button class="btn btn-sm @(fullSchema ? "btn-primary" : "")" type="button" @onclick="ToggleFullSchema">Full Schema</button>
                 </div>
 
-                <div class="row-inline" style="gap:2px;margin-left:6px;border-left:1px solid var(--line);padding-left:8px">
+                <div class="row-inline" style="gap:2px;border-left:1px solid var(--line);padding-left:8px">
                     <button class="btn btn-sm icon-btn" title="Zoom in" type="button" @onclick="ZoomIn"><Icon Name="plus" /></button>
                     <button class="btn btn-sm icon-btn" title="Zoom out" type="button" @onclick="ZoomOut"><Icon Name="minus" /></button>
-                    <button class="btn btn-sm icon-btn" title="Fit to screen" type="button" @onclick="ZoomFit"><Icon Name="maximize" /></button>
+                    <button class="btn btn-sm icon-btn" title="Fit diagram in view" type="button" @onclick="ZoomFit"><Icon Name="refresh" /></button>
+                    <button class="btn btn-sm icon-btn" title="@(isMaximized ? "Restore window size" : "Maximize dialog to full screen")" type="button" @onclick="ToggleMaximize">
+                        <Icon Name="@(isMaximized ? "minimize" : "maximize")" />
+                    </button>
                 </div>
 
-                <button class="btn btn-sm icon-btn" title="Close" type="button" style="margin-left:6px" @onclick="Close"><Icon Name="x" /></button>
+                <button class="btn btn-sm icon-btn" title="Close" type="button" @onclick="Close"><Icon Name="x" /></button>
             </div>
         </div>
 
-        <div style="flex:1;position:relative;min-height:550px;background:var(--bg-sunken)">
+        <div class="er-canvas-wrap">
             @if (loading)
             {
                 <div style="display:flex;align-items:center;justify-content:center;height:100%;gap:10px;color:var(--text-dim)">
@@ -57,7 +60,7 @@
                     <span class="small">Ensure metadata is loaded for this database.</span>
                 </div>
             }
-            <div id="@containerId" style="width:100%;height:100%;min-height:550px"></div>
+            <div id="@containerId" class="er-canvas"></div>
         </div>
     </div>
 </div>
@@ -77,6 +80,7 @@
     private int hops = 1;
     private bool fullSchema;
     private bool loading = true;
+    private bool isMaximized;
 
     protected override async Task OnInitializedAsync()
     {
@@ -158,6 +162,14 @@
     private async Task ZoomIn() => await JS.InvokeVoidAsync("dbamEr.zoomIn", containerId);
     private async Task ZoomOut() => await JS.InvokeVoidAsync("dbamEr.zoomOut", containerId);
     private async Task ZoomFit() => await JS.InvokeVoidAsync("dbamEr.zoomFit", containerId);
+
+    private async Task ToggleMaximize()
+    {
+        isMaximized = !isMaximized;
+        StateHasChanged();
+        await Task.Delay(50);
+        await ZoomFit();
+    }
 
     [JSInvokable]
     public async Task OnSelectTableQuery(string tableName)

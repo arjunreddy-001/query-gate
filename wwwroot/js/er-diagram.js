@@ -30,6 +30,7 @@
             this.layoutNodes(state);
             this.draw(state);
             this.bindEvents(state);
+            this.zoomFit(containerId);
         },
 
         layoutNodes: function (state) {
@@ -80,10 +81,10 @@
             var defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
             defs.innerHTML = `
                 <marker id="er-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                    <path d="M 0 1 L 9 5 L 0 9 z" fill="#5b5bf0" />
+                    <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--brand, #5b5bf0)" />
                 </marker>
                 <marker id="er-arrow-active" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                    <path d="M 0 1 L 9 5 L 0 9 z" fill="#ef4444" />
+                    <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--bad, #e03e52)" />
                 </marker>
             `;
             svg.appendChild(defs);
@@ -120,7 +121,7 @@
             card.style.background = "var(--bg-elev, #ffffff)";
             card.style.border = isFocus ? "2px solid var(--brand, #5b5bf0)" : "1px solid var(--line, #e3e6f1)";
             card.style.borderRadius = "8px";
-            card.style.boxShadow = isFocus ? "0 4px 16px rgba(91,91,240,0.2)" : "0 2px 8px rgba(0,0,0,0.06)";
+            card.style.boxShadow = isFocus ? "0 4px 16px color-mix(in srgb, var(--brand) 24%, transparent)" : "var(--shadow, 0 2px 8px rgba(0,0,0,0.06))";
             card.style.cursor = "move";
             card.style.zIndex = "10";
             card.style.fontSize = "12px";
@@ -162,6 +163,7 @@
             qBtn.style.border = "1px solid var(--line, #e3e6f1)";
             qBtn.style.borderRadius = "4px";
             qBtn.style.background = "var(--bg-elev, #ffffff)";
+            qBtn.style.color = "var(--text, #151a33)";
             qBtn.style.cursor = "pointer";
             qBtn.textContent = "Query";
             qBtn.onmousedown = function (e) { e.stopPropagation(); };
@@ -198,7 +200,7 @@
 
                 if (col.isPrimaryKey) {
                     var pkBadge = document.createElement("span");
-                    pkBadge.style.color = "#eab308";
+                    pkBadge.style.color = "var(--warn-ink, #995800)";
                     pkBadge.style.fontWeight = "bold";
                     pkBadge.title = "Primary Key";
                     pkBadge.textContent = "[PK]";
@@ -230,14 +232,24 @@
             }
             card.appendChild(colList);
 
-            // Drag binding
+            // Drag binding (mouse + touch)
             var self = this;
+            function startNodeDrag(clientX, clientY) {
+                state.draggingNode = node.fullName;
+                state.dragOriginX = pos.x;
+                state.dragOriginY = pos.y;
+                state.dragStartX = clientX;
+                state.dragStartY = clientY;
+                card.style.zIndex = "100";
+            }
             header.onmousedown = function (e) {
                 if (e.button !== 0) return;
-                state.draggingNode = node.fullName;
-                state.dragStartX = e.clientX - pos.x;
-                state.dragStartY = e.clientY - pos.y;
-                card.style.zIndex = "100";
+                startNodeDrag(e.clientX, e.clientY);
+                e.stopPropagation();
+            };
+            header.ontouchstart = function (e) {
+                if (!e.touches || e.touches.length !== 1) return;
+                startNodeDrag(e.touches[0].clientX, e.touches[0].clientY);
                 e.stopPropagation();
             };
 
@@ -285,7 +297,7 @@
                 var d = "M " + x1 + " " + y1 + " C " + cx1 + " " + cy1 + ", " + cx2 + " " + cy2 + ", " + x2 + " " + y2;
                 path.setAttribute("d", d);
                 path.setAttribute("fill", "none");
-                path.setAttribute("stroke", isSelected ? "#ef4444" : "#5b5bf0");
+                path.setAttribute("stroke", isSelected ? "var(--bad, #e03e52)" : "var(--brand, #5b5bf0)");
                 path.setAttribute("stroke-width", isSelected ? "2.5" : "1.5");
                 path.setAttribute("stroke-dasharray", isSelected ? "none" : "4,2");
                 path.setAttribute("marker-end", isSelected ? "url(#er-arrow-active)" : "url(#er-arrow)");
@@ -303,24 +315,23 @@
             var container = state.container;
             var self = this;
 
-            container.onmousedown = function (e) {
-                if (e.target !== container && e.target.tagName !== "svg") return;
-                state.isPanning = true;
-                state.panStartX = e.clientX - state.panX;
-                state.panStartY = e.clientY - state.panY;
-                container.style.cursor = "grabbing";
-            };
-
-            window.addEventListener("mousemove", function (e) {
-                if (state.isPanning) {
-                    state.panX = e.clientX - state.panStartX;
-                    state.panY = e.clientY - state.panStartY;
+            function applyTransform() {
+                if (state.world) {
                     state.world.style.transform = "translate(" + state.panX + "px, " + state.panY + "px) scale(" + state.zoom + ")";
+                }
+            }
+
+            function handleMove(clientX, clientY) {
+                if (state.isPanning) {
+                    state.panX = clientX - state.panStartX;
+                    state.panY = clientY - state.panStartY;
+                    applyTransform();
                 } else if (state.draggingNode) {
                     var pos = state.nodePositions[state.draggingNode];
                     if (pos) {
-                        pos.x = (e.clientX - state.dragStartX);
-                        pos.y = (e.clientY - state.dragStartY);
+                        var zoom = state.zoom || 1;
+                        pos.x = state.dragOriginX + (clientX - state.dragStartX) / zoom;
+                        pos.y = state.dragOriginY + (clientY - state.dragStartY) / zoom;
                         var card = document.getElementById("er-node-" + encodeURIComponent(state.draggingNode));
                         if (card) {
                             card.style.left = pos.x + "px";
@@ -329,9 +340,9 @@
                         self.updateEdges(state);
                     }
                 }
-            });
+            }
 
-            window.addEventListener("mouseup", function () {
+            function handleEnd() {
                 if (state.isPanning) {
                     state.isPanning = false;
                     container.style.cursor = "grab";
@@ -341,7 +352,47 @@
                     if (card) card.style.zIndex = "10";
                     state.draggingNode = null;
                 }
-            });
+            }
+
+            container.onmousedown = function (e) {
+                if (e.target !== container && e.target.tagName !== "svg" && e.target !== state.world) return;
+                state.isPanning = true;
+                state.panStartX = e.clientX - state.panX;
+                state.panStartY = e.clientY - state.panY;
+                container.style.cursor = "grabbing";
+            };
+
+            container.ontouchstart = function (e) {
+                if (!e.touches || e.touches.length !== 1) return;
+                if (e.target !== container && e.target.tagName !== "svg" && e.target !== state.world) return;
+                state.isPanning = true;
+                state.panStartX = e.touches[0].clientX - state.panX;
+                state.panStartY = e.touches[0].clientY - state.panY;
+            };
+
+            function onMouseMove(e) {
+                handleMove(e.clientX, e.clientY);
+            }
+            function onTouchMove(e) {
+                if (!state.isPanning && !state.draggingNode) return;
+                if (!e.touches || !e.touches.length) return;
+                e.preventDefault();
+                handleMove(e.touches[0].clientX, e.touches[0].clientY);
+            }
+
+            window.addEventListener("mousemove", onMouseMove);
+            window.addEventListener("mouseup", handleEnd);
+            window.addEventListener("touchmove", onTouchMove, { passive: false });
+            window.addEventListener("touchend", handleEnd);
+            window.addEventListener("touchcancel", handleEnd);
+
+            state._cleanup = function () {
+                window.removeEventListener("mousemove", onMouseMove);
+                window.removeEventListener("mouseup", handleEnd);
+                window.removeEventListener("touchmove", onTouchMove);
+                window.removeEventListener("touchend", handleEnd);
+                window.removeEventListener("touchcancel", handleEnd);
+            };
 
             container.onwheel = function (e) {
                 e.preventDefault();
@@ -369,15 +420,39 @@
 
         zoomFit: function (containerId) {
             var state = this.instances[containerId];
-            if (!state) return;
-            state.panX = 40;
-            state.panY = 40;
-            state.zoom = 1.0;
-            state.world.style.transform = "translate(" + state.panX + "px, " + state.panY + "px) scale(1.0)";
+            if (!state || !state.world) return;
+            var keys = Object.keys(state.nodePositions || {});
+            var cw = state.container.clientWidth || 600;
+            var ch = state.container.clientHeight || 400;
+            if (!keys.length) {
+                state.panX = 24;
+                state.panY = 24;
+                state.zoom = 1.0;
+                state.world.style.transform = "translate(24px, 24px) scale(1.0)";
+                return;
+            }
+            var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (var i = 0; i < keys.length; i++) {
+                var p = state.nodePositions[keys[i]];
+                if (p.x < minX) minX = p.x;
+                if (p.y < minY) minY = p.y;
+                if (p.x + p.width > maxX) maxX = p.x + p.width;
+                if (p.y + p.height > maxY) maxY = p.y + p.height;
+            }
+            var bw = Math.max(100, maxX - minX);
+            var bh = Math.max(100, maxY - minY);
+            var pad = 32;
+            var fitZoom = Math.max(0.25, Math.min(1.0, Math.min((cw - pad * 2) / bw, (ch - pad * 2) / bh)));
+            state.zoom = fitZoom;
+            state.panX = Math.round((cw - bw * fitZoom) / 2 - minX * fitZoom);
+            state.panY = Math.round((ch - bh * fitZoom) / 2 - minY * fitZoom);
+            state.world.style.transform = "translate(" + state.panX + "px, " + state.panY + "px) scale(" + state.zoom + ")";
         },
 
         destroy: function (containerId) {
-            if (this.instances[containerId]) {
+            var state = this.instances[containerId];
+            if (state) {
+                if (state._cleanup) state._cleanup();
                 delete this.instances[containerId];
             }
         }

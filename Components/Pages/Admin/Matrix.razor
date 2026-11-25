@@ -25,7 +25,7 @@
 </div>
 
 <div class="toolbar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-    <select @bind="dbId" @bind:after="Load" style="min-width:280px">
+    <select class="matrix-db-select" @bind="dbId" @bind:after="Load">
         <option value="@Guid.Empty">Select database…</option>
         @foreach (var d in dbs) { <option value="@d.Id">@d.Name (@d.Environment) · @DatabaseEngineInfo.GetDisplayName(d.Engine)</option> }
     </select>
@@ -36,7 +36,7 @@
     }
     @if (rows.Count > 0)
     {
-        <input type="search" class="search" placeholder="Filter users…" @bind="userSearch" @bind:event="oninput" style="max-width:240px;margin-left:auto" />
+        <input type="search" class="search matrix-user-search" placeholder="Filter users…" @bind="userSearch" @bind:event="oninput" />
     }
 </div>
 
