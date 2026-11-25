@@ -249,6 +249,16 @@
     }, { passive: false });
     document.addEventListener('touchend', endSplitDrag);
     document.addEventListener('touchcancel', endSplitDrag);
+    document.addEventListener('dblclick', function (e) {
+        var s = e.target.closest && e.target.closest('.ws-split');
+        if (!s) return;
+        e.preventDefault();
+        drag = null;
+        document.body.style.userSelect = '';
+        if (window.dbam && window.dbam.toggleResults) {
+            window.dbam.toggleResults();
+        }
+    });
 
     // Keep split layout flex-basis synced when orientation toggles
     var lastHorizState = null;

@@ -5,6 +5,8 @@ window.dbam = (function () {
   let metadata = [];
   let providerRegistered = false;
   let sideResizeBound = false;
+  let activeWorkspaceRef = null;
+  let workspaceShortcutsBound = false;
   const tabFileHandles = new Map();
   let pendingDropHandle = null;
 
@@ -423,6 +425,89 @@ window.dbam = (function () {
     document.addEventListener("touchcancel", endSideDrag);
   }
 
+  function handleWorkspaceShortcutEvent(e) {
+    if (!activeWorkspaceRef || !e) return false;
+    if (!document.getElementById("query-ws")) return false;
+
+    if (
+      e.ctrlKey &&
+      !e.altKey &&
+      !e.metaKey &&
+      !e.shiftKey &&
+      e.code === "Backquote"
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      activeWorkspaceRef
+        .invokeMethodAsync("OnToggleResults")
+        .catch(console.error);
+      return true;
+    }
+
+    if (
+      (e.ctrlKey || e.metaKey) &&
+      !e.altKey &&
+      !e.shiftKey &&
+      (e.code === "Backslash" || e.key === "\\")
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      activeWorkspaceRef.invokeMethodAsync("OnToggleSide").catch(console.error);
+      return true;
+    }
+
+    if (
+      (e.ctrlKey || e.metaKey) &&
+      !e.altKey &&
+      !e.shiftKey &&
+      (e.code === "KeyI" || (e.key && e.key.toLowerCase() === "i"))
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      activeWorkspaceRef.invokeMethodAsync("OnToggleAi").catch(console.error);
+      return true;
+    }
+
+    if (
+      (e.ctrlKey || e.metaKey) &&
+      e.shiftKey &&
+      !e.altKey &&
+      (e.code === "KeyE" || (e.key && e.key.toLowerCase() === "e"))
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      activeWorkspaceRef
+        .invokeMethodAsync("OnToggleFocusMode")
+        .catch(console.error);
+      return true;
+    }
+
+    return false;
+  }
+
+  function ensureWorkspaceShortcuts() {
+    if (workspaceShortcutsBound) return;
+    workspaceShortcutsBound = true;
+    document.addEventListener("keydown", (e) => {
+      if (!activeWorkspaceRef || !document.getElementById("query-ws")) return;
+      if (e.key === "Escape") {
+        if (
+          !e.defaultPrevented &&
+          !document.querySelector(
+            "#sql-editor .suggest-widget.visible, #sql-editor .find-widget.visible",
+          )
+        ) {
+          activeWorkspaceRef.invokeMethodAsync("OnEscape").catch(() => {});
+        }
+        return;
+      }
+      if (e.target && e.target.closest && e.target.closest("#sql-editor")) {
+        return;
+      }
+      handleWorkspaceShortcutEvent(e);
+    });
+  }
+
   return {
     isNarrowViewport: () =>
       window.matchMedia(
@@ -655,9 +740,22 @@ window.dbam = (function () {
       if (Number.isFinite(width))
         ws.style.setProperty("--ws-side-w", clampSideWidth(width) + "px");
       ensureSideResizeHandlers();
+      ensureWorkspaceShortcuts();
+    },
+
+    toggleResults: function () {
+      if (activeWorkspaceRef) {
+        return activeWorkspaceRef
+          .invokeMethodAsync("OnToggleResults")
+          .catch(console.error);
+      }
     },
 
     editorInit: async function (id, elementId, ref, value, preferences) {
+      if (id === "main") {
+        activeWorkspaceRef = ref;
+        ensureWorkspaceShortcuts();
+      }
       const el = document.getElementById(elementId);
       if (!el) return false;
       try {
@@ -684,23 +782,28 @@ window.dbam = (function () {
           fixedOverflowWidgets: true,
         });
         editor.addCommand(monaco.KeyCode.F5, () =>
-          ref.invokeMethodAsync("OnRun"),
+          ref.invokeMethodAsync("OnRun").catch(console.error),
         );
         editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () =>
-          ref.invokeMethodAsync("OnRun"),
+          ref.invokeMethodAsync("OnRun").catch(console.error),
         );
         editor.addCommand(
           monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF,
-          () => ref.invokeMethodAsync("OnFormat"),
+          () => ref.invokeMethodAsync("OnFormat").catch(console.error),
         );
         editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () =>
-          ref.invokeMethodAsync("OnSave"),
+          ref.invokeMethodAsync("OnSave").catch(console.error),
         );
         editor.onKeyDown((ev) => {
           if (ev.keyCode === monaco.KeyCode.F5) {
             ev.preventDefault();
             ev.stopPropagation();
-            ref.invokeMethodAsync("OnRun");
+            ref.invokeMethodAsync("OnRun").catch(console.error);
+            return;
+          }
+          if (handleWorkspaceShortcutEvent(ev.browserEvent)) {
+            ev.preventDefault();
+            ev.stopPropagation();
           }
         });
         const entry = {
@@ -709,10 +812,16 @@ window.dbam = (function () {
           ref,
           diagnostics: preferences.liveDiagnostics,
           cursorTimer: null,
+          changeTimer: null,
         };
         editors[id] = entry;
         editor.onDidChangeModelContent(() => {
-          ref.invokeMethodAsync("OnChanged", editor.getValue());
+          clearTimeout(entry.changeTimer);
+          entry.changeTimer = setTimeout(() => {
+            if (editors[id] === entry) {
+              ref.invokeMethodAsync("OnChanged", editor.getValue()).catch(() => {});
+            }
+          }, 250);
           scheduleDiagnostics(entry);
         });
         editor.onDidChangeCursorPosition((ev) => {
@@ -739,17 +848,25 @@ window.dbam = (function () {
         ta.className = "fallback";
         ta.value = value || "";
         ta.spellcheck = false;
-        ta.addEventListener("input", () =>
-          ref.invokeMethodAsync("OnChanged", ta.value),
-        );
+        const plainEntry = { kind: "plain", ta, changeTimer: null };
+        ta.addEventListener("input", () => {
+          clearTimeout(plainEntry.changeTimer);
+          plainEntry.changeTimer = setTimeout(() => {
+            if (editors[id] === plainEntry) {
+              ref.invokeMethodAsync("OnChanged", ta.value).catch(() => {});
+            }
+          }, 250);
+        });
         ta.addEventListener("keydown", (ev) => {
           if (ev.key === "F5" || (ev.ctrlKey && ev.key === "Enter")) {
             ev.preventDefault();
-            ref.invokeMethodAsync("OnRun");
+            ref.invokeMethodAsync("OnRun").catch(console.error);
+            return;
           }
+          handleWorkspaceShortcutEvent(ev);
         });
         el.appendChild(ta);
-        editors[id] = { kind: "plain", ta };
+        editors[id] = plainEntry;
         setupEditorFileDrop(el, ref);
         return false;
       }
@@ -799,10 +916,17 @@ window.dbam = (function () {
       );
     },
     editorDispose: function (id) {
+      if (id === "main") {
+        activeWorkspaceRef = null;
+      }
       const e = editors[id];
-      if (e && e.kind === "monaco") {
+      if (e) {
         clearTimeout(e.diagnosticTimer);
-        e.editor.dispose();
+        clearTimeout(e.cursorTimer);
+        clearTimeout(e.changeTimer);
+        if (e.kind === "monaco") {
+          e.editor.dispose();
+        }
       }
       delete editors[id];
       metadata = [];

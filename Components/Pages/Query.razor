@@ -338,6 +338,22 @@ else
                 <button class="btn btn-hover-expand @(formMode ? "btn-primary" : "")" title="Form Mode: auto-generate form for parameterized queries" @onclick="ToggleFormMode"><Icon Name="edit" /><span class="btn-lbl">Form Mode@(DetectedParameters.Count > 0 ? $" ({DetectedParameters.Count})" : "")</span></button>
             </div>
             <button class="icon-btn sm ws-split-toggle" title="@(layoutSplitHorizontal ? "Switch to stacked vertical layout" : "Switch to side-by-side horizontal layout")" @onclick="ToggleLayoutSplit"><Icon Name="@(layoutSplitHorizontal ? "rows" : "columns")" /></button>
+            <button class="icon-btn sm ws-results-toggle @(resultsVisible ? "active" : "")"
+                    type="button"
+                    title="@(resultsVisible ? "Hide result viewer (Ctrl+`)" : "Show result viewer (Ctrl+`)")"
+                    aria-label="@(resultsVisible ? "Hide result viewer" : "Show result viewer")"
+                    aria-pressed="@(resultsVisible ? "true" : "false")"
+                    @onclick="ToggleResults">
+                <Icon Name="@(layoutSplitHorizontal ? "panel-right" : "panel-bottom")" />
+            </button>
+            <button class="icon-btn sm ws-focus-toggle @(IsFocusMode ? "active" : "")"
+                    type="button"
+                    title="@(IsFocusMode ? "Exit editor focus mode (Ctrl+Shift+E)" : "Editor focus mode: hide side panel and results (Ctrl+Shift+E)")"
+                    aria-label="@(IsFocusMode ? "Exit editor focus mode" : "Enter editor focus mode")"
+                    aria-pressed="@(IsFocusMode ? "true" : "false")"
+                    @onclick="ToggleFocusMode">
+                <Icon Name="@(IsFocusMode ? "minimize" : "maximize")" />
+            </button>
             <button class="icon-btn sm ws-bar-desktop-only" title="Keyboard Shortcuts (?)" @onclick="() => showShortcutsModal = true"><Icon Name="key" /></button>
             <div class="ws-bar-overflow">
                 <button class="icon-btn sm @(toolbarOverflow ? "active" : "")" type="button" title="More actions" aria-label="More actions" aria-expanded="@(toolbarOverflow ? "true" : "false")" @onclick="() => toolbarOverflow = !toolbarOverflow">
@@ -462,7 +478,7 @@ else
             </div>
         }
 
-        <div class="ws-body @(layoutSplitHorizontal ? "ws-body-horizontal" : "")">
+        <div class="ws-body @(layoutSplitHorizontal ? "ws-body-horizontal" : "") @(resultsVisible ? "" : "results-hidden")">
             <div class="ws-editor-pane">
                 @if (formMode)
                 {
@@ -538,11 +554,17 @@ else
                 </div>
             </div>
 
-            <div class="ws-split" title="Drag to resize"></div>
+            <div class="ws-split" title="Drag to resize · Double-click to hide result viewer"></div>
 
             <div class="card results @(maximized ? "maximized" : "")" @onkeydown='e => { if (e.Key == "Escape") maximized = false; }' tabindex="-1">
             <div class="card-head" style="padding:5px 10px">
-                @if (last is null) { <span class="muted">Results appear here.</span> }
+                @if (last is null)
+                {
+                    <span class="muted">Results appear here.</span>
+                    <div class="actions">
+                        <button class="icon-btn sm" type="button" title="Hide result viewer (Ctrl+`)" aria-label="Hide result viewer" @onclick="ToggleResults"><Icon Name="@(layoutSplitHorizontal ? "chevron-right" : "chevron-down")" /></button>
+                    </div>
+                }
                 else
                 {
                     <span class="badge @OutcomeClass(last.Outcome)">@last.Outcome</span>
@@ -610,6 +632,7 @@ else
                             }
                         }
                         <button class="btn btn-sm" title="@(maximized ? "Minimize (Esc)" : "Maximize results")" @onclick="() => maximized = !maximized"><Icon Name="@(maximized ? "minimize" : "maximize")" />@(maximized ? "Minimize" : "Maximize")</button>
+                        <button class="icon-btn sm" type="button" title="Hide result viewer (Ctrl+`)" aria-label="Hide result viewer" @onclick="ToggleResults"><Icon Name="@(layoutSplitHorizontal ? "chevron-right" : "chevron-down")" /></button>
                     </div>
                 }
             </div>
@@ -719,7 +742,21 @@ else
                             <button class="btn btn-sm" type="button" @onclick="CopyMessages" disabled="@(last.Messages.Count == 0)"><Icon Name="copy" />Copy Messages</button>
                         </div>
                         @foreach (var m in last.Messages) { <div>@m</div> }
-                        @if (last.Messages.Count == 0) { <span class="muted">No messages.</span> }
+                        @if (last.Messages.Count == 0)
+                        {
+                            @if (last.Outcome == "Success" && last.Error is null)
+                            {
+                                <span class="ok">Command(s) completed successfully.@(last.RowsAffected > 0 ? $" ({last.RowsAffected} row(s) affected.)" : "")</span>
+                            }
+                            else if (last.Error is not null)
+                            {
+                                <span class="muted">No additional messages.</span>
+                            }
+                            else
+                            {
+                                <span class="muted">No messages.</span>
+                            }
+                        }
                     </div>
                 }
                 else if (activeResult == -2 && last.ExecutionPlan is not null)
@@ -977,6 +1014,17 @@ else
                 <span class="badge warn" title="Sensitive PII columns redacted (no UNMASK permission)"><Icon Name="lock" />Masked (@last.MaskedColumns.Count PII redacted)</span>
             }
         }
+        @if (!resultsVisible)
+        {
+            <button type="button" class="ws-status-toggle" @onclick="ToggleResults" title="Show result viewer (Ctrl+`)">
+                <Icon Name="@(layoutSplitHorizontal ? "panel-right" : "panel-bottom")" />
+                @if (last is not null)
+                {
+                    <span class="ws-status-dot @(last.Error is not null ? "bad" : "")"></span>
+                }
+                <span>Results hidden · Show</span>
+            </button>
+        }
         <span class="ws-status-item ws-status-cursor">Ln @cursorLine, Col @cursorCol</span>
     </div>
     </section>
@@ -1062,7 +1110,7 @@ else
                        autofocus />
             </div>
             <div class="modal-foot" style="justify-content:space-between">
-                <button class="btn btn-sm" @onclick="() => { showSafetyConfirmModal = false; dryRun = true; _ = RunCore(false); }">
+                <button class="btn btn-sm" @onclick="ExecuteDryRunFromSafety">
                     <Icon Name="play" /> Run as Dry-Run Instead
                 </button>
                 <div class="row-inline" style="gap:6px">
@@ -1227,6 +1275,14 @@ else
                 <div class="row-inline" style="justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line)">
                     <span>Toggle Side Panel</span>
                     <span><kbd>Ctrl+\</kbd></span>
+                </div>
+                <div class="row-inline" style="justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line)">
+                    <span>Toggle Result Viewer</span>
+                    <span><kbd>Ctrl+`</kbd></span>
+                </div>
+                <div class="row-inline" style="justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line)">
+                    <span>Toggle Editor Focus Mode</span>
+                    <span><kbd>Ctrl+Shift+E</kbd></span>
                 </div>
                 <div class="row-inline" style="justify-content:space-between;padding:4px 0">
                     <span>Dismiss modal or minimize results</span>
@@ -1563,6 +1619,10 @@ else
     private bool groupBySchema;
     private bool searchColumns;
     private bool layoutSplitHorizontal;
+    private bool resultsVisible = true;
+    private bool? preFocusSideOpen;
+    private bool preFocusResultsVisible = true;
+    private bool IsFocusMode => !resultsVisible && sideOpen == false;
     private bool showShortcutsModal;
     private bool toolbarOverflow;
     private int cursorLine = 1;
@@ -1670,6 +1730,19 @@ else
 
         catch { tabs = []; }
 
+        try
+        {
+            var splitStored = await Storage.GetAsync<bool>("query_split_h");
+            if (splitStored.Success) layoutSplitHorizontal = splitStored.Value;
+        }
+        catch { }
+        try
+        {
+            var resultsStored = await Storage.GetAsync<bool>("query_results_visible");
+            if (resultsStored.Success) resultsVisible = resultsStored.Value;
+        }
+        catch { }
+
         if (tabs.Count == 0) tabs.Add(new QueryTab { DatabaseId = DbParam ?? databases[0].Id, Sql = "SELECT TOP 10 * FROM sys.objects;" });
         else if (DbParam is { } p && databases.Any(d => d.Id == p)) tabs.Add(new QueryTab { Name = "Query " + (tabs.Count + 1), DatabaseId = p });
         activeId = tabs[^1].Id;
@@ -1680,9 +1753,58 @@ else
         await JS.InvokeAsync<bool>("dbam.editorInit", "main", "sql-editor", self, Current!.Sql, savedPreferences);
         await OnDbChanged();
         StateHasChanged();
+        if (layoutSplitHorizontal || !resultsVisible)
+        {
+            await Task.Yield();
+            try { await JS.InvokeVoidAsync("dbam.syncSplitLayout", layoutSplitHorizontal); } catch { }
+            await JS.InvokeVoidAsync("dbam.editorLayout", "main");
+        }
     }
 
-    private void ToggleSide() => sideOpen = sideOpen != true;
+    private async Task ToggleSide()
+    {
+        sideOpen = sideOpen != true;
+        await Task.Yield();
+        await JS.InvokeVoidAsync("dbam.editorLayout", "main");
+    }
+
+    private async Task ToggleResults()
+    {
+        resultsVisible = !resultsVisible;
+        if (!resultsVisible) maximized = false;
+        try { await Storage.SetAsync("query_results_visible", resultsVisible); } catch { }
+        await Task.Yield();
+        try { await JS.InvokeVoidAsync("dbam.syncSplitLayout", layoutSplitHorizontal); } catch { }
+        await JS.InvokeVoidAsync("dbam.editorLayout", "main");
+    }
+
+    private async Task ToggleFocusMode()
+    {
+        if (IsFocusMode)
+        {
+            sideOpen = preFocusSideOpen ?? !await JS.InvokeAsync<bool>("dbam.isNarrowViewport");
+            resultsVisible = preFocusResultsVisible;
+        }
+        else
+        {
+            preFocusSideOpen = sideOpen;
+            preFocusResultsVisible = resultsVisible;
+            sideOpen = false;
+            resultsVisible = false;
+            maximized = false;
+        }
+        try { await Storage.SetAsync("query_results_visible", resultsVisible); } catch { }
+        await Task.Yield();
+        try { await JS.InvokeVoidAsync("dbam.syncSplitLayout", layoutSplitHorizontal); } catch { }
+        await JS.InvokeVoidAsync("dbam.editorLayout", "main");
+    }
+
+    private async Task EnsureResultsVisibleAsync()
+    {
+        if (resultsVisible) return;
+        resultsVisible = true;
+        try { await Storage.SetAsync("query_results_visible", true); } catch { }
+    }
 
     private void CancelPreferences()
     {
@@ -1845,6 +1967,20 @@ else
     [JSInvokable] public Task OnCursorChanged(int line, int column) { cursorLine = line; cursorCol = column; return InvokeAsync(StateHasChanged); }
     [JSInvokable] public Task OnRun() => InvokeAsync(Run);
     [JSInvokable] public Task OnFormat() => InvokeAsync(FormatSql);
+    [JSInvokable] public Task OnToggleResults() => InvokeAsync(ToggleResults);
+    [JSInvokable] public Task OnToggleSide() => InvokeAsync(ToggleSide);
+    [JSInvokable] public Task OnToggleAi() => InvokeAsync(() => { ToggleAiPrompt(); StateHasChanged(); });
+    [JSInvokable] public Task OnToggleFocusMode() => InvokeAsync(ToggleFocusMode);
+    [JSInvokable]
+    public Task OnEscape() => InvokeAsync(() =>
+    {
+        var changed = false;
+        if (showShortcutsModal) { showShortcutsModal = false; changed = true; }
+        else if (maximized) { maximized = false; changed = true; }
+        else if (toolbarOverflow) { toolbarOverflow = false; changed = true; }
+        else if (showAiPrompt) { showAiPrompt = false; changed = true; }
+        if (changed) StateHasChanged();
+    });
     [JSInvokable]
     public Task OnSave() => InvokeAsync(async () =>
     {
@@ -2177,21 +2313,62 @@ else
     private async Task Run() => await RunCore(false);
     private async Task ConfirmRun() { confirm = null; await RunCore(true); }
 
+    private void SetRunError(string prefix, Exception ex)
+    {
+        Logger.LogError(ex, "{Prefix}", prefix);
+        last = new ExecutionResult
+        {
+            RunId = runId == Guid.Empty ? Guid.NewGuid() : runId,
+            Outcome = "Error",
+            Error = $"{prefix}: {ex.Message}"
+        };
+        activeResult = -1;
+        resultsVisible = true;
+        SaveTabResultState(Current);
+        Say(last.Error, true);
+    }
+
+    private async Task<string?> TryReadEditorSqlAsync()
+    {
+        try
+        {
+            await SyncCurrent();
+            var selection = await JS.InvokeAsync<string>("dbam.editorSelection", "main");
+            return string.IsNullOrWhiteSpace(selection) ? Current!.Sql : selection;
+        }
+        catch (Exception ex)
+        {
+            SetRunError("Could not read SQL from editor", ex);
+            await InvokeAsync(StateHasChanged);
+            return null;
+        }
+    }
+
     private async Task RunCore(bool confirmed)
     {
         ValidateTimeout();
         if (running || Current is null) return;
-        await SyncCurrent();
-        var selection = await JS.InvokeAsync<string>("dbam.editorSelection", "main");
-        var sql = string.IsNullOrWhiteSpace(selection) ? Current.Sql : selection;
+
+        var sql = await TryReadEditorSqlAsync();
+        if (sql is null) return;
+
         if (string.IsNullOrWhiteSpace(sql)) { Say("Nothing to run.", true); return; }
 
         if (!confirmed && impactCheck && !dryRun)
         {
-            var dbObj = databases.FirstOrDefault(d => d.Id == Current.DatabaseId);
-            var eng = dbObj?.Engine ?? DatabaseEngine.SqlServer;
-            var gateAnalysis = Gate.Analyze(sql, eng);
-            if (gateAnalysis.HasMutatingStatements)
+            bool hasMutating = false;
+            try
+            {
+                var dbObj = databases.FirstOrDefault(d => d.Id == Current.DatabaseId);
+                var eng = dbObj?.Engine ?? DatabaseEngine.SqlServer;
+                hasMutating = Gate.Analyze(sql, eng).HasMutatingStatements;
+            }
+            catch (Exception ex)
+            {
+                Say($"Impact check analysis error: {ex.Message}", true);
+            }
+
+            if (hasMutating)
             {
                 running = true;
                 StateHasChanged();
@@ -2240,7 +2417,8 @@ else
 
         running = true; Flash = null; runId = Guid.NewGuid(); lastRunSql = sql;
         sortCol = null; sortAsc = true;
-        await JS.InvokeVoidAsync("dbam.editorMarker", "main", 0, "");
+        var wasResultsHidden = !resultsVisible;
+        try { await JS.InvokeVoidAsync("dbam.editorMarker", "main", 0, ""); } catch { }
         StateHasChanged();
         try
         {
@@ -2253,16 +2431,34 @@ else
             activeResult = last.ResultSets.Count > 0 ? 0 : -1;
             lastActiveResultIndex = activeResult >= 0 ? activeResult : 0;
             if (last.Outcome == "NeedsConfirmation") { confirm = last.UnfilteredWrites; last = null; }
-            else if (last.ErrorLine is { } line) await JS.InvokeVoidAsync("dbam.editorMarker", "main", line, last.Error);
+            else
+            {
+                await EnsureResultsVisibleAsync();
+                if (last.ErrorLine is { } line)
+                {
+                    try { await JS.InvokeVoidAsync("dbam.editorMarker", "main", line, last.Error); } catch { }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            SetRunError("Execution failed", ex);
+            try { await Storage.SetAsync("query_results_visible", true); } catch { }
         }
         finally
         {
             running = false;
             SaveTabResultState(Current);
         }
-        await LoadSidePanels();
+        try { await LoadSidePanels(); } catch (Exception ex) { Logger.LogWarning(ex, "Could not refresh side panels after query execution"); }
         _ = JS.InvokeVoidAsync("initTableColumnResizing", "query-results-table");
         await InvokeAsync(StateHasChanged);
+        if (wasResultsHidden && resultsVisible)
+        {
+            await Task.Yield();
+            try { await JS.InvokeVoidAsync("dbam.syncSplitLayout", layoutSplitHorizontal); } catch { }
+            await JS.InvokeVoidAsync("dbam.editorLayout", "main");
+        }
     }
 
     private bool showRawPlanXml;
@@ -2271,13 +2467,15 @@ else
     {
         ValidateTimeout();
         if (running || Current is null) return;
-        await SyncCurrent();
-        var selection = await JS.InvokeAsync<string>("dbam.editorSelection", "main");
-        var sql = string.IsNullOrWhiteSpace(selection) ? Current.Sql : selection;
+
+        var sql = await TryReadEditorSqlAsync();
+        if (sql is null) return;
+
         if (string.IsNullOrWhiteSpace(sql)) { Say("Nothing to explain.", true); return; }
 
         running = true; Flash = null; lastRunSql = sql;
-        await JS.InvokeVoidAsync("dbam.editorMarker", "main", 0, "");
+        var wasResultsHidden = !resultsVisible;
+        try { await JS.InvokeVoidAsync("dbam.editorMarker", "main", 0, ""); } catch { }
         StateHasChanged();
         try
         {
@@ -2290,15 +2488,30 @@ else
             {
                 activeResult = -1;
             }
-            if (last.ErrorLine is { } line) await JS.InvokeVoidAsync("dbam.editorMarker", "main", line, last.Error);
+            await EnsureResultsVisibleAsync();
+            if (last.ErrorLine is { } line)
+            {
+                try { await JS.InvokeVoidAsync("dbam.editorMarker", "main", line, last.Error); } catch { }
+            }
+        }
+        catch (Exception ex)
+        {
+            SetRunError("Explain plan failed", ex);
+            try { await Storage.SetAsync("query_results_visible", true); } catch { }
         }
         finally
         {
             running = false;
             SaveTabResultState(Current);
         }
-        await LoadSidePanels();
+        try { await LoadSidePanels(); } catch (Exception ex) { Logger.LogWarning(ex, "Could not refresh side panels after explain plan"); }
         await InvokeAsync(StateHasChanged);
+        if (wasResultsHidden && resultsVisible)
+        {
+            await Task.Yield();
+            try { await JS.InvokeVoidAsync("dbam.syncSplitLayout", layoutSplitHorizontal); } catch { }
+            await JS.InvokeVoidAsync("dbam.editorLayout", "main");
+        }
     }
 
     private async Task CopyPlanXml()
@@ -2992,6 +3205,10 @@ else
 
     private async Task ToggleFormMode()
     {
+        if (!formMode)
+        {
+            await SyncCurrent();
+        }
         formMode = !formMode;
         if (formMode)
         {
@@ -3022,6 +3239,13 @@ else
     {
         showSafetyConfirmModal = false;
         await RunCore(true);
+    }
+
+    private async Task ExecuteDryRunFromSafety()
+    {
+        showSafetyConfirmModal = false;
+        dryRun = true;
+        await RunCore(false);
     }
 
     private async Task ExecuteConfirmedImpactRun()

@@ -40,6 +40,20 @@ public class BlazorComponentTests : BunitContext
         Assert.Empty(svg.Children);
     }
 
+    [Theory]
+    [InlineData("panel-bottom")]
+    [InlineData("panel-right")]
+    public void Icon_WorkspacePanelIcons_RenderSvgGeometry(string iconName)
+    {
+        var cut = Render<Icon>(parameters => parameters
+            .Add(p => p.Name, iconName)
+        );
+
+        var svg = cut.Find("svg");
+        Assert.NotNull(svg);
+        Assert.NotEmpty(svg.Children);
+    }
+
     [Fact]
     public void ConfirmDialog_WhenClosed_RendersNothing()
     {

@@ -3534,6 +3534,11 @@ html[data-nav="compact"]
   color: var(--brand);
   border-color: var(--brand);
 }
+.icon-btn.active {
+  color: var(--brand-ink);
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
 .icon-btn svg {
   width: 16px;
   height: 16px;
@@ -7754,6 +7759,18 @@ html[data-os="mac"] .kbd-other {
   min-height: 0;
 }
 
+/* Collapsed Result Viewer */
+.ws-body.results-hidden .ws-editor-pane {
+  flex: 1 1 100% !important;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ws-body.results-hidden .ws-split,
+.ws-body.results-hidden .results {
+  display: none;
+}
+
 /* ==========================================================================
    Form Mode Controls (No-Code Parameterized Query Runner)
    ========================================================================== */
@@ -8021,6 +8038,44 @@ html[data-os="mac"] .kbd-other {
 .ws-status-cursor {
   margin-left: auto;
   font-family: var(--mono);
+}
+.ws-status-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease,
+    background 0.15s ease;
+}
+.ws-status-toggle:hover {
+  border-color: var(--brand);
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+}
+.ws-status-toggle svg {
+  width: 11px;
+  height: 11px;
+  color: var(--brand);
+}
+.ws-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex-shrink: 0;
+}
+.ws-status-dot.bad {
+  background: var(--bad);
 }
 
 /* AI prompt sheet backdrop & Object Explorer drawer backdrop */

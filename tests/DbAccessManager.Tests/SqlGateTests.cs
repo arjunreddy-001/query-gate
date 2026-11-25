@@ -107,4 +107,35 @@ public class SqlGateTests
     {
         Assert.Contains(Perm.SpHelpText, _gate.Analyze("EXEC sp_helptext 'dbo.p'").Requirements);
     }
+
+    [Fact]
+    public void Large_multi_batch_stored_procedure_script_parses_cleanly()
+    {
+        var body = string.Join("\n", Enumerable.Range(1, 700).Select(i =>
+            $"    SELECT @Result = @Result + CAST({i} AS NVARCHAR(20));"));
+        var sql = $"""
+            IF OBJECT_ID('[dbo].[LargeProc]', 'P') IS NOT NULL
+                DROP PROCEDURE [dbo].[LargeProc]
+            GO
+            SET ANSI_NULLS ON
+            GO
+            SET QUOTED_IDENTIFIER ON
+            GO
+            CREATE PROCEDURE [dbo].[LargeProc](@Result NVARCHAR(MAX) OUT)
+            AS
+            BEGIN
+            {body}
+            END
+            GO
+            """;
+
+        Assert.True(sql.Length > 32 * 1024);
+
+        var a = _gate.Analyze(sql);
+        Assert.True(a.Parsed);
+        Assert.False(a.HasHardDenial, string.Join(";", a.HardDenials.Concat(a.ParseErrors)));
+        Assert.Equal(4, a.Batches.Count);
+        Assert.Contains(Perm.Drop, a.Requirements);
+        Assert.Contains(Perm.Create, a.Requirements);
+    }
 }
