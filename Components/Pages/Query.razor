@@ -546,11 +546,6 @@ else
                 else
                 {
                     <span class="badge @OutcomeClass(last.Outcome)">@last.Outcome</span>
-                    @if (last.IsMasked)
-                    {
-                        <span class="badge warn" title="Sensitive PII columns redacted (no UNMASK permission)"><Icon Name="lock" />Masked (@last.MaskedColumns.Count PII redacted)</span>
-                    }
-                    <span class="muted small">@last.DurationMs ms · @last.RowsReturned row(s) returned@(last.RowsAffected > 0 ? $" · {last.RowsAffected} affected" : "")</span>
                     <div class="actions">
                         @for (var i = 0; i < last.ResultSets.Count; i++)
                         {
@@ -712,21 +707,10 @@ else
                             </tbody>
                         </table>
                     </div>
-                    <div class="grid-aggregates-bar">
-                        <span class="grid-agg-item">Displayed: <b>@rowsToDisplay.Count</b> rows</span>
-                        @{
-                            var agg = ComputeAggregates(rs, rowsToDisplay);
-                        }
-                        @if (agg.HasNumeric)
-                        {
-                            <span class="grid-agg-item">Sum: <b>@agg.Sum.ToString("N2")</b></span>
-                            <span class="grid-agg-item">Avg: <b>@agg.Avg.ToString("N2")</b></span>
-                            <span class="grid-agg-item">Min: <b>@agg.Min.ToString("N2")</b></span>
-                            <span class="grid-agg-item">Max: <b>@agg.Max.ToString("N2")</b></span>
-                        }
-                        <span class="grid-agg-item">Columns: <b>@rs.Columns.Count</b></span>
-                    </div>
-                    @if (rs.Truncated) { <div class="alert warn" style="margin:10px 14px">Showing the first @rs.Rows.Count rows. The row limit for this database was reached.</div> }
+                    @if (rs.Truncated)
+                    {
+                        <div class="alert warn results-limit" role="status">Showing the first @rs.Rows.Count rows. The row limit for this database was reached.</div>
+                    }
                 }
                 else if (activeResult == -1)
                 {
@@ -976,7 +960,22 @@ else
         @if (last is not null)
         {
             <span class="ws-status-item"><Icon Name="clock" />@last.DurationMs ms</span>
-            <span class="ws-status-item">@last.RowsReturned row(s)</span>
+            @if (activeResult >= 0 && activeResult < last.ResultSets.Count)
+            {
+                <span class="ws-status-item">@last.RowsReturned row(s) @last.ResultSets[activeResult].Columns.Count col(s)</span>
+            }
+            else
+            {
+                <span class="ws-status-item">@last.RowsReturned row(s)</span>
+            }
+            @if (last.RowsAffected > 0)
+            {
+                <span class="ws-status-item">@last.RowsAffected affected</span>
+            }
+            @if (last.IsMasked)
+            {
+                <span class="badge warn" title="Sensitive PII columns redacted (no UNMASK permission)"><Icon Name="lock" />Masked (@last.MaskedColumns.Count PII redacted)</span>
+            }
         }
         <span class="ws-status-item ws-status-cursor">Ln @cursorLine, Col @cursorCol</span>
     </div>
@@ -3102,44 +3101,6 @@ else
         await Task.Yield();
         try { await JS.InvokeVoidAsync("dbam.syncSplitLayout", layoutSplitHorizontal); } catch { }
         await JS.InvokeVoidAsync("dbam.editorLayout", "main");
-    }
-
-    // Quick Aggregates
-    private sealed record AggregatesResult(int Count, int Distinct, decimal Sum, decimal Avg, decimal Min, decimal Max, bool HasNumeric);
-
-    private AggregatesResult ComputeAggregates(ResultSetDto rs, IReadOnlyList<object?[]> rows)
-    {
-        if (rows.Count == 0 || rs.Columns.Count == 0) return new(0, 0, 0, 0, 0, 0, false);
-        var numericValues = new List<decimal>();
-        var distinctValues = new HashSet<string>();
-
-        foreach (var r in rows)
-        {
-            for (var c = 0; c < r.Length; c++)
-            {
-                var v = r[c];
-                if (v is not null)
-                {
-                    var str = v.ToString() ?? "";
-                    distinctValues.Add(str);
-                    if (decimal.TryParse(str, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var num))
-                    {
-                        numericValues.Add(num);
-                    }
-                }
-            }
-        }
-
-        if (numericValues.Count == 0)
-        {
-            return new(rows.Count, distinctValues.Count, 0, 0, 0, 0, false);
-        }
-
-        var sum = numericValues.Sum();
-        var avg = sum / numericValues.Count;
-        var min = numericValues.Min();
-        var max = numericValues.Max();
-        return new(rows.Count, distinctValues.Count, sum, avg, min, max, true);
     }
 
     // SQL File Drag & Drop, Browse, Save & Single-Click Copy

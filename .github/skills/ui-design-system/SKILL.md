@@ -27,7 +27,7 @@ Custom CSS only (no new Bootstrap dependency). Files: `wwwroot\app.css`, `wwwroo
 - **Global Command Palette**: Rendered via `.cmd-palette-modal` with `max-width: 780px` on desktop and laptop displays, fuzzy filtering across routes and databases, and full keyboard navigation.
 - **Results Grid Overhaul**:
   - Resizable column headers via `.th-resizable` and `.th-resizer` divider dragging.
-  - Sticky aggregates bar (`.grid-aggregates-bar`) displaying real-time statistics (Count, Distinct, Sum, Avg, Min, Max).
+  - Row count, column count, duration, rows affected, and the PII mask badge live in the workspace status bar (`.ws-status`).
   - Slide-out cell inspector drawer (`.cell-inspector-drawer`) opened on cell double-click with formatted JSON and XML viewing and copy button.
 - **Button Hover Expansion**: Limit `.btn-hover-expand` to short action verbs in compact toolbars (e.g. Save, Format, Explain). Never use for long labels or inside `.actions` button groups, because the CSS width transition clips text.
 - The results card has a Maximize and Restore toggle (`.results.maximized` is `position: fixed; inset: 0`).
