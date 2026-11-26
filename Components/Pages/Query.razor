@@ -46,8 +46,8 @@ else
                         <label class="check small" title="Search columns as well"><input type="checkbox" @bind="searchColumns" />Cols</label>
                         <label class="check small" title="Use typo-tolerant fuzzy search"><input type="checkbox" @bind="fuzzySearch" />Fuzzy</label>
                         <button class="icon-btn sm @(groupBySchema ? "active" : "")" title="Group objects by database schema (e.g. dbo, sales)" aria-label="Group objects by schema" @onclick="() => groupBySchema = !groupBySchema" style="flex:none"><Icon Name="folder" /></button>
-                        <button class="icon-btn" title="Refresh" @onclick="() => LoadMetadata(true)" style="flex:none"><Icon Name="refresh" /></button>
-                        <button class="icon-btn" title="Entity-Relationship (ER) Diagram" @onclick="() => OpenErDiagram(null)" style="flex:none"><Icon Name="grid" /></button>
+                        <button class="icon-btn sm" title="Refresh" @onclick="() => LoadMetadata(true)" style="flex:none"><Icon Name="refresh" /></button>
+                        <button class="icon-btn sm" title="Entity-Relationship (ER) Diagram" @onclick="() => OpenErDiagram(null)" style="flex:none"><Icon Name="grid" /></button>
                     </div>
                     <div class="row-inline obj-filters">
                         <button class="icon-btn sm obj-filter @(objectTypeFilter == "All" ? "active" : "")" title="All" @onclick='() => objectTypeFilter = "All"'><Icon Name="list" /></button>
@@ -140,7 +140,7 @@ else
                             }
                         }
                     }
-                    @if (!FilteredObjects.Any()) { <div class="muted small" style="padding:8px">No objects.</div> }
+                    @if (FilteredObjects.Count == 0) { <div class="muted small" style="padding:8px">No objects.</div> }
                 }
             }
             else if (side == "saved")
@@ -381,11 +381,14 @@ else
                     </div>
                 }
             </div>
-            <label class="chip-toggle @(impactCheck ? "active" : "")" title="Impact check: analyze affected records and confirm before executing INSERT, UPDATE, DELETE, or DROP commands">
-                <input type="checkbox" class="visually-hidden" @bind="impactCheck" />
+            <button type="button"
+                    class="icon-btn sm ws-impact-toggle @(impactCheck ? "active" : "")"
+                    title="@(impactCheck ? "Impact check enabled: analyze affected records and confirm before executing INSERT, UPDATE, DELETE, or DROP commands (click to disable)" : "Impact check disabled: click to enable pre-execution impact analysis")"
+                    aria-label="@(impactCheck ? "Disable impact check" : "Enable impact check")"
+                    aria-pressed="@(impactCheck ? "true" : "false")"
+                    @onclick="() => impactCheck = !impactCheck">
                 <Icon Name="shield" />
-                <span>Impact check</span>
-            </label>
+            </button>
             <label class="chip-toggle chip-warn @(dryRun ? "active" : "")" title="Dry run: execute in transaction and roll back">
                 <input type="checkbox" class="visually-hidden" @bind="dryRun" />
                 <span>Dry run</span>
@@ -572,7 +575,7 @@ else
                         @for (var i = 0; i < last.ResultSets.Count; i++)
                         {
                             var idx = i;
-                            <button class="btn btn-sm @(activeResult == idx ? "btn-primary" : "")" @onclick="() => { activeResult = idx; sortCol = null; SaveTabResultState(Current); }">Result @(idx + 1)</button>
+                            <button class="btn btn-sm @(activeResult == idx ? "btn-primary" : "")" @onclick="() => SelectResultTab(idx)">Result @(idx + 1)</button>
                         }
                         <button class="btn btn-sm @(activeResult == -1 ? "btn-primary" : "")" @onclick="() => { activeResult = -1; SaveTabResultState(Current); }">Messages</button>
                         @if (activeResult == -1)
@@ -714,19 +717,17 @@ else
                                 </tr>
                             </thead>
                             <tbody>
-                                @for (var r = 0; r < rowsToDisplay.Count; r++)
-                                {
-                                    var row = rowsToDisplay[r];
-                                    <tr>
-                                        <td class="num faint">@(r + 1)</td>
-                                        @foreach (var v in row)
+                                <Virtualize Items="rowsToDisplay" Context="entry" ItemSize="26" OverscanCount="12" SpacerElement="tr">
+                                    <tr @key="entry.RowNumber">
+                                        <td class="num faint">@entry.RowNumber</td>
+                                        @foreach (var v in entry.Values)
                                         {
                                             <td @ondblclick="() => OpenCellInspector(v)" title="Double-click to inspect cell content" style="cursor:pointer">
                                                 @if (v is null) { <span class="null">NULL</span> } else { @Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture) }
                                             </td>
                                         }
                                     </tr>
-                                }
+                                </Virtualize>
                             </tbody>
                         </table>
                     </div>
@@ -1025,7 +1026,7 @@ else
                 <span>Results hidden · Show</span>
             </button>
         }
-        <span class="ws-status-item ws-status-cursor">Ln @cursorLine, Col @cursorCol</span>
+        <span id="ws-status-cursor" class="ws-status-item ws-status-cursor">Ln @cursorLine, Col @cursorCol</span>
     </div>
     </section>
 </div>
@@ -1637,7 +1638,9 @@ else
     private sealed record EditorPreferences(bool AutomaticSuggestions, bool LiveDiagnostics, int FontSize);
     public sealed record SyntaxDiagnostic(int Line, int Column, string Message);
 
-    private IEnumerable<DbObjectInfo> FilteredObjects => BuildFilteredObjects();
+    private IReadOnlyList<DbObjectInfo> FilteredObjects => GetFilteredObjects();
+    private Guid _loadedMetadataDbId;
+    private bool _hasLoadedMetadataForDb;
 
     private Guid CurrentDbId
     {
@@ -1764,6 +1767,7 @@ else
     private async Task ToggleSide()
     {
         sideOpen = sideOpen != true;
+        StateHasChanged();
         await Task.Yield();
         await JS.InvokeVoidAsync("dbam.editorLayout", "main");
     }
@@ -1772,6 +1776,7 @@ else
     {
         resultsVisible = !resultsVisible;
         if (!resultsVisible) maximized = false;
+        StateHasChanged();
         try { await Storage.SetAsync("query_results_visible", resultsVisible); } catch { }
         await Task.Yield();
         try { await JS.InvokeVoidAsync("dbam.syncSplitLayout", layoutSplitHorizontal); } catch { }
@@ -1793,6 +1798,7 @@ else
             resultsVisible = false;
             maximized = false;
         }
+        StateHasChanged();
         try { await Storage.SetAsync("query_results_visible", resultsVisible); } catch { }
         await Task.Yield();
         try { await JS.InvokeVoidAsync("dbam.syncSplitLayout", layoutSplitHorizontal); } catch { }
@@ -1876,9 +1882,13 @@ else
 
     private async Task OnDbChanged()
     {
-        await CheckExportPermissionAsync();
-        await LoadMetadata(false);
-        await LoadSidePanels();
+        var sameDb = Current is not null && _hasLoadedMetadataForDb && Current.DatabaseId == _loadedMetadataDbId;
+        if (!sameDb)
+        {
+            await CheckExportPermissionAsync();
+            await LoadMetadata(false);
+            await LoadSidePanels();
+        }
         await PersistAsync();
         StateHasChanged();
     }
@@ -1935,12 +1945,16 @@ else
             var loadedObjects = await Metadata.GetAsync(databaseId, refresh);
             if (request != metadataRequest || Current?.DatabaseId != databaseId) return;
             objects = loadedObjects;
+            _loadedMetadataDbId = databaseId;
+            _hasLoadedMetadataForDb = true;
             await JS.InvokeVoidAsync("dbam.setMetadata", objects);
         }
         catch (Exception ex)
         {
             if (request != metadataRequest || Current?.DatabaseId != databaseId) return;
             objects = []; metaError = "Could not load objects: " + ex.Message;
+            _loadedMetadataDbId = Guid.Empty;
+            _hasLoadedMetadataForDb = false;
         }
         metaLoading = false;
     }
@@ -1964,7 +1978,7 @@ else
         if (Current.IsDirty != wasDirty) return InvokeAsync(StateHasChanged);
         return Task.CompletedTask;
     }
-    [JSInvokable] public Task OnCursorChanged(int line, int column) { cursorLine = line; cursorCol = column; return InvokeAsync(StateHasChanged); }
+    [JSInvokable] public Task OnCursorChanged(int line, int column) { cursorLine = line; cursorCol = column; return Task.CompletedTask; }
     [JSInvokable] public Task OnRun() => InvokeAsync(Run);
     [JSInvokable] public Task OnFormat() => InvokeAsync(FormatSql);
     [JSInvokable] public Task OnToggleResults() => InvokeAsync(ToggleResults);
@@ -2611,14 +2625,38 @@ else
         SaveTabResultState(Current);
     }
 
-    private List<object?[]> GetProcessedRows(ResultSetDto rs)
+    private sealed record IndexedResultRow(int RowNumber, object?[] Values);
+    private ResultSetDto? _cachedRowsSource;
+    private string _cachedRowsFilter = "";
+    private int? _cachedRowsSortCol;
+    private bool _cachedRowsSortAsc = true;
+    private List<IndexedResultRow> _cachedProcessedRows = [];
+
+    private void SelectResultTab(int idx)
     {
-        IEnumerable<object?[]> rows = rs.Rows;
-        if (!string.IsNullOrWhiteSpace(gridFilter))
+        activeResult = idx;
+        sortCol = null;
+        SaveTabResultState(Current);
+        _ = JS.InvokeVoidAsync("initTableColumnResizing", "query-results-table");
+    }
+
+    private List<IndexedResultRow> GetProcessedRows(ResultSetDto rs)
+    {
+        var normalizedFilter = gridFilter ?? "";
+        if (ReferenceEquals(_cachedRowsSource, rs) &&
+            string.Equals(_cachedRowsFilter, normalizedFilter, StringComparison.Ordinal) &&
+            _cachedRowsSortCol == sortCol &&
+            _cachedRowsSortAsc == sortAsc)
         {
-            var filter = gridFilter.Trim();
+            return _cachedProcessedRows;
+        }
+
+        IEnumerable<object?[]> rows = rs.Rows;
+        if (!string.IsNullOrWhiteSpace(normalizedFilter))
+        {
+            var f = normalizedFilter.Trim();
             rows = rows.Where(row => row.Any(cell => cell is not null &&
-                Convert.ToString(cell, System.Globalization.CultureInfo.InvariantCulture)?.Contains(filter, StringComparison.OrdinalIgnoreCase) == true));
+                Convert.ToString(cell, System.Globalization.CultureInfo.InvariantCulture)?.Contains(f, StringComparison.OrdinalIgnoreCase) == true));
         }
 
         if (sortCol.HasValue && sortCol.Value < rs.Columns.Count)
@@ -2629,7 +2667,19 @@ else
                 : rows.OrderByDescending(r => r[idx], CellComparer.Instance);
         }
 
-        return rows.ToList();
+        var result = new List<IndexedResultRow>();
+        var rowNum = 1;
+        foreach (var r in rows)
+        {
+            result.Add(new IndexedResultRow(rowNum++, r));
+        }
+
+        _cachedRowsSource = rs;
+        _cachedRowsFilter = normalizedFilter;
+        _cachedRowsSortCol = sortCol;
+        _cachedRowsSortAsc = sortAsc;
+        _cachedProcessedRows = result;
+        return result;
     }
 
     private async Task ExportCsv()
@@ -2871,23 +2921,52 @@ else
         self?.Dispose();
     }
 
-    private IEnumerable<DbObjectInfo> BuildFilteredObjects()
+    private List<DbObjectInfo>? _cachedObjectsSource;
+    private string _cachedObjectsFilter = "";
+    private string _cachedObjectsType = "All";
+    private bool _cachedObjectsSearchCols;
+    private bool _cachedObjectsFuzzy = true;
+    private List<DbObjectInfo> _cachedFilteredObjects = [];
+
+    private IReadOnlyList<DbObjectInfo> GetFilteredObjects()
+    {
+        var normalizedFilter = filter ?? "";
+        if (ReferenceEquals(_cachedObjectsSource, objects) &&
+            string.Equals(_cachedObjectsFilter, normalizedFilter, StringComparison.Ordinal) &&
+            string.Equals(_cachedObjectsType, objectTypeFilter, StringComparison.Ordinal) &&
+            _cachedObjectsSearchCols == searchColumns &&
+            _cachedObjectsFuzzy == fuzzySearch)
+        {
+            return _cachedFilteredObjects;
+        }
+
+        var result = BuildFilteredObjects(normalizedFilter).ToList();
+        _cachedObjectsSource = objects;
+        _cachedObjectsFilter = normalizedFilter;
+        _cachedObjectsType = objectTypeFilter;
+        _cachedObjectsSearchCols = searchColumns;
+        _cachedObjectsFuzzy = fuzzySearch;
+        _cachedFilteredObjects = result;
+        return result;
+    }
+
+    private IEnumerable<DbObjectInfo> BuildFilteredObjects(string currentFilter)
     {
         var source = objects.AsEnumerable();
         if (objectTypeFilter != "All") source = source.Where(o => o.Type == objectTypeFilter);
 
-        if (string.IsNullOrWhiteSpace(filter)) return source.Take(300);
+        if (string.IsNullOrWhiteSpace(currentFilter)) return source.Take(300);
         if (searchColumns)
         {
             return source.Where(o =>
-                (o.Schema + "." + o.Name).Contains(filter, StringComparison.OrdinalIgnoreCase) ||
-                o.Columns.Any(c => c.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                (o.Schema + "." + o.Name).Contains(currentFilter, StringComparison.OrdinalIgnoreCase) ||
+                o.Columns.Any(c => c.Contains(currentFilter, StringComparison.OrdinalIgnoreCase))
             ).Take(300);
         }
         if (!fuzzySearch)
-            return source.Where(o => (o.Schema + "." + o.Name).Contains(filter, StringComparison.OrdinalIgnoreCase)).Take(300);
+            return source.Where(o => (o.Schema + "." + o.Name).Contains(currentFilter, StringComparison.OrdinalIgnoreCase)).Take(300);
 
-        var query = Normalize(filter);
+        var query = Normalize(currentFilter);
         if (query.Length == 0) return source.Take(300);
 
         return source
@@ -2921,6 +3000,7 @@ else
         if (IsSubsequence(query, name)) return 700 - Math.Max(0, name.Length - query.Length);
 
         var threshold = Math.Max(1, query.Length / 3);
+        if (Math.Abs(query.Length - name.Length) > threshold) return -1;
         var distance = Levenshtein(query, name);
         if (distance <= threshold) return 500 - (distance * 50);
 
@@ -2940,21 +3020,24 @@ else
         if (source.Length == 0) return target.Length;
         if (target.Length == 0) return source.Length;
 
-        var matrix = new int[source.Length + 1, target.Length + 1];
-        for (var i = 0; i <= source.Length; i++) matrix[i, 0] = i;
-        for (var j = 0; j <= target.Length; j++) matrix[0, j] = j;
+        if (source.Length < target.Length) (source, target) = (target, source);
+
+        var row = new int[target.Length + 1];
+        for (var j = 0; j <= target.Length; j++) row[j] = j;
 
         for (var i = 1; i <= source.Length; i++)
         {
+            var prevDiag = row[0];
+            row[0] = i;
             for (var j = 1; j <= target.Length; j++)
             {
+                var oldDiag = row[j];
                 var cost = source[i - 1] == target[j - 1] ? 0 : 1;
-                matrix[i, j] = Math.Min(
-                    Math.Min(matrix[i - 1, j] + 1, matrix[i, j - 1] + 1),
-                    matrix[i - 1, j - 1] + cost);
+                row[j] = Math.Min(Math.Min(row[j] + 1, row[j - 1] + 1), prevDiag + cost);
+                prevDiag = oldDiag;
             }
         }
-        return matrix[source.Length, target.Length];
+        return row[target.Length];
     }
 
     // AI Assistant State & Methods
@@ -3187,17 +3270,34 @@ else
     }
 
     // Form Mode & Parameterized Execution
+    private static readonly System.Text.RegularExpressions.Regex ParamTokenRegex = new(
+        @"(@[a-zA-Z0-9_]+|(?<!:):[a-zA-Z0-9_]+|\{\{\s*([a-zA-Z0-9_]+)\s*\}\})",
+        System.Text.RegularExpressions.RegexOptions.Compiled);
+    private string? _cachedParamsSql;
+    private List<string> _cachedParams = [];
+
     private List<string> DetectedParameters
     {
         get
         {
             var sql = Current?.Sql ?? "";
-            if (string.IsNullOrWhiteSpace(sql)) return [];
-            var matches = System.Text.RegularExpressions.Regex.Matches(sql, @"(@[a-zA-Z0-9_]+|(?<!:):[a-zA-Z0-9_]+|\{\{\s*([a-zA-Z0-9_]+)\s*\}\})");
-            return matches
+            if (string.Equals(_cachedParamsSql, sql, StringComparison.Ordinal))
+            {
+                return _cachedParams;
+            }
+            if (string.IsNullOrWhiteSpace(sql))
+            {
+                _cachedParamsSql = sql;
+                _cachedParams = [];
+                return _cachedParams;
+            }
+            var matches = ParamTokenRegex.Matches(sql);
+            _cachedParams = matches
                 .Select(m => m.Groups[2].Success ? m.Groups[2].Value : m.Value.TrimStart('@', ':'))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
+            _cachedParamsSql = sql;
+            return _cachedParams;
         }
     }
 
@@ -3278,9 +3378,9 @@ else
         if (last is null || activeResult != -3 || last.ResultSets.Count == 0) return;
         var rs = last.ResultSets[Math.Max(0, lastActiveResultIndex)];
         var rows = GetProcessedRows(rs);
-        var labels = rows.Select(r => chartCatCol < r.Length ? Convert.ToString(r[chartCatCol], System.Globalization.CultureInfo.InvariantCulture) ?? "" : "").Take(50).ToArray();
+        var labels = rows.Select(r => chartCatCol < r.Values.Length ? Convert.ToString(r.Values[chartCatCol], System.Globalization.CultureInfo.InvariantCulture) ?? "" : "").Take(50).ToArray();
         var values = rows.Select(r => {
-            if (chartValCol < r.Length && decimal.TryParse(Convert.ToString(r[chartValCol], System.Globalization.CultureInfo.InvariantCulture), out var d)) return (double)d;
+            if (chartValCol < r.Values.Length && decimal.TryParse(Convert.ToString(r.Values[chartValCol], System.Globalization.CultureInfo.InvariantCulture), out var d)) return (double)d;
             return 0.0;
         }).Take(50).ToArray();
 

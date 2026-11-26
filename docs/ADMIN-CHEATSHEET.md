@@ -82,7 +82,7 @@ The Settings page is organized into seven tabs: **General & Limits**, **Email & 
 
 **Metadata cache:** the _Object metadata cache_ card on the Settings page shows what is cached per database, with the environment in a separate column. Use _Enable/Disable_, per-database _Reload_ / _Clear_, or _Reload all_ / _Clear all_. All actions are audited.
 
-**Email & SMTP:** configure outgoing SMTP server (host, port, SSL/TLS, username, encrypted password, sender address) directly in the UI. Use _Send test email_ to verify delivery immediately. Falls back to environment/appsettings if unconfigured in the UI.
+**Email & SMTP:** configure outgoing SMTP server (host, port, SSL/TLS, username, encrypted password, sender address, and optional sender display name) directly in the UI. Use _Send test email_ to verify delivery immediately. Falls back to environment/appsettings if unconfigured in the UI.
 
 **Collaboration Webhooks:** add webhooks for Slack, Microsoft Teams, Zoho Cliq, Discord, or generic endpoints. Supports event filters (all, access/script requests only, script executions only, or database health alerts only) and instant _Test_ dispatch.
 

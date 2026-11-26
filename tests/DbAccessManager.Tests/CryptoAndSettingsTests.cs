@@ -170,7 +170,8 @@ public class CryptoAndSettingsTests
             enableSsl: true,
             user: "mailer@example.com",
             newPassword: "SecretSmtpPassword123!",
-            from: "notifications@example.com");
+            from: "notifications@example.com",
+            fromName: "Query Gate Alerts");
 
         var smtp = await service.GetSmtpConfigAsync(crypto);
 
@@ -181,7 +182,29 @@ public class CryptoAndSettingsTests
         Assert.Equal("mailer@example.com", smtp.User);
         Assert.Equal("SecretSmtpPassword123!", smtp.Password);
         Assert.Equal("notifications@example.com", smtp.From);
+        Assert.Equal("Query Gate Alerts", smtp.FromName);
         Assert.True(smtp.HasSavedPassword);
+    }
+
+    [Fact]
+    public async Task SettingsService_SmtpConfig_FallbackIncludesFromName()
+    {
+        var (service, _, crypto, _) = CreateSettingsService("SettingsTest_SmtpFallback_" + Guid.NewGuid());
+        var fallback = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Smtp:Host"] = "smtp.fallback.com",
+                ["Smtp:Port"] = "2525",
+                ["Smtp:From"] = "alerts@fallback.com",
+                ["Smtp:FromName"] = "Fallback Alerts"
+            })
+            .Build();
+
+        var smtp = await service.GetSmtpConfigAsync(crypto, fallback);
+
+        Assert.True(smtp.IsConfigured);
+        Assert.Equal("alerts@fallback.com", smtp.From);
+        Assert.Equal("Fallback Alerts", smtp.FromName);
     }
 
     [Fact]

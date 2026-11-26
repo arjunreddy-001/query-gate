@@ -219,6 +219,7 @@ public sealed class SettingsService(
         var user = await GetRawAsync("Smtp:User");
         var encPwd = await GetRawAsync("Smtp:EncryptedPassword");
         var from = await GetRawAsync("Smtp:From");
+        var fromName = await GetRawAsync("Smtp:FromName");
 
         // Fallback to configuration if host is not configured in DB
         if (string.IsNullOrWhiteSpace(host) && fallback is not null)
@@ -229,12 +230,13 @@ public sealed class SettingsService(
             user ??= fallback["Smtp:User"];
             var rawFallbackPwd = fallback["Smtp:Password"];
             from ??= fallback["Smtp:From"];
+            fromName ??= fallback["Smtp:FromName"];
 
             if (!string.IsNullOrWhiteSpace(host))
             {
                 var port = int.TryParse(portStr, out var p) ? p : 587;
                 var ssl = !bool.TryParse(sslStr, out var s) || s;
-                return new SmtpConfig(host, port, ssl, user, rawFallbackPwd, from ?? "noreply@localhost", true, !string.IsNullOrEmpty(rawFallbackPwd));
+                return new SmtpConfig(host, port, ssl, user, rawFallbackPwd, ResolveSmtpFrom(from, user), true, !string.IsNullOrEmpty(rawFallbackPwd), SanitizeHeaderValue(fromName));
             }
         }
 
@@ -249,16 +251,38 @@ public sealed class SettingsService(
         var dbPort = int.TryParse(portStr, out var dp) ? dp : 587;
         var dbSsl = !bool.TryParse(sslStr, out var ds) || ds;
         var isConfigured = !string.IsNullOrWhiteSpace(host);
-        return new SmtpConfig(host ?? "", dbPort, dbSsl, user, decryptedPwd, from ?? "noreply@localhost", isConfigured, hasEncPwd);
+        return new SmtpConfig(host ?? "", dbPort, dbSsl, user, decryptedPwd, ResolveSmtpFrom(from, user), isConfigured, hasEncPwd, SanitizeHeaderValue(fromName));
     }
 
-    public async Task SaveSmtpConfigAsync(CryptoService crypto, string host, int port, bool enableSsl, string? user, string? newPassword, string from)
+    internal static string ResolveSmtpFrom(string? from, string? user)
     {
-        await SetRawAsync("Smtp:Host", (host ?? "").Trim());
+        if (!string.IsNullOrWhiteSpace(from)) return from.Trim();
+        if (!string.IsNullOrWhiteSpace(user) && System.Net.Mail.MailAddress.TryCreate(user.Trim(), out _)) return user.Trim();
+        return "noreply@localhost";
+    }
+
+    internal static string? SanitizeHeaderValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var cleaned = value.Replace("\r", "").Replace("\n", "").Trim();
+        return cleaned.Length == 0 ? null : cleaned;
+    }
+
+    public async Task SaveSmtpConfigAsync(CryptoService crypto, string host, int port, bool enableSsl, string? user, string? newPassword, string from, string? fromName = null)
+    {
+        var trimmedHost = (host ?? "").Trim();
+        var trimmedUser = (user ?? "").Trim();
+        var resolvedFrom = string.IsNullOrWhiteSpace(trimmedHost)
+            ? (from ?? "").Trim()
+            : ResolveSmtpFrom(from, trimmedUser);
+        var cleanFromName = SanitizeHeaderValue(fromName) ?? "";
+
+        await SetRawAsync("Smtp:Host", trimmedHost);
         await SetRawAsync("Smtp:Port", port.ToString());
         await SetRawAsync("Smtp:EnableSsl", enableSsl ? "true" : "false");
-        await SetRawAsync("Smtp:User", (user ?? "").Trim());
-        await SetRawAsync("Smtp:From", (from ?? "").Trim());
+        await SetRawAsync("Smtp:User", trimmedUser);
+        await SetRawAsync("Smtp:From", resolvedFrom);
+        await SetRawAsync("Smtp:FromName", cleanFromName);
         if (!string.IsNullOrEmpty(newPassword))
         {
             var encrypted = crypto.Encrypt(newPassword);
@@ -275,7 +299,8 @@ public sealed record SmtpConfig(
     string? Password,
     string From,
     bool IsConfigured,
-    bool HasSavedPassword);
+    bool HasSavedPassword,
+    string? FromName = null);
 
 public sealed class AuditService(IDbContextFactory<ApplicationDbContext> factory, ILogger<AuditService> logger)
 {

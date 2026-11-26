@@ -146,4 +146,19 @@ public class WebhookAndSmtpTests
         Assert.False(unconfigured.IsConfigured);
         Assert.False(unconfigured.HasSavedPassword);
     }
+
+    [Fact]
+    public void TryBuildMailMessage_AppliesAndSanitizesDisplayName()
+    {
+        var smtp = new SmtpConfig("smtp.example.com", 587, true, null, null, "noreply@example.com", true, false, "Query Gate\r\n Notifications ");
+        var to = new System.Net.Mail.MailAddress("alice@example.com");
+
+        var ok = NotificationService.TryBuildMailMessage(smtp, to, "Test Subject", "Body", out var msg, out var error);
+
+        Assert.True(ok);
+        Assert.Null(error);
+        Assert.NotNull(msg);
+        Assert.Equal("noreply@example.com", msg!.From!.Address);
+        Assert.Equal("Query Gate Notifications", msg.From.DisplayName);
+    }
 }

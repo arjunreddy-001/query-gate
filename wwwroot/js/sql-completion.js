@@ -192,10 +192,21 @@
     const dot = prior.at(-1)?.value === "." ? prior.at(-2) : null;
     const prev = prior.at(-1);
     const sourceContext = prev && prev.kind === "word" && ["from", "join", "apply", "update", "into"].includes(name(prev));
+    const columnCounts = new Map();
+    for (const s of visible) {
+      const seenInSource = new Set();
+      for (const x of s.columns) {
+        const key = (typeof x === "string" ? x : x.name).toLowerCase();
+        if (!seenInSource.has(key)) {
+          seenInSource.add(key);
+          columnCounts.set(key, (columnCounts.get(key) || 0) + 1);
+        }
+      }
+    }
     const suggestions = [];
     const addColumn = (source, c, qualified) => {
       const col = typeof c === "string" ? { name: c } : c;
-      const ambiguous = visible.filter(s => s.columns.some(x => (typeof x === "string" ? x : x.name).toLowerCase() === col.name.toLowerCase())).length > 1;
+      const ambiguous = (columnCounts.get(col.name.toLowerCase()) || 0) > 1;
       suggestions.push({ label: col.name, insertText: (qualified || !ambiguous ? "" : quote(source.alias) + ".") + quote(col.name),
         kind: "column", detail: source.alias + " / " + source.object.schema + "." + source.object.name +
           (col.dataType ? " · " + col.dataType + (col.nullable ? " NULL" : " NOT NULL") : "") });

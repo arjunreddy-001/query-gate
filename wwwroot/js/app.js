@@ -434,7 +434,7 @@ window.dbam = (function () {
       !e.altKey &&
       !e.metaKey &&
       !e.shiftKey &&
-      e.code === "Backquote"
+      (e.code === "Backquote" || e.key === "`")
     ) {
       e.preventDefault();
       e.stopPropagation();
@@ -828,15 +828,16 @@ window.dbam = (function () {
           clearTimeout(entry.cursorTimer);
           entry.cursorTimer = setTimeout(() => {
             if (editors[id] === entry) {
-              ref
-                .invokeMethodAsync(
-                  "OnCursorChanged",
-                  ev.position.lineNumber,
-                  ev.position.column,
-                )
-                .catch(() => {});
+              const elCursor = document.getElementById("ws-status-cursor");
+              if (elCursor) {
+                elCursor.textContent =
+                  "Ln " +
+                  ev.position.lineNumber +
+                  ", Col " +
+                  ev.position.column;
+              }
             }
-          }, 120);
+          }, 50);
         });
         scheduleDiagnostics(entry);
         setupEditorFileDrop(el, ref);

@@ -150,7 +150,7 @@ else
                         </div>
                         <div class="field">
                             <label>Enable SSL/TLS</label>
-                            <select @bind="smtpEnableSsl">
+                            <select value="@(smtpEnableSsl ? "true" : "false")" @onchange='e => smtpEnableSsl = string.Equals(e.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase)'>
                                 <option value="true">Yes (SSL/TLS / STARTTLS)</option>
                                 <option value="false">No (Plaintext)</option>
                             </select>
@@ -167,6 +167,10 @@ else
                     <div class="field">
                         <label>Sender Address (From)</label>
                         <input type="email" placeholder="noreply@example.com" @bind="smtpFrom" />
+                    </div>
+                    <div class="field">
+                        <label>Sender Display Name (optional)</label>
+                        <input type="text" placeholder="e.g. Query Gate Notifications" @bind="smtpFromName" />
                     </div>
                     <div style="margin-top:14px">
                         <button class="btn btn-primary" @onclick="SaveSmtp">Save SMTP configuration</button>
@@ -963,6 +967,7 @@ else
     private string smtpUser = "";
     private string smtpPassword = "";
     private string smtpFrom = "noreply@localhost";
+    private string smtpFromName = "";
     private string testEmailRecipient = "";
     private bool smtpTesting;
 
@@ -1061,6 +1066,7 @@ else
         smtpUser = smtpConfig.User ?? "";
         smtpPassword = "";
         smtpFrom = smtpConfig.From;
+        smtpFromName = smtpConfig.FromName ?? "";
         if (string.IsNullOrWhiteSpace(testEmailRecipient)) testEmailRecipient = Me.UserName.Contains('@') ? Me.UserName : "";
     }
 
@@ -1087,7 +1093,13 @@ else
     private async Task SaveSmtp()
     {
         if (smtpPort <= 0 || smtpPort > 65535) { Say("Port must be between 1 and 65535.", true); return; }
-        await Cfg.SaveSmtpConfigAsync(Crypto, smtpHost, smtpPort, smtpEnableSsl, smtpUser, smtpPassword, smtpFrom);
+        var trimmedFrom = (smtpFrom ?? "").Trim();
+        if (!string.IsNullOrEmpty(trimmedFrom) && !System.Net.Mail.MailAddress.TryCreate(trimmedFrom, out _))
+        {
+            Say("Sender Address (From) must be a valid email address (for example, noreply@example.com).", true);
+            return;
+        }
+        await Cfg.SaveSmtpConfigAsync(Crypto, smtpHost, smtpPort, smtpEnableSsl, smtpUser, smtpPassword, trimmedFrom, smtpFromName);
         await AuditSvc.TryWriteAsync(Me, "Settings", "SmtpConfigured", "Success", $"Host: {smtpHost}:{smtpPort}");
         await LoadSmtpConfig();
         Say("SMTP configuration saved.");
@@ -1097,7 +1109,7 @@ else
     {
         if (string.IsNullOrWhiteSpace(testEmailRecipient)) { Say("Please provide a recipient email address.", true); return; }
         smtpTesting = true; StateHasChanged();
-        var result = await Notifications.SendTestEmailAsync(testEmailRecipient);
+        var result = await Notifications.SendTestEmailAsync(testEmailRecipient.Trim());
         smtpTesting = false;
         if (result.Ok) Say(result.Value ?? "Test email sent successfully.");
         else Say(result.Error ?? "Failed to send test email.", true);

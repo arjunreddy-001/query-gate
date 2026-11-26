@@ -501,6 +501,41 @@ public class AppServicesTests
         var unconfiguredSmtp = await ctx.Notifications.SendTestEmailAsync("admin@example.com");
         Assert.False(unconfiguredSmtp.Ok);
         Assert.Contains("SMTP server is not configured", unconfiguredSmtp.Error);
+
+        var invalidRecipient = await ctx.Notifications.SendTestEmailAsync("not-an-email");
+        Assert.False(invalidRecipient.Ok);
+        Assert.Contains("not a valid email address", invalidRecipient.Error);
+    }
+
+    [Fact]
+    public async Task SettingsService_And_NotificationService_SmtpFromAndSslHandling()
+    {
+        await using var ctx = new TestContext();
+
+        // Saving with EnableSsl = false and empty From falls back to valid email User
+        await ctx.Settings.SaveSmtpConfigAsync(ctx.Crypto, "smtp.gmail.com", 587, enableSsl: false, "arjun1108@gmail.com", "secret", "");
+        var cfg1 = await ctx.Settings.GetSmtpConfigAsync(ctx.Crypto);
+        Assert.True(cfg1.IsConfigured);
+        Assert.False(cfg1.EnableSsl);
+        Assert.Equal("arjun1108@gmail.com", cfg1.From);
+
+        // Saving with EnableSsl = true and non-email User falls back to noreply@localhost
+        await ctx.Settings.SaveSmtpConfigAsync(ctx.Crypto, "smtp.example.com", 25, enableSsl: true, "smtpuser", null, "");
+        var cfg2 = await ctx.Settings.GetSmtpConfigAsync(ctx.Crypto);
+        Assert.True(cfg2.EnableSsl);
+        Assert.Equal("noreply@localhost", cfg2.From);
+
+        // Pre-existing empty Smtp:From in DB still resolves cleanly
+        await ctx.Settings.SetRawAsync("Smtp:From", "");
+        var cfg3 = await ctx.Settings.GetSmtpConfigAsync(ctx.Crypto);
+        Assert.Equal("noreply@localhost", cfg3.From);
+
+        // Pre-existing invalid Smtp:From returns a friendly OpResult error instead of FormatException
+        await ctx.Settings.SetRawAsync("Smtp:From", "invalid sender");
+        var res = await ctx.Notifications.SendTestEmailAsync("arjun1108@gmail.com");
+        Assert.False(res.Ok);
+        Assert.Contains("Sender address (From)", res.Error);
+        Assert.Contains("not a valid email address", res.Error);
     }
 
     // --- UserAdminService Tests ---

@@ -3317,6 +3317,25 @@ html[data-nav="compact"] .sidebar:has(:focus-visible) {
 html[data-nav="compact"] .sidebar:not(:hover):not(:has(:focus-visible)) .lbl {
   display: none;
 }
+html[data-nav="compact"]
+  .sidebar:not(:hover):not(:has(:focus-visible))
+  .brand,
+html[data-nav="compact"]
+  .sidebar:not(:hover):not(:has(:focus-visible))
+  .nav-item,
+html[data-nav="compact"]
+  .sidebar:not(:hover):not(:has(:focus-visible))
+  .pin-btn {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+  gap: 0;
+}
+html[data-nav="compact"]
+  .sidebar:not(:hover):not(:has(:focus-visible))
+  .sidebar-brand {
+  justify-content: center;
+}
 .nav-item {
   position: relative;
 }
@@ -3352,7 +3371,7 @@ html[data-nav="compact"]
   .count {
   position: absolute;
   top: 4px;
-  left: 26px;
+  left: calc(50% + 4px);
   font-size: 0;
   min-width: 9px;
   height: 9px;
@@ -3913,30 +3932,30 @@ html[data-nav="compact"]
     font-size: 0.88rem;
   }
   .brand-mark {
-    width: 28px;
-    height: 28px;
-    border-radius: 8px;
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
   }
   .brand-mark svg {
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
   }
   .nav-item {
-    padding: 5px 8px;
-    gap: 8px;
+    padding: 6px 8px;
+    gap: 9px;
     font-size: 0.82rem;
     border-radius: 7px;
   }
   .nav-item svg {
-    width: 15px;
-    height: 15px;
+    width: 17px;
+    height: 17px;
   }
   .nav-section {
     padding: 8px 8px 3px;
     font-size: 0.64rem;
   }
   .pin-btn {
-    padding: 5px 8px;
+    padding: 6px 8px;
   }
   .topbar {
     padding: 4px 14px;
@@ -4076,7 +4095,7 @@ html[data-nav="compact"]
     max-width: 320px;
   }
   .ws {
-    --ws-side-w: 200px;
+    --ws-side-w: 224px;
     height: 100%;
     min-height: 360px;
     row-gap: 4px;
@@ -5891,6 +5910,44 @@ kbd {
     .sidebar:not(:hover):not(:has(:focus-visible))
     .lbl {
     display: inline;
+  }
+  html[data-nav="compact"]
+    .sidebar.mobile-open:not(:hover):not(:has(:focus-visible))
+    .brand,
+  html[data-nav="compact"]
+    html[data-mobile-nav="open"]
+    .sidebar:not(:hover):not(:has(:focus-visible))
+    .brand {
+    justify-content: flex-start;
+    padding: 4px 3px 12px;
+    gap: 11px;
+  }
+  html[data-nav="compact"]
+    .sidebar.mobile-open:not(:hover):not(:has(:focus-visible))
+    .sidebar-brand,
+  html[data-nav="compact"]
+    html[data-mobile-nav="open"]
+    .sidebar:not(:hover):not(:has(:focus-visible))
+    .sidebar-brand {
+    justify-content: space-between;
+  }
+  html[data-nav="compact"]
+    .sidebar.mobile-open:not(:hover):not(:has(:focus-visible))
+    .nav-item,
+  html[data-nav="compact"]
+    html[data-mobile-nav="open"]
+    .sidebar:not(:hover):not(:has(:focus-visible))
+    .nav-item,
+  html[data-nav="compact"]
+    .sidebar.mobile-open:not(:hover):not(:has(:focus-visible))
+    .pin-btn,
+  html[data-nav="compact"]
+    html[data-mobile-nav="open"]
+    .sidebar:not(:hover):not(:has(:focus-visible))
+    .pin-btn {
+    justify-content: flex-start;
+    padding: 7px 11px;
+    gap: 12px;
   }
   html[data-nav="compact"]
     .sidebar.mobile-open:not(:hover):not(:has(:focus-visible))
@@ -7958,6 +8015,14 @@ html[data-os="mac"] .kbd-other {
   }
 }
 
+.ws-split::before {
+  content: "";
+  position: absolute;
+  inset: -4px 0;
+}
+.ws-body.ws-body-horizontal .ws-split::before {
+  inset: 0 -4px;
+}
 /* Splitter visual drag handle */
 .ws-split::after,
 .ws-side-split::after {

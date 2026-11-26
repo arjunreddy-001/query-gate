@@ -103,20 +103,64 @@ public sealed class NotificationService(
         }
     }
 
+    private static SmtpClient CreateSmtpClient(SmtpConfig smtp)
+    {
+        var client = new SmtpClient(smtp.Host, smtp.Port) { EnableSsl = smtp.EnableSsl };
+        if (!string.IsNullOrEmpty(smtp.User))
+        {
+            client.Credentials = new NetworkCredential(smtp.User, smtp.Password ?? "");
+        }
+        return client;
+    }
+
+    public static bool TryBuildMailMessage(SmtpConfig smtp, MailAddress toAddress, string subject, string body, out MailMessage? message, out string? error)
+    {
+        message = null;
+        var resolvedFrom = SettingsService.ResolveSmtpFrom(smtp.From, smtp.User);
+        if (!MailAddress.TryCreate(resolvedFrom, out var fromAddress))
+        {
+            error = $"Sender address (From) '{resolvedFrom}' is not a valid email address. Update it in SMTP settings.";
+            return false;
+        }
+
+        var cleanDisplayName = SettingsService.SanitizeHeaderValue(smtp.FromName);
+        if (cleanDisplayName is not null)
+        {
+            fromAddress = new MailAddress(fromAddress.Address, cleanDisplayName);
+        }
+
+        message = new MailMessage(fromAddress, toAddress)
+        {
+            Subject = subject,
+            Body = body
+        };
+        error = null;
+        return true;
+    }
+
     private async Task SendEmailAsync(string to, string subject, string body)
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(to) || !MailAddress.TryCreate(to.Trim(), out var toAddress))
+            {
+                logger.LogWarning("Email delivery skipped for invalid recipient '{To}'", to);
+                return;
+            }
+
             var smtp = await settings.GetSmtpConfigAsync(crypto, config);
             if (!smtp.IsConfigured) return;
 
-            using var client = new SmtpClient(smtp.Host, smtp.Port) { EnableSsl = smtp.EnableSsl };
-            if (!string.IsNullOrEmpty(smtp.User))
+            if (!TryBuildMailMessage(smtp, toAddress, "[Query Gate] " + subject, body, out var mail, out var error) || mail is null)
             {
-                client.Credentials = new NetworkCredential(smtp.User, smtp.Password ?? "");
+                logger.LogWarning("Email delivery skipped for {To}: {Reason}", to, error);
+                return;
             }
-            using var mail = new MailMessage(smtp.From, to, "[Query Gate] " + subject, body);
-            await client.SendMailAsync(mail);
+            using (mail)
+            using (var client = CreateSmtpClient(smtp))
+            {
+                await client.SendMailAsync(mail);
+            }
         }
         catch (Exception ex)
         {
@@ -127,24 +171,34 @@ public sealed class NotificationService(
     public async Task<OpResult> SendTestEmailAsync(string to)
     {
         if (string.IsNullOrWhiteSpace(to)) return new OpResult(false, "Recipient email address is required.");
+        var trimmedTo = to.Trim();
+        if (!MailAddress.TryCreate(trimmedTo, out var toAddress))
+        {
+            return new OpResult(false, $"Recipient email address '{trimmedTo}' is not a valid email address.");
+        }
         try
         {
             var smtp = await settings.GetSmtpConfigAsync(crypto, config);
             if (!smtp.IsConfigured) return new OpResult(false, "SMTP server is not configured. Enter the host and save settings.");
 
-            using var client = new SmtpClient(smtp.Host, smtp.Port) { EnableSsl = smtp.EnableSsl };
-            if (!string.IsNullOrEmpty(smtp.User))
+            var resolvedFrom = SettingsService.ResolveSmtpFrom(smtp.From, smtp.User);
+            var cleanDisplayName = SettingsService.SanitizeHeaderValue(smtp.FromName);
+            var senderLabel = cleanDisplayName is not null ? $"{cleanDisplayName} <{resolvedFrom}>" : resolvedFrom;
+            var body = $"This is a test notification from Query Gate to verify your SMTP email configuration.\n\nSent: {DateTimeOffset.UtcNow:u}\nHost: {smtp.Host}:{smtp.Port}\nSSL: {smtp.EnableSsl}\nSender: {senderLabel}";
+            if (!TryBuildMailMessage(smtp, toAddress, "[Query Gate] Test notification", body, out var mail, out var error) || mail is null)
             {
-                client.Credentials = new NetworkCredential(smtp.User, smtp.Password ?? "");
+                return new OpResult(false, error ?? "Invalid email address.");
             }
-            using var mail = new MailMessage(smtp.From, to, "[Query Gate] Test notification",
-                $"This is a test notification from Query Gate to verify your SMTP email configuration.\n\nSent: {DateTimeOffset.UtcNow:u}\nHost: {smtp.Host}:{smtp.Port}\nSSL: {smtp.EnableSsl}\nSender: {smtp.From}");
-            await client.SendMailAsync(mail);
-            return new OpResult(true, Value: $"Test email successfully sent to {to}.");
+            using (mail)
+            using (var client = CreateSmtpClient(smtp))
+            {
+                await client.SendMailAsync(mail);
+            }
+            return new OpResult(true, Value: $"Test email successfully sent to {toAddress.Address}.");
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Test email failed for {To}", to);
+            logger.LogWarning(ex, "Test email failed for {To}", trimmedTo);
             return new OpResult(false, $"SMTP send failed: {ex.Message}");
         }
     }

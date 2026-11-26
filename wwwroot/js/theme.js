@@ -198,13 +198,16 @@
             y: clientY,
             w: pane.getBoundingClientRect().width,
             h: pane.getBoundingClientRect().height,
-            pane: pane
+            pane: pane,
+            moved: false
         };
         document.body.style.userSelect = 'none';
         return true;
     }
     function moveSplitDrag(clientX, clientY) {
         if (!drag) return;
+        if (!drag.moved && Math.abs(clientX - drag.x) < 2 && Math.abs(clientY - drag.y) < 2) return;
+        drag.moved = true;
         if (drag.isHoriz) {
             var parentW = drag.pane.parentElement ? drag.pane.parentElement.getBoundingClientRect().width : 800;
             var maxW = Math.max(160, parentW - 160);
@@ -221,9 +224,10 @@
     }
     function endSplitDrag() {
         if (drag) {
+            var didMove = drag.moved;
             drag = null;
             document.body.style.userSelect = '';
-            if (window.dbam && window.dbam.editorLayout) {
+            if (didMove && window.dbam && window.dbam.editorLayout) {
                 window.dbam.editorLayout('main');
             }
         }

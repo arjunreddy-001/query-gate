@@ -1,11 +1,23 @@
+using System.Security.Claims;
 using Bunit;
 using DbAccessManager.Components.Account.Pages;
 using DbAccessManager.Components.Account.Shared;
 using DbAccessManager.Components.Pages;
+using DbAccessManager.Components.Pages.Admin;
 using DbAccessManager.Components.Shared;
+using DbAccessManager.Data;
+using DbAccessManager.Security;
 using DbAccessManager.Services;
+using DbAccessManager.Services.Ai;
+using DbAccessManager.Services.Providers;
+using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace DbAccessManager.Tests;
@@ -211,5 +223,106 @@ public class BlazorComponentTests : BunitContext
 
         Assert.Contains("Not Found", cut.Markup);
         Assert.Contains("Sorry, the content you are looking for does not exist.", cut.Markup);
+    }
+
+    private sealed class TestAuthStateProvider : AuthenticationStateProvider
+    {
+        public override Task<AuthenticationState> GetAuthenticationStateAsync()
+        {
+            var identity = new ClaimsIdentity(
+            [
+                new Claim(ClaimTypes.NameIdentifier, "admin-1"),
+                new Claim(ClaimTypes.Name, "admin@example.com"),
+                new Claim(ClaimTypes.Role, Roles.Admin)
+            ], "Test");
+            return Task.FromResult(new AuthenticationState(new ClaimsPrincipal(identity)));
+        }
+    }
+
+    private sealed class TestDbContextFactory(DbContextOptions<ApplicationDbContext> options) : IDbContextFactory<ApplicationDbContext>
+    {
+        public ApplicationDbContext CreateDbContext() => new(options);
+        public Task<ApplicationDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ApplicationDbContext(options));
+    }
+
+    [Fact]
+    public async Task Settings_EmailTab_AllowsSelectingEnableSslOptionAndSaves()
+    {
+        await using var conn = new SqliteConnection("Data Source=:memory:");
+        await conn.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(conn).Options;
+        await using (var initDb = new ApplicationDbContext(options))
+        {
+            await initDb.Database.EnsureCreatedAsync();
+        }
+
+        var factory = new TestDbContextFactory(options);
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Encryption:Key"] = Convert.ToBase64String(new byte[32])
+            })
+            .Build();
+        var memCache = new MemoryCache(new MemoryCacheOptions());
+        var tenantCtx = new TenantContext();
+        var tenantAccessor = new TenantContextAccessor { Current = tenantCtx };
+        var crypto = new CryptoService(config);
+        var settingsSvc = new SettingsService(factory, memCache, tenantAccessor);
+        var auditSvc = new AuditService(factory, NullLogger<AuditService>.Instance);
+        var providers = new DatabaseProviderFactory();
+        var metadataSvc = new MetadataService(factory, crypto, memCache, settingsSvc, providers);
+        var httpServices = new ServiceCollection();
+        httpServices.AddHttpClient();
+        var httpFactory = httpServices.BuildServiceProvider().GetRequiredService<IHttpClientFactory>();
+        var webhookSvc = new WebhookService(factory, httpFactory, NullLogger<WebhookService>.Instance);
+        var notificationSvc = new NotificationService(factory, config, settingsSvc, crypto, webhookSvc, NullLogger<NotificationService>.Instance);
+        var aiSvc = new AiAssistantService(httpFactory, settingsSvc, crypto, metadataSvc, new SqlGate(), auditSvc, NullLogger<AiAssistantService>.Instance);
+        var oidcSvc = new OidcService(httpFactory, settingsSvc, crypto);
+        var piiSvc = new PiiDiscoveryService(metadataSvc, factory);
+
+        Services.AddSingleton<IConfiguration>(config);
+        Services.AddSingleton<IDbContextFactory<ApplicationDbContext>>(factory);
+        Services.AddSingleton<AuthenticationStateProvider, TestAuthStateProvider>();
+        Services.AddSingleton(new ClientInfo());
+        Services.AddSingleton<ToastService>();
+        Services.AddSingleton<ITenantContext>(tenantCtx);
+        Services.AddSingleton<ITenantContextAccessor>(tenantAccessor);
+        Services.AddSingleton(crypto);
+        Services.AddSingleton(settingsSvc);
+        Services.AddSingleton(auditSvc);
+        Services.AddSingleton(metadataSvc);
+        Services.AddSingleton(webhookSvc);
+        Services.AddSingleton(notificationSvc);
+        Services.AddSingleton(aiSvc);
+        Services.AddSingleton(oidcSvc);
+        Services.AddSingleton(piiSvc);
+
+        var cut = Render<Settings>();
+        cut.WaitForAssertion(() => Assert.Contains("Email & SMTP", cut.Markup));
+
+        cut.FindAll("button.tab").First(b => b.TextContent.Contains("Email & SMTP")).Click();
+
+        var sslSelect = cut.FindAll("select")
+            .First(s => s.InnerHtml.Contains("Yes (SSL/TLS / STARTTLS)"));
+        Assert.Equal("true", sslSelect.GetAttribute("value"));
+
+        sslSelect.Change("false");
+        Assert.Equal("false", cut.FindAll("select")
+            .First(s => s.InnerHtml.Contains("Yes (SSL/TLS / STARTTLS)"))
+            .GetAttribute("value"));
+
+        cut.Find("input[placeholder='e.g. smtp.office365.com, smtp.gmail.com']").Change("smtp.example.com");
+        cut.Find("input[placeholder='e.g. Query Gate Notifications']").Change("Query Gate Alerts");
+        cut.FindAll("button").First(b => b.TextContent.Contains("Save SMTP configuration")).Click();
+
+        await cut.InvokeAsync(async () =>
+        {
+            var saved = await settingsSvc.GetSmtpConfigAsync(crypto, config);
+            Assert.True(saved.IsConfigured);
+            Assert.False(saved.EnableSsl);
+            Assert.Equal("smtp.example.com", saved.Host);
+            Assert.Equal("Query Gate Alerts", saved.FromName);
+        });
     }
 }
