@@ -177,6 +177,7 @@ builder.Services.AddScoped<PiiDiscoveryService>();
 builder.Services.AddSingleton<DatabaseAdminService>();
 builder.Services.AddSingleton<ExportDownloadCache>();
 builder.Services.AddSingleton<UserAdminService>();
+builder.Services.AddSingleton<PlatformAdminService>();
 builder.Services.AddSingleton<RequestService>();
 builder.Services.AddSingleton<WorkspaceService>();
 builder.Services.AddSingleton(sp => new TokenService(jwtKey, sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>()));

@@ -80,6 +80,7 @@
     private DotNetObjectReference<CommandPalette>? dotNetRef;
     private List<PaletteItem> allItems = [];
     private bool isAdmin;
+    private bool isSuperAdmin;
 
     public sealed record PaletteItem(
         string Group,
@@ -110,7 +111,8 @@
     protected override async Task OnInitializedAsync()
     {
         var auth = await AuthProvider.GetAuthenticationStateAsync();
-        isAdmin = auth.User.IsInRole(Roles.Admin);
+        isSuperAdmin = auth.User.IsInRole(Roles.SuperAdmin);
+        isAdmin = auth.User.IsInRole(Roles.Admin) || isSuperAdmin;
         dotNetRef = DotNetObjectReference.Create(this);
     }
 
@@ -169,6 +171,15 @@
             items.Add(new("Governance", "Audit Logs", "Append-only execution and security audit trail", "list", "/admin/audit"));
             items.Add(new("Governance", "Application Logs", "Real-time system events, warnings, and error traces", "activity", "/admin/logs"));
             items.Add(new("Governance", "Settings", "Global limits, data masking, webhooks, SMTP, and SSO", "cog", "/admin/settings"));
+        }
+
+        if (isSuperAdmin)
+        {
+            items.Add(new("Platform", "Platform Workspaces", "Manage multi-tenant workspaces, domains, quotas, and members", "grid", "/platform/tenants"));
+            items.Add(new("Platform", "Platform Operators", "Add, promote, and revoke SuperAdmin operators", "shield", "/platform/operators"));
+            items.Add(new("Platform", "Platform Health", "Cross-tenant database connectivity, usage, and error telemetry", "activity", "/platform/health"));
+            items.Add(new("Platform", "Platform Audit Logs", "Platform-level workspace and operator audit trail", "list", "/platform/audit"));
+            items.Add(new("Platform", "Platform Settings", "Global maintenance mode and custom domain policies", "cog", "/platform/settings"));
         }
 
         // Target Databases Group

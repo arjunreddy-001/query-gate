@@ -54,6 +54,17 @@ public sealed class DatabaseAdminService(
             if (string.IsNullOrWhiteSpace(trimmedName)) return OpResult.Fail("Name is required.");
             if (await db.ManagedDatabases.AnyAsync(d => d.Name == trimmedName && d.Environment == environment))
                 return OpResult.Fail("A database with that name and environment is already registered.");
+            if (db.CurrentTenantId.HasValue && db.CurrentTenantId.Value != Guid.Empty)
+            {
+                var tenant = await db.Tenants.IgnoreQueryFilters().AsNoTracking()
+                    .FirstOrDefaultAsync(t => t.Id == db.CurrentTenantId.Value);
+                if (tenant?.MaxDatabases is int maxDbs && maxDbs > 0)
+                {
+                    var currentCount = await db.ManagedDatabases.CountAsync();
+                    if (currentCount >= maxDbs)
+                        return OpResult.Fail($"Workspace database limit ({maxDbs}) reached. Contact a platform SuperAdmin to increase the quota.");
+                }
+            }
             var cleanInc = string.IsNullOrWhiteSpace(includedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(includedObjects));
             var cleanExc = string.IsNullOrWhiteSpace(excludedObjects) ? null : string.Join(", ", DbAccessManager.Security.ObjectScope.ParseList(excludedObjects, defaultToAll: false));
             if (DbAccessManager.Security.ObjectScope.HasConflict(cleanInc, cleanExc, out var conflict))

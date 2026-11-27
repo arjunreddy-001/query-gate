@@ -507,6 +507,16 @@ public sealed class ExecutionService(
         }
         if (!database.IsActive) return await Deny("Denied", "This database is disabled.");
 
+        if (!isSystem && await settings.GetPlatformBoolAsync("Platform:MaintenanceMode"))
+        {
+            var (_, userRoleNames) = await permissions.GetUserRolesAsync(db, actor.UserId);
+            if (!userRoleNames.Values.Any(r => string.Equals(r, Roles.SuperAdmin, StringComparison.OrdinalIgnoreCase)))
+            {
+                var msg = await settings.GetPlatformAsync("Platform:MaintenanceMessage");
+                return await Deny("Denied", string.IsNullOrWhiteSpace(msg) ? "Platform maintenance mode is active." : msg);
+            }
+        }
+
         var analysis = gate.Analyze(options.SqlText, database.Engine);
         if (analysis.HasHardDenial)
         {

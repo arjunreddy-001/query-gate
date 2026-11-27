@@ -8428,6 +8428,24 @@ html[data-os="mac"] .kbd-other {
   flex: 0 1 180px;
   min-width: 140px;
 }
+.platform-audit-toolbar {
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.platform-audit-search {
+  flex: 1 1 220px;
+  width: auto;
+  min-width: 180px;
+}
+.platform-audit-select {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 140px;
+  max-width: 100%;
+}
+.platform-audit-btn {
+  flex-shrink: 0;
+}
 .tenant-ws-card {
   display: flex;
   align-items: center;
@@ -8574,6 +8592,12 @@ html[data-os="mac"] .kbd-other {
   .tenant-filter-status {
     flex: 1 1 100%;
     max-width: 100%;
+  }
+  .platform-audit-search {
+    flex: 1 1 100%;
+  }
+  .platform-audit-select {
+    flex: 1 1 140px;
   }
   .tenant-ws-actions {
     width: 100%;

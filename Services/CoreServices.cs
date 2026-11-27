@@ -120,7 +120,11 @@ public sealed class SettingsService(
         ["Oidc:Authority"] = ("", "OIDC Authority / Issuer URL"),
         ["Oidc:ClientId"] = ("", "OIDC Client ID"),
         ["Oidc:ClientSecret"] = ("", "Encrypted OIDC Client Secret"),
-        ["Oidc:Scopes"] = ("openid profile email", "OIDC Scopes")
+        ["Oidc:Scopes"] = ("openid profile email", "OIDC Scopes"),
+        ["Platform:MaintenanceMode"] = ("false", "Enable global platform maintenance mode"),
+        ["Platform:MaintenanceMessage"] = ("Query Gate is undergoing scheduled maintenance. Please try again shortly.", "Maintenance banner and status message"),
+        ["Platform:EnforceDomainAllowlist"] = ("false", "Restrict custom tenant domains to allowed suffixes"),
+        ["Platform:AllowedDomainSuffixes"] = ("", "Allowed custom domain suffixes (comma-separated, e.g. .company.com, .querygate.io)")
     };
 
     public async Task<string> GetAsync(string key)
@@ -213,6 +217,60 @@ public sealed class SettingsService(
             cache.Remove($"setting:raw:{tId}:{key}");
         }
         cache.Remove($"settings:all:{tId}");
+    }
+
+    public async Task<string> GetPlatformAsync(string key)
+    {
+        var raw = await GetPlatformRawAsync(key);
+        return raw ?? (Definitions.TryGetValue(key, out var def) ? def.Default : "");
+    }
+
+    public async Task<bool> GetPlatformBoolAsync(string key) =>
+        bool.TryParse(await GetPlatformAsync(key), out var v) && v;
+
+    public async Task<string?> GetPlatformRawAsync(string key)
+    {
+        var platformId = WellKnownTenants.Platform;
+        var cacheKey = $"setting:raw:{platformId}:{key}";
+        if (cache != null && cache.TryGetValue(cacheKey, out string? cached))
+        {
+            return cached;
+        }
+
+        await using var db = await factory.CreateDbContextAsync();
+        var stored = await db.Settings.IgnoreQueryFilters().AsNoTracking()
+            .FirstOrDefaultAsync(s => s.TenantId == platformId && s.Key == key);
+        var val = stored?.Value;
+
+        if (cache != null)
+        {
+            cache.Set(cacheKey, val, TimeSpan.FromMinutes(30));
+        }
+        return val;
+    }
+
+    public async Task SetPlatformAsync(string key, string value)
+    {
+        if (!Definitions.ContainsKey(key)) throw new ArgumentException("Unknown setting.", nameof(key));
+        var platformId = WellKnownTenants.Platform;
+        await using var db = await factory.CreateDbContextAsync();
+        var existing = await db.Settings.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(s => s.TenantId == platformId && s.Key == key);
+        if (existing is null)
+        {
+            db.Settings.Add(new SettingEntry { TenantId = platformId, Key = key, Value = value });
+        }
+        else
+        {
+            existing.Value = value;
+        }
+        await db.SaveChangesAsync();
+
+        if (cache != null)
+        {
+            cache.Set($"setting:raw:{platformId}:{key}", (string?)value, TimeSpan.FromMinutes(30));
+            cache.Remove($"settings:all:{platformId}");
+        }
     }
 
     public async Task<SmtpConfig> GetSmtpConfigAsync(CryptoService crypto, IConfiguration? fallback = null)
@@ -331,6 +389,7 @@ public sealed class AuditService(IDbContextFactory<ApplicationDbContext> factory
     public Task TryWriteAsync(Actor? actor, string category, string action, string outcome, string? details = null, Guid? databaseId = null, string? databaseName = null, Guid? linkedRequestId = null) =>
         TryWriteAsync(new AuditLog
         {
+            TenantId = actor?.TenantId ?? Guid.Empty,
             UserId = actor?.UserId,
             UserName = actor?.UserName,
             ClientIp = actor?.Ip,

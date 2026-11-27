@@ -1,0 +1,136 @@
+@page "/platform/audit"
+@attribute [Authorize(Roles = Roles.SuperAdmin)]
+@inherits PageBase
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<PageTitle>Platform Audit Logs · Query Gate</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Platform Audit Logs</h1>
+        <p>Immutable log of workspace provisioning, custom domains, SuperAdmin grants, and global platform changes.</p>
+    </div>
+</div>
+
+<div class="toolbar platform-audit-toolbar">
+    <input class="platform-audit-search" type="search" aria-label="Search actor or details" placeholder="Search actor or details..." @bind="search" @bind:event="oninput" @bind:after="LoadAsync" />
+    <select class="platform-audit-select" aria-label="Action" @bind="actionFilter" @bind:after="LoadAsync">
+        <option value="">All actions</option>
+        <option>CreateWorkspace</option>
+        <option>UpdateWorkspace</option>
+        <option>EnableWorkspace</option>
+        <option>DisableWorkspace</option>
+        <option>DeleteWorkspace</option>
+        <option>AddDomain</option>
+        <option>RemoveDomain</option>
+        <option>GrantSuperAdmin</option>
+        <option>RevokeSuperAdmin</option>
+        <option>AssignWorkspaceMember</option>
+        <option>RemoveWorkspaceMember</option>
+        <option>UpdatePlatformSettings</option>
+    </select>
+    <select class="platform-audit-select" aria-label="Outcome" @bind="outcomeFilter" @bind:after="LoadAsync">
+        <option value="">All outcomes</option>
+        <option>Success</option>
+        <option>Failed</option>
+        <option>Denied</option>
+    </select>
+    <button class="btn btn-primary platform-audit-btn" type="button" @onclick="LoadAsync">Filter</button>
+</div>
+
+<div class="card">
+    @if (!ready)
+    {
+        <div class="empty"><span class="spinner"></span><div>Loading platform audit trail...</div></div>
+    }
+    else if (rows.Count == 0)
+    {
+        <div class="empty"><Icon Name="list" /><div>No platform audit events match your filter.</div></div>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Operator</th>
+                        <th>Action</th>
+                        <th>Outcome</th>
+                        <th>Details</th>
+                        <th>Client IP</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in rows)
+                    {
+                        <tr style="cursor:pointer" @onclick="() => selected = row">
+                            <td class="nowrap small font-mono">@Local(row.Timestamp)</td>
+                            <td>@(row.UserName ?? "-")</td>
+                            <td><b>@row.Action</b></td>
+                            <td><span class="badge @OutcomeClass(row.Outcome)">@row.Outcome</span></td>
+                            <td class="wrap small">@(row.Details ?? "-")</td>
+                            <td class="small font-mono">@(row.ClientIp ?? "-")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@if (selected is not null)
+{
+    <div class="modal-back" @onclick="() => selected = null">
+        <div class="modal" style="max-width:640px" @onclick:stopPropagation>
+            <div class="modal-head">
+                <h2>Platform Audit #@selected.Id</h2>
+            </div>
+            <div class="modal-body stack" style="gap:10px">
+                <div><b>Timestamp:</b> @Local(selected.Timestamp)</div>
+                <div><b>Operator:</b> @(selected.UserName ?? "-") (@(selected.UserId ?? "-"))</div>
+                <div><b>Category / Action:</b> @selected.Category / @selected.Action</div>
+                <div><b>Outcome:</b> <span class="badge @OutcomeClass(selected.Outcome)">@selected.Outcome</span></div>
+                <div><b>Client IP:</b> @(selected.ClientIp ?? "-")</div>
+                <div><b>Details:</b><pre class="small" style="white-space:pre-wrap;margin-top:4px">@(selected.Details ?? "-")</pre></div>
+            </div>
+            <div class="modal-foot">
+                <button class="btn btn-primary" type="button" @onclick="() => selected = null">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<AuditLog> rows = [];
+    private AuditLog? selected;
+    private string search = "", actionFilter = "", outcomeFilter = "";
+    private bool ready;
+
+    protected override async Task OnLoadAsync()
+    {
+        await LoadAsync();
+        ready = true;
+    }
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var q = db.AuditLogs.IgnoreQueryFilters().AsNoTracking()
+            .Where(a => a.TenantId == WellKnownTenants.Platform || a.Category == "Platform");
+
+        if (!string.IsNullOrWhiteSpace(actionFilter))
+            q = q.Where(a => a.Action == actionFilter);
+
+        if (!string.IsNullOrWhiteSpace(outcomeFilter))
+            q = q.Where(a => a.Outcome == outcomeFilter);
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim();
+            q = q.Where(a => (a.UserName != null && a.UserName.Contains(s)) || (a.Details != null && a.Details.Contains(s)));
+        }
+
+        rows = await q.OrderByDescending(a => a.Id).Take(300).ToListAsync();
+    }
+}

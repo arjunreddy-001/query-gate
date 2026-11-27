@@ -45,15 +45,26 @@ In `Components/App.razor`, the HTML `<base href>` dynamically resolves to the te
 
 ## 5. Platform Administration (`SuperAdmin`)
 
-- Dedicated platform management interface at `/platform/tenants` (`[Authorize(Roles = Roles.SuperAdmin)]`).
-- Platform administrators can create workspaces, toggle workspace status, manage custom domains, and inspect database/user counts across tenants.
-- Platform administrators have `TenantId = WellKnownTenants.Platform`, preventing accidental leakage of customer tenant data.
+- Platform control plane routes (`[Authorize(Roles = Roles.SuperAdmin)]`):
+  - `/platform/tenants`: Create/edit/disable/delete workspaces, configure `MaxDatabases`/`MaxUsers` quotas, manage custom domains, and assign/remove workspace members and admins via `PlatformAdminService`.
+  - `/platform/operators`: Promote existing users or create new `SuperAdmin` operators, and revoke operator access (protected against self-revocation and removing the last active `SuperAdmin`).
+  - `/platform/health`: Cross-tenant database health, latency, quota usage, and 24-hour application error counts.
+  - `/platform/audit`: Immutable `WellKnownTenants.Platform` audit trail for all platform operations.
+  - `/platform/settings`: Global maintenance mode and custom domain suffix allowlists.
+- `SuperAdmin` users have implicit `Admin` access across all tenant workspaces (`Roles.AdminOrSuperAdmin`, `PageBase.IsAdmin`, `AccessConfigurationService.CanAuditAsync`), while workspace `Admin`s can manage access inside their workspace (`/admin/users`) without creating workspaces or assigning `SuperAdmin`.
+- Platform operations stamp `TenantId = WellKnownTenants.Platform` for platform audit and settings isolation.
 
 ## 6. SuperAdmin Setup & Promotion Options
 
-There are two primary ways to configure or elevate an account to `SuperAdmin`:
+There are four ways to configure or elevate an account to `SuperAdmin`:
 
-### Method 1: Bootstrap Configuration (Recommended)
+### Method 1: Initial Web Setup (`/Account/Setup`)
+When no users exist, completing `/Account/Setup` creates the root user with both `Roles.Admin` (on the `default` workspace) and `Roles.SuperAdmin`.
+
+### Method 2: Platform Operators UI (`/platform/operators`)
+An existing `SuperAdmin` can promote any user or create a new operator account directly in `/platform/operators`.
+
+### Method 3: Bootstrap Configuration
 `Program.cs` checks configuration keys `BootstrapAdmin:Email` and `BootstrapAdmin:Password` during application startup (`SeedAsync`).
 - If the account does not exist, it is created and granted both `Roles.Admin` and `Roles.SuperAdmin`, and added as an `Admin` in the default workspace.
 - If the account already exists, `SeedAsync` automatically checks for `Roles.SuperAdmin` and adds it without resetting the password.

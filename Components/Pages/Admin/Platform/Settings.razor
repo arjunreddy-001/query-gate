@@ -1,0 +1,112 @@
+@page "/platform/settings"
+@attribute [Authorize(Roles = Roles.SuperAdmin)]
+@inherits PageBase
+@inject SettingsService Cfg
+@inject AuditService AuditSvc
+
+<PageTitle>Platform Settings · Query Gate</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Platform Settings</h1>
+        <p>Global maintenance mode, custom domain restrictions, and platform-level governance defaults.</p>
+    </div>
+    <div class="actions">
+        <button class="btn btn-primary" type="button" disabled="@(!ready || saving)" @onclick="SaveAsync">
+            <Icon Name="save" />@(saving ? "Saving..." : "Save Platform Settings")
+        </button>
+    </div>
+</div>
+
+@if (!ready)
+{
+    <div class="empty"><span class="spinner"></span><div>Loading platform settings...</div></div>
+}
+else
+{
+    <div class="grid g2" style="align-items:start;gap:16px">
+        <div class="card">
+            <div class="card-head"><h3>Maintenance Mode</h3></div>
+            <div class="card-pad">
+                <p class="muted small" style="margin-bottom:14px">
+                    When enabled, non-SuperAdmin users see a maintenance screen and query execution is paused while SuperAdmins retain full access.
+                </p>
+                <div class="field">
+                    <label>Maintenance Mode Status</label>
+                    <select @bind="maintenanceMode">
+                        <option value="false">Disabled (Normal operation)</option>
+                        <option value="true">Enabled (Maintenance active)</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Maintenance Banner / Screen Message</label>
+                    <textarea rows="3" @bind="maintenanceMessage"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-head"><h3>Custom Domain Governance</h3></div>
+            <div class="card-pad">
+                <p class="muted small" style="margin-bottom:14px">
+                    Optionally restrict workspace custom domains to approved corporate or SaaS domain suffixes.
+                </p>
+                <div class="field">
+                    <label>Enforce Domain Suffix Allowlist</label>
+                    <select @bind="enforceAllowlist">
+                        <option value="false">No (Any valid hostname allowed)</option>
+                        <option value="true">Yes (Require matching suffix)</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Allowed Suffixes (comma-separated)</label>
+                    <input type="text" @bind="allowedSuffixes" placeholder=".querygate.io, .corp.example.com" />
+                    <span class="small muted">Example: <code>.company.com, .querygate.local</code></span>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool ready, saving;
+    private string maintenanceMode = "false";
+    private string maintenanceMessage = "";
+    private string enforceAllowlist = "false";
+    private string allowedSuffixes = "";
+
+    protected override async Task OnLoadAsync()
+    {
+        maintenanceMode = await Cfg.GetPlatformAsync("Platform:MaintenanceMode");
+        maintenanceMessage = await Cfg.GetPlatformAsync("Platform:MaintenanceMessage");
+        enforceAllowlist = await Cfg.GetPlatformAsync("Platform:EnforceDomainAllowlist");
+        allowedSuffixes = await Cfg.GetPlatformAsync("Platform:AllowedDomainSuffixes");
+        ready = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        saving = true;
+        try
+        {
+            await Cfg.SetPlatformAsync("Platform:MaintenanceMode", maintenanceMode);
+            await Cfg.SetPlatformAsync("Platform:MaintenanceMessage", string.IsNullOrWhiteSpace(maintenanceMessage)
+                ? SettingsService.Definitions["Platform:MaintenanceMessage"].Default
+                : maintenanceMessage.Trim());
+            await Cfg.SetPlatformAsync("Platform:EnforceDomainAllowlist", enforceAllowlist);
+            await Cfg.SetPlatformAsync("Platform:AllowedDomainSuffixes", allowedSuffixes.Trim());
+
+            await AuditSvc.TryWriteAsync(
+                Me with { TenantId = WellKnownTenants.Platform },
+                "Platform",
+                "UpdatePlatformSettings",
+                "Success",
+                $"maintenance={maintenanceMode}; enforceDomainAllowlist={enforceAllowlist}");
+            Say("Platform settings saved.");
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+}

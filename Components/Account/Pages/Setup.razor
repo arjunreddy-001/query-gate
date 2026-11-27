@@ -11,6 +11,8 @@
 @inject AuditService Audit
 @inject NavigationManager NavigationManager
 @inject IdentityRedirectManager RedirectManager
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ITenantLookupCache TenantCache
 
 <PageTitle>Initial Setup · Query Gate</PageTitle>
 
@@ -129,9 +131,12 @@
             return;
         }
 
-        if (!await RoleManager.RoleExistsAsync(Roles.Admin))
+        foreach (var roleName in new[] { Roles.Admin, Roles.SuperAdmin })
         {
-            await RoleManager.CreateAsync(new IdentityRole(Roles.Admin));
+            if (!await RoleManager.RoleExistsAsync(roleName))
+            {
+                await RoleManager.CreateAsync(new IdentityRole(roleName));
+            }
         }
 
         var user = new ApplicationUser
@@ -157,10 +162,45 @@
             return;
         }
 
-        await Audit.TryWriteAsync(ActorFor(user.Email, user.Id), "Auth", "Setup", "Success", "Initial root administrator account created.");
+        var superRoleResult = await UserManager.AddToRoleAsync(user, Roles.SuperAdmin);
+        if (!superRoleResult.Succeeded)
+        {
+            errorMessage = "Failed to assign SuperAdmin role.";
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var defaultTenant = await db.Tenants.IgnoreQueryFilters().FirstOrDefaultAsync(t => t.Slug == "default");
+        if (defaultTenant is null)
+        {
+            defaultTenant = new Tenant
+            {
+                Name = "Default Workspace",
+                Slug = "default",
+                IsActive = true
+            };
+            db.Tenants.Add(defaultTenant);
+            await db.SaveChangesAsync();
+            TenantCache.Invalidate();
+        }
+
+        if (!await db.UserTenantMemberships.IgnoreQueryFilters().AnyAsync(m => m.UserId == user.Id && m.TenantId == defaultTenant.Id))
+        {
+            db.UserTenantMemberships.Add(new UserTenantMembership
+            {
+                UserId = user.Id,
+                TenantId = defaultTenant.Id,
+                Role = Roles.Admin
+            });
+            await db.SaveChangesAsync();
+        }
+
+        await Audit.TryWriteAsync(
+            new Actor(user.Id, user.Email, HttpContext.Connection.RemoteIpAddress?.ToString(), HttpContext.Request.Headers.UserAgent.ToString(), defaultTenant.Id),
+            "Auth", "Setup", "Success", "Initial root administrator and SuperAdmin account created.");
 
         await SignInManager.SignInAsync(user, isPersistent: true);
-        RedirectManager.RedirectTo("dashboard");
+        RedirectManager.RedirectTo($"/t/{defaultTenant.Slug}/dashboard");
     }
 
     private sealed class InputModel

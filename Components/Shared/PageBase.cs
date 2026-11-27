@@ -22,6 +22,7 @@ public abstract class PageBase : ComponentBase
     protected string UserId { get; private set; } = "";
     protected string UserName { get; private set; } = "";
     protected bool IsAdmin { get; private set; }
+    protected bool IsSuperAdmin { get; private set; }
     protected Actor Me => new(UserId, UserName, Client.Ip, Client.UserAgent, TenantCtx?.TenantId);
 
     protected string? Flash { get; set; }
@@ -36,7 +37,8 @@ public abstract class PageBase : ComponentBase
         var user = (await Auth.GetAuthenticationStateAsync()).User;
         UserId = user.FindFirstValue(ClaimTypes.NameIdentifier) ?? "";
         UserName = user.Identity?.Name ?? "";
-        IsAdmin = user.IsInRole(Security.Roles.Admin);
+        IsSuperAdmin = user.IsInRole(Security.Roles.SuperAdmin);
+        IsAdmin = user.IsInRole(Security.Roles.Admin) || IsSuperAdmin;
         await OnLoadAsync();
     }
 

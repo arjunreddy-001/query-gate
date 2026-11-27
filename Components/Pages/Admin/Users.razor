@@ -1,5 +1,5 @@
 @page "/admin/users"
-@attribute [Authorize(Roles = Roles.Admin)]
+@attribute [Authorize(Roles = Roles.AdminOrSuperAdmin)]
 @inherits PageBase
 @inject UserAdminService UserAdmin
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
@@ -31,11 +31,24 @@
         <tbody>
         @foreach (var (u, roles) in list)
         {
+            var targetIsSuperAdmin = superAdminIds.Contains(u.Id);
+            var lockedByPlatformRole = targetIsSuperAdmin && !IsSuperAdmin;
             <tr>
-                <td><input type="checkbox" checked="@selected.Contains(u.Id)" disabled="@(u.Id == UserId)" @onchange="e => Select(u.Id, (bool)e.Value!)" /></td>
-                <td><b>@(u.DisplayName ?? u.Email)</b><div class="faint small">@u.Email</div></td>
+                <td><input type="checkbox" checked="@selected.Contains(u.Id)" disabled="@(u.Id == UserId || lockedByPlatformRole)" @onchange="e => Select(u.Id, (bool)e.Value!)" /></td>
                 <td>
-                    <select value="@(roles.FirstOrDefault() ?? "")" @onchange="e => ChangeRole(u.Id, e.Value?.ToString() ?? string.Empty)" style="min-width:130px">
+                    <b>@(u.DisplayName ?? u.Email)</b>
+                    @if (targetIsSuperAdmin)
+                    {
+                        <span class="badge brand" style="margin-left:6px;font-size:10px">SuperAdmin</span>
+                    }
+                    <div class="faint small">@u.Email</div>
+                </td>
+                <td>
+                    <select value="@(roles.FirstOrDefault() ?? "")" disabled="@lockedByPlatformRole" title="@(lockedByPlatformRole ? "SuperAdmin accounts can only be modified by a SuperAdmin" : "Assign workspace role")" @onchange="e => ChangeRole(u.Id, e.Value?.ToString() ?? string.Empty)" style="min-width:130px">
+                        @if (targetIsSuperAdmin && !AllRoles.Contains(roles.FirstOrDefault() ?? ""))
+                        {
+                            <option value="@(roles.FirstOrDefault() ?? Roles.SuperAdmin)">@(roles.FirstOrDefault() ?? Roles.SuperAdmin)</option>
+                        }
                         @foreach (var r in AllRoles) { <option value="@r">@r</option> }
                     </select>
                 </td>
@@ -49,9 +62,9 @@
                 <td>@Local(u.ExpiresAt)</td>
                 <td>@(u.TimeoutOverrideSeconds?.ToString() ?? "default")</td>
                 <td class="right nowrap">
-                    <button class="btn btn-sm" @onclick="() => Edit(u)">Edit</button>
-                    <button class="btn btn-sm" @onclick="() => Reset(u)">Reset pwd</button>
-                    @if (u.Id != UserId) { <button class="btn btn-sm @(u.IsActive ? "btn-danger" : "btn-primary")" @onclick="() => PromptToggle(u)">@(u.IsActive ? "Deactivate" : "Activate")</button> }
+                    <button class="btn btn-sm" disabled="@lockedByPlatformRole" @onclick="() => Edit(u)">Edit</button>
+                    <button class="btn btn-sm" disabled="@lockedByPlatformRole" @onclick="() => Reset(u)">Reset pwd</button>
+                    @if (u.Id != UserId) { <button class="btn btn-sm @(u.IsActive ? "btn-danger" : "btn-primary")" disabled="@lockedByPlatformRole" @onclick="() => PromptToggle(u)">@(u.IsActive ? "Deactivate" : "Activate")</button> }
                 </td>
             </tr>
         }
@@ -107,6 +120,7 @@
     private List<string> AllRoles = [];
     private List<(ApplicationUser User, string[] Roles)> list = [];
     private HashSet<string> selected = [];
+    private HashSet<string> superAdminIds = [];
     private string search = "", newEmail = "", newName = "", newRole = Roles.Developer, secretFor = "";
     private string? secret;
     private DateTime? newExpiry, editExpiry;
@@ -118,11 +132,23 @@
     protected override async Task OnLoadAsync()
     {
         await using var db = await DbFactory.CreateDbContextAsync();
-        AllRoles = await db.Roles.AsNoTracking().Where(r => r.Name != null).Select(r => r.Name!).OrderBy(r => r).ToListAsync();
+        AllRoles = await db.Roles.AsNoTracking()
+            .Where(r => r.Name != null && r.Name != Roles.SuperAdmin)
+            .Select(r => r.Name!)
+            .OrderBy(r => r)
+            .ToListAsync();
         if (!AllRoles.Contains(newRole)) newRole = AllRoles.FirstOrDefault() ?? "";
         await Load();
     }
-    private async Task Load() => list = await UserAdmin.ListAsync(search);
+    private async Task Load()
+    {
+        list = await UserAdmin.ListAsync(search);
+        await using var db = await DbFactory.CreateDbContextAsync();
+        superAdminIds = (await (from ur in db.UserRoles
+                                join r in db.Roles on ur.RoleId equals r.Id
+                                where r.Name == Roles.SuperAdmin
+                                select ur.UserId).ToListAsync()).ToHashSet();
+    }
     private void Select(string id, bool on) { if (on) selected.Add(id); else selected.Remove(id); }
 
     private async Task Create()

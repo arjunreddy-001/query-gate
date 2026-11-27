@@ -47,8 +47,8 @@ public sealed class NotificationService(
         var ids = await (from ur in db.UserRoles
                          join r in db.Roles on ur.RoleId equals r.Id
                          join u in db.Users on ur.UserId equals u.Id
-                         where r.Name == role && u.IsActive && ur.UserId != exceptUserId
-                         select ur.UserId).ToListAsync();
+                         where (r.Name == role || (role == Roles.Admin && r.Name == Roles.SuperAdmin)) && u.IsActive && ur.UserId != exceptUserId
+                         select ur.UserId).Distinct().ToListAsync();
         var isFirst = true;
         foreach (var id in ids)
         {
@@ -250,8 +250,19 @@ public sealed class UserAdminService(
         return users.Select(u => (u, tenantRoleMap.TryGetValue(u.Id, out var tr) ? [tr] : roleMap.Where(r => r.UserId == u.Id).Select(r => r.Name!).OrderBy(n => n).ToArray())).ToList();
     }
 
+    private static async Task<bool> CanModifyTargetAsync(UserManager<ApplicationUser> users, Actor actor, ApplicationUser target)
+    {
+        if (!await users.IsInRoleAsync(target, Roles.SuperAdmin)) return true;
+        if (string.IsNullOrEmpty(actor.UserId)) return false;
+        var actorUser = await users.FindByIdAsync(actor.UserId);
+        return actorUser is not null && await users.IsInRoleAsync(actorUser, Roles.SuperAdmin);
+    }
+
     public async Task<OpResult> CreateAsync(Actor actor, string email, string displayName, string role, DateTimeOffset? expiresAt)
     {
+        if (string.Equals(role, Roles.SuperAdmin, StringComparison.OrdinalIgnoreCase))
+            return OpResult.Fail("SuperAdmin role can only be managed from Platform Administration.");
+
         using var scope = scopes.CreateScope();
         var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         var roles = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
@@ -262,15 +273,31 @@ public sealed class UserAdminService(
         {
             db.ChangeTracker.Clear();
             await using var transaction = await db.Database.BeginTransactionAsync();
-            
+
             var existingUser = await users.FindByEmailAsync(email);
+            if (existingUser is not null)
+            {
+                var isMember = await db.UserTenantMemberships.AnyAsync(m => m.UserId == existingUser.Id);
+                if (isMember) return OpResult.Fail("User is already a member of this workspace.");
+            }
+
+            if (db.CurrentTenantId.HasValue && db.CurrentTenantId.Value != Guid.Empty)
+            {
+                var tenant = await db.Tenants.IgnoreQueryFilters().AsNoTracking()
+                    .FirstOrDefaultAsync(t => t.Id == db.CurrentTenantId.Value);
+                if (tenant?.MaxUsers is int maxUsers && maxUsers > 0)
+                {
+                    var currentCount = await db.UserTenantMemberships.CountAsync();
+                    if (currentCount >= maxUsers)
+                        return OpResult.Fail($"Workspace user limit ({maxUsers}) reached. Contact a platform SuperAdmin to increase the quota.");
+                }
+            }
+
             string? password = null;
             ApplicationUser user;
             if (existingUser is not null)
             {
                 user = existingUser;
-                var isMember = await db.UserTenantMemberships.AnyAsync(m => m.UserId == user.Id);
-                if (isMember) return OpResult.Fail("User is already a member of this workspace.");
             }
             else
             {
@@ -311,6 +338,8 @@ public sealed class UserAdminService(
         var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         var user = await users.FindByIdAsync(userId);
         if (user is null) return OpResult.Fail("User not found.");
+        if (!await CanModifyTargetAsync(users, actor, user))
+            return OpResult.Fail("Only a SuperAdmin can modify a SuperAdmin account.");
         var password = GeneratePassword();
         var token = await users.GeneratePasswordResetTokenAsync(user);
         var result = await users.ResetPasswordAsync(user, token, password);
@@ -331,6 +360,8 @@ public sealed class UserAdminService(
         var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         var user = await users.FindByIdAsync(userId);
         if (user is null) return OpResult.Fail("User not found.");
+        if (!await CanModifyTargetAsync(users, actor, user))
+            return OpResult.Fail("Only a SuperAdmin can modify a SuperAdmin account.");
         user.IsActive = active;
         await users.UpdateAsync(user);
         if (!active)
@@ -348,24 +379,46 @@ public sealed class UserAdminService(
 
     public async Task<OpResult> SetRoleAsync(Actor actor, string userId, string role)
     {
+        if (string.Equals(role, Roles.SuperAdmin, StringComparison.OrdinalIgnoreCase))
+            return OpResult.Fail("SuperAdmin role can only be managed from Platform Administration.");
+
         using var scope = scopes.CreateScope();
         var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         var roles = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
         if (!await roles.RoleExistsAsync(role)) return OpResult.Fail("Role not found.");
-        var user = await users.FindByIdAsync(userId);
-        if (user is null) return OpResult.Fail("User not found.");
-        if (userId == actor.UserId && !string.Equals(role, Roles.Admin, StringComparison.OrdinalIgnoreCase)) return OpResult.Fail("You cannot remove your own Admin role.");
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var strategy = db.Database.CreateExecutionStrategy();
         return await strategy.ExecuteAsync(async () =>
         {
             db.ChangeTracker.Clear();
+            var user = await users.FindByIdAsync(userId);
+            if (user is null) return OpResult.Fail("User not found.");
+            if (!await CanModifyTargetAsync(users, actor, user))
+                return OpResult.Fail("Only a SuperAdmin can modify a SuperAdmin account.");
+            if (userId == actor.UserId && !string.Equals(role, Roles.Admin, StringComparison.OrdinalIgnoreCase)) return OpResult.Fail("You cannot remove your own Admin role.");
+
             await using var transaction = await db.Database.BeginTransactionAsync();
             var current = await users.GetRolesAsync(user);
-            var removed = await users.RemoveFromRolesAsync(user, current);
-            if (!removed.Succeeded) return OpResult.Fail(string.Join(" ", removed.Errors.Select(e => e.Description)));
-            var added = await users.AddToRoleAsync(user, role);
-            if (!added.Succeeded) return OpResult.Fail(string.Join(" ", added.Errors.Select(e => e.Description)));
+            var toRemove = current.Where(r => !string.Equals(r, Roles.SuperAdmin, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (toRemove.Length > 0)
+            {
+                var removed = await users.RemoveFromRolesAsync(user, toRemove);
+                if (!removed.Succeeded) return OpResult.Fail(string.Join(" ", removed.Errors.Select(e => e.Description)));
+            }
+            if (!current.Contains(role, StringComparer.OrdinalIgnoreCase))
+            {
+                var added = await users.AddToRoleAsync(user, role);
+                if (!added.Succeeded) return OpResult.Fail(string.Join(" ", added.Errors.Select(e => e.Description)));
+            }
+            if (db.CurrentTenantId.HasValue && db.CurrentTenantId.Value != Guid.Empty)
+            {
+                var membership = await db.UserTenantMemberships.FirstOrDefaultAsync(m => m.UserId == userId);
+                if (membership is not null)
+                {
+                    membership.Role = role;
+                    await db.SaveChangesAsync();
+                }
+            }
             var stamp = await users.UpdateSecurityStampAsync(user);
             if (!stamp.Succeeded) return OpResult.Fail(string.Join(" ", stamp.Errors.Select(e => e.Description)));
             await transaction.CommitAsync();
@@ -382,6 +435,8 @@ public sealed class UserAdminService(
         var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         var user = await users.FindByIdAsync(userId);
         if (user is null) return OpResult.Fail("User not found.");
+        if (!await CanModifyTargetAsync(users, actor, user))
+            return OpResult.Fail("Only a SuperAdmin can modify a SuperAdmin account.");
         user.ExpiresAt = expiresAt;
         user.TimeoutOverrideSeconds = timeoutOverride;
         await users.UpdateAsync(user);

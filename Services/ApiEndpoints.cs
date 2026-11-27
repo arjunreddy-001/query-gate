@@ -104,7 +104,7 @@ public static class ApiEndpoints
         });
 
         secured.MapPost("/query/{runId:guid}/cancel", (Guid runId, HttpContext http, ExecutionService execution) =>
-            execution.Cancel(runId, http.User.FindFirstValue(ClaimTypes.NameIdentifier)!, http.User.IsInRole(Roles.Admin)) ? Results.Accepted() : Results.NotFound());
+            execution.Cancel(runId, http.User.FindFirstValue(ClaimTypes.NameIdentifier)!, http.User.IsInRole(Roles.Admin) || http.User.IsInRole(Roles.SuperAdmin)) ? Results.Accepted() : Results.NotFound());
 
         app.MapGet("/api/internal/exports/{token}", (string token, HttpContext http, ExportDownloadCache exports) =>
         {

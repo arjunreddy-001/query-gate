@@ -274,11 +274,23 @@ Query Gate supports multi-tenant workspaces with complete data isolation across 
 - **Tenant-level settings**: SMTP email mailers, notification webhooks, and branding are configured independently per workspace under _Admin -> Settings_.
 
 ### SuperAdmin Role and Platform Administration
-Users with the `SuperAdmin` role operate outside individual tenant data boundaries and manage all workspaces, domains, and global platform status at `/platform/tenants`.
+Users with the `SuperAdmin` role have implicit `Admin` access across all workspaces and manage the platform control plane:
+
+- **Workspaces (`/platform/tenants`)**: Provision new workspaces, configure custom domains, set per-workspace database and user quotas, manage workspace admins and members, and safely delete disabled workspaces.
+- **Platform Operators (`/platform/operators`)**: Promote existing accounts or create new `SuperAdmin` operators, and revoke operator access (protected against self-revocation and removing the last active `SuperAdmin`).
+- **Platform Health (`/platform/health`)**: Monitor database online/offline counts, average latency, quota consumption, and 24-hour application errors across all tenants without exposing query SQL or result data.
+- **Platform Audit Logs (`/platform/audit`)**: Inspect platform-level events (workspace provisioning, custom domains, operator promotions/revocations, and global settings updates).
+- **Platform Settings (`/platform/settings`)**: Toggle global maintenance mode and enforce custom domain suffix allowlists.
 
 To grant or assume the `SuperAdmin` role:
 
-1. **Bootstrap Configuration (Recommended)**:
+1. **Initial Web Setup (`/Account/Setup`)**:
+   On a fresh installation with zero users, completing `/Account/Setup` automatically grants the root user both `Admin` (on the default workspace) and `SuperAdmin` roles.
+
+2. **Platform Operators UI (`/platform/operators`)**:
+   An existing `SuperAdmin` can promote an existing user or create a new `SuperAdmin` operator directly from **Platform -> Operators**.
+
+3. **Bootstrap Configuration**:
    Configure the bootstrap administrator in your environment file or deployment settings:
    ```env
    BOOTSTRAP_ADMIN_EMAIL=admin@company.com
@@ -286,7 +298,7 @@ To grant or assume the `SuperAdmin` role:
    ```
    On application startup, Query Gate creates the user (or locates an existing account with that email) and assigns both `Admin` and `SuperAdmin` roles.
 
-2. **Direct PostgreSQL Database Assignment**:
+4. **Direct PostgreSQL Database Assignment**:
    If the application is already running and you want to elevate an existing account without restarting:
    ```sql
    INSERT INTO "AspNetRoles" ("Id", "Name", "NormalizedName", "ConcurrencyStamp")

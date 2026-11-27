@@ -134,11 +134,13 @@ Audit and Access matrix access is configurable per role; Databases access defaul
 - **Workspace Switching**: Use the topbar workspace dropdown or visit `/select-tenant` to switch between organizations.
 
 ### SuperAdmin Role Setup
-The `SuperAdmin` role enables platform-wide workspace management at `/platform/tenants`. Configure it using one of two methods:
+The `SuperAdmin` role grants implicit `Admin` access in all workspaces and unlocks platform administration (`/platform/tenants`, `/platform/operators`, `/platform/health`, `/platform/audit`, `/platform/settings`). Workspace `Admin`s can grant user access inside their workspace (`/admin/users`) but cannot create workspaces or assign `SuperAdmin`. Configure `SuperAdmin` using one of four methods:
 
-1. **Bootstrap Configuration (Recommended)**:
+1. **Initial Web Setup (`/Account/Setup`)**: The first user created via `/Account/Setup` automatically receives `Admin` (on the default workspace) and `SuperAdmin`.
+2. **Platform Operators UI (`/platform/operators`)**: An existing `SuperAdmin` can promote an existing account or create a new `SuperAdmin` operator.
+3. **Bootstrap Configuration**:
    Set `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` (or `BootstrapAdmin__Email` and `BootstrapAdmin__Password`). On startup, `Program.cs` automatically creates the account or promotes an existing account to `SuperAdmin` and `Admin`.
-2. **Direct PostgreSQL SQL Assignment**:
+4. **Direct PostgreSQL SQL Assignment**:
    When immediate elevation is required without restarting the server:
    ```sql
    INSERT INTO "AspNetRoles" ("Id", "Name", "NormalizedName", "ConcurrencyStamp")
@@ -155,6 +157,7 @@ The `SuperAdmin` role enables platform-wide workspace management at `/platform/t
    (Log out and log back in to refresh claims).
 
 ### Tenant Provisioning & Onboarding Workflow
-- **Creating a Workspace**: SuperAdmins open `/platform/tenants`, click **Create Workspace**, provide name, slug (lowercase alphanumeric and hyphens), contact email, plan, and an initial administrator email.
+- **Creating a Workspace**: SuperAdmins open `/platform/tenants`, click **Create Workspace**, provide name, slug (lowercase alphanumeric and hyphens), contact email, plan, optional `MaxDatabases`/`MaxUsers` quotas, and an initial administrator email.
+- **Managing Workspace Admins & Members**: SuperAdmins can click **Members** on any workspace row in `/platform/tenants` to assign or remove workspace admins and members.
 - **Adding Custom Domains**: Click **Domains** on the tenant row in `/platform/tenants`, enter the hostname (e.g. `sql.acme.com`), and point DNS to the server.
-- **Adding Users to Workspaces**: Workspace admins open **Admin -> Users** (`/admin/users`), click **New user**, enter email and workspace role (`Admin`, `Developer`, `Auditor`, `Tester`). If the user already exists globally, they are joined to the workspace without email conflicts; new users receive a generated temporary password.
+- **Adding Users to Workspaces**: Workspace admins open **Admin -> Users** (`/admin/users`), click **New user**, enter email and workspace role (`Admin`, `Developer`, `Auditor`, `Tester`). If the user already exists globally, they are joined to the workspace without email conflicts; new users receive a generated temporary password. Workspace admins cannot assign `SuperAdmin` or create new workspaces.

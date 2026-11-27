@@ -11,6 +11,8 @@ public sealed class Tenant
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public string? ContactEmail { get; set; }
     public string? Plan { get; set; }
+    public int? MaxDatabases { get; set; }
+    public int? MaxUsers { get; set; }
 }
 
 public sealed class TenantDomain

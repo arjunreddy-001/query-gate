@@ -117,6 +117,7 @@ public static class Roles
 {
     public const string SuperAdmin = "SuperAdmin";
     public const string Admin = "Admin";
+    public const string AdminOrSuperAdmin = Admin + "," + SuperAdmin;
     public const string Developer = "Developer";
     public const string Tester = "Tester";
     public const string Auditor = "Auditor";

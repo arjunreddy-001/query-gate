@@ -1,0 +1,185 @@
+@page "/platform/health"
+@attribute [Authorize(Roles = Roles.SuperAdmin)]
+@inherits PageBase
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject HealthMonitorService HealthMonitor
+
+<PageTitle>Platform Health · Query Gate</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Platform Health &amp; Usage</h1>
+        <p>Aggregated workspace telemetry, database connectivity, quota usage, and recent application errors.</p>
+    </div>
+    <div class="actions">
+        <button class="btn btn-sm" type="button" @onclick="LoadAsync"><Icon Name="refresh" />Refresh</button>
+    </div>
+</div>
+
+@if (!ready)
+{
+    <div class="empty"><span class="spinner"></span><div>Loading platform health...</div></div>
+}
+else
+{
+    <div class="grid g4" style="margin-bottom:20px">
+        <div class="card stat">
+            <div class="label">Workspaces</div>
+            <div class="value">@activeTenants / @rows.Count</div>
+            <div class="hint">active organizations</div>
+        </div>
+        <div class="card stat">
+            <div class="label">Databases Online</div>
+            <div class="value">@totalOnlineDbs / @totalDbs</div>
+            <div class="hint">monitored active targets</div>
+        </div>
+        <div class="card stat">
+            <div class="label">Workspace Members</div>
+            <div class="value">@totalMembers</div>
+            <div class="hint">assigned memberships</div>
+        </div>
+        <div class="card stat">
+            <div class="label">Errors (24h)</div>
+            <div class="value">@totalErrors24h</div>
+            <div class="hint">across all workspaces</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Workspace</th>
+                        <th>Status</th>
+                        <th>Plan</th>
+                        <th>Databases (Online / Total / Quota)</th>
+                        <th>Avg Latency</th>
+                        <th>Members (Count / Quota)</th>
+                        <th>Errors (24h)</th>
+                        <th class="right">Open</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in rows)
+                    {
+                        <tr>
+                            <td>
+                                <b>@r.Name</b>
+                                <div class="faint small"><code>/t/@r.Slug</code></div>
+                            </td>
+                            <td>
+                                <span class="badge @(r.IsActive ? "ok" : "bad")">@(r.IsActive ? "Active" : "Disabled")</span>
+                            </td>
+                            <td>@(r.Plan ?? "-")</td>
+                            <td>
+                                <span class="badge @(r.OfflineDbs > 0 ? "warn" : r.TotalDbs > 0 ? "ok" : "muted")">
+                                    @r.OnlineDbs / @r.TotalDbs online
+                                </span>
+                                <span class="faint small" style="margin-left:6px">
+                                    / @(r.MaxDatabases?.ToString() ?? "unlimited")
+                                </span>
+                            </td>
+                            <td>@(r.AvgLatencyMs > 0 ? $"{r.AvgLatencyMs} ms" : "-")</td>
+                            <td>
+                                @r.MemberCount
+                                <span class="faint small">/ @(r.MaxUsers?.ToString() ?? "unlimited")</span>
+                            </td>
+                            <td>
+                                @if (r.Errors24h > 0)
+                                {
+                                    <span class="badge bad">@r.Errors24h</span>
+                                }
+                                else
+                                {
+                                    <span class="badge ok">0</span>
+                                }
+                            </td>
+                            <td class="right">
+                                <a class="btn btn-sm" href="/t/@r.Slug/dashboard" target="_blank" rel="external">Open</a>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private sealed record TenantHealthRow(
+        Guid Id,
+        string Name,
+        string Slug,
+        bool IsActive,
+        string? Plan,
+        int TotalDbs,
+        int OnlineDbs,
+        int OfflineDbs,
+        long AvgLatencyMs,
+        int? MaxDatabases,
+        int MemberCount,
+        int? MaxUsers,
+        int Errors24h);
+
+    private List<TenantHealthRow> rows = [];
+    private int activeTenants, totalDbs, totalOnlineDbs, totalMembers, totalErrors24h;
+    private bool ready;
+
+    protected override async Task OnLoadAsync()
+    {
+        await LoadAsync();
+        ready = true;
+    }
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var tenants = await db.Tenants.IgnoreQueryFilters().AsNoTracking().OrderBy(t => t.Name).ToListAsync();
+        var dbs = await db.ManagedDatabases.IgnoreQueryFilters().AsNoTracking().ToListAsync();
+        var memberCounts = await db.UserTenantMemberships.IgnoreQueryFilters().AsNoTracking()
+            .GroupBy(m => m.TenantId)
+            .Select(g => new { TenantId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.TenantId, x => x.Count);
+
+        var since = DateTimeOffset.UtcNow.AddHours(-24);
+        var errorCounts = await db.AppLogs.IgnoreQueryFilters().AsNoTracking()
+            .Where(l => l.Level == "Error" && l.Timestamp >= since)
+            .GroupBy(l => l.TenantId)
+            .Select(g => new { TenantId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.TenantId, x => x.Count);
+
+        var list = new List<TenantHealthRow>();
+        foreach (var t in tenants)
+        {
+            var tDbs = dbs.Where(d => d.TenantId == t.Id && d.IsActive).ToList();
+            var healthResults = tDbs.Select(d => HealthMonitor.Get(d.Id)).Where(h => h is not null).ToList();
+            var online = healthResults.Count(h => h!.IsOnline);
+            var offline = healthResults.Count(h => !h!.IsOnline);
+            var latencies = healthResults.Where(h => h!.IsOnline && h.LatencyMs >= 0).Select(h => h!.LatencyMs).ToList();
+            var avgLatency = latencies.Count > 0 ? (long)latencies.Average() : 0;
+
+            list.Add(new TenantHealthRow(
+                t.Id,
+                t.Name,
+                t.Slug,
+                t.IsActive,
+                t.Plan,
+                dbs.Count(d => d.TenantId == t.Id),
+                online,
+                offline,
+                avgLatency,
+                t.MaxDatabases,
+                memberCounts.GetValueOrDefault(t.Id, 0),
+                t.MaxUsers,
+                errorCounts.GetValueOrDefault(t.Id, 0)));
+        }
+
+        rows = list;
+        activeTenants = rows.Count(r => r.IsActive);
+        totalDbs = rows.Sum(r => r.TotalDbs);
+        totalOnlineDbs = rows.Sum(r => r.OnlineDbs);
+        totalMembers = rows.Sum(r => r.MemberCount);
+        totalErrors24h = rows.Sum(r => r.Errors24h);
+    }
+}

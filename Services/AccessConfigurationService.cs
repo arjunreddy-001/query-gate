@@ -21,6 +21,10 @@ public sealed class AccessConfigurationService(
     public const string AuditCapability = "audit";
     private readonly ConcurrentDictionary<string, byte> _auditCacheKeys = new(StringComparer.Ordinal);
 
+    private static bool IsBuiltInProtectedRole(string? roleName) =>
+        string.Equals(roleName, Roles.Admin, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(roleName, Roles.SuperAdmin, StringComparison.OrdinalIgnoreCase);
+
     public async Task<bool> CanAuditAsync(string userId)
     {
         var cacheKey = "perm:canaudit:" + userId;
@@ -33,7 +37,7 @@ public sealed class AccessConfigurationService(
         var allowed = await (from ur in db.UserRoles join r in db.Roles on ur.RoleId equals r.Id
             join c in db.RoleClaims on r.Id equals c.RoleId into claims
             from c in claims.DefaultIfEmpty()
-            where ur.UserId == userId && (r.NormalizedName == "ADMIN" ||
+            where ur.UserId == userId && (r.NormalizedName == "ADMIN" || r.NormalizedName == "SUPERADMIN" ||
                 (c != null && c.ClaimType == CapabilityClaim && c.ClaimValue == AuditCapability))
             select ur.UserId).AnyAsync();
 
@@ -77,7 +81,7 @@ public sealed class AccessConfigurationService(
                 await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
                 var role = await manager.FindByIdAsync(id);
                 if (role is null) return OpResult.Fail("Role not found.");
-                if (string.Equals(role.Name, Roles.Admin, StringComparison.OrdinalIgnoreCase)) return OpResult.Fail("The Admin role is protected.");
+                if (IsBuiltInProtectedRole(role.Name)) return OpResult.Fail("This built-in role is protected.");
                 var existing = await manager.FindByNameAsync(name);
                 if (existing is not null && existing.Id != id) return OpResult.Fail("Role already exists.");
                 var oldName = role.Name ?? "";
@@ -131,7 +135,7 @@ public sealed class AccessConfigurationService(
                 await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
                 var role = await manager.FindByIdAsync(id);
                 if (role is null) return OpResult.Fail("Role not found.");
-                if (string.Equals(role.Name, Roles.Admin, StringComparison.OrdinalIgnoreCase)) return OpResult.Fail("The Admin role is protected.");
+                if (IsBuiltInProtectedRole(role.Name)) return OpResult.Fail("This built-in role is protected.");
                 if (await db.UserRoles.AnyAsync(x => x.RoleId == id) || await db.PermissionGrants.AnyAsync(x => x.RoleId == id) ||
                     await db.EnvironmentDefaultGrants.AnyAsync(x => x.RoleId == id))
                     return OpResult.Fail("Remove users, database grants and environment defaults from this role first.");

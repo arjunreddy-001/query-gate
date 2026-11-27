@@ -1,0 +1,199 @@
+@page "/platform/operators"
+@attribute [Authorize(Roles = Roles.SuperAdmin)]
+@inherits PageBase
+@inject PlatformAdminService PlatformAdmin
+
+<PageTitle>Platform Operators · Query Gate</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Platform Operators</h1>
+        <p>Manage SuperAdmin accounts with platform-wide workspace governance and implicit Admin access across all tenants.</p>
+    </div>
+    <div class="actions">
+        <button class="btn btn-primary" type="button" @onclick="OpenAddModal">
+            <Icon Name="plus" />Add SuperAdmin
+        </button>
+    </div>
+</div>
+
+@if (generatedSecret is not null)
+{
+    <div class="alert info">
+        <b>Temporary password for @secretFor</b>, shown once. The user must change it at first sign-in.
+        <div class="secret" style="margin-top:8px">@generatedSecret</div>
+        <button class="btn btn-sm" style="margin-top:8px" type="button" @onclick="() => generatedSecret = null">Dismiss</button>
+    </div>
+}
+
+<div class="card">
+    @if (!ready)
+    {
+        <div class="empty"><span class="spinner"></span><div>Loading platform operators...</div></div>
+    }
+    else if (operators.Count == 0)
+    {
+        <div class="empty"><Icon Name="shield" /><div>No SuperAdmin operators found.</div></div>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Operator</th>
+                        <th>Status</th>
+                        <th>Workspace Memberships</th>
+                        <th class="right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var op in operators)
+                    {
+                        var isSelf = op.UserId == UserId;
+                        var isLastActive = op.IsActive && activeCount <= 1;
+                        <tr>
+                            <td>
+                                <b>@(op.DisplayName ?? op.Email)</b>
+                                @if (isSelf)
+                                {
+                                    <span class="badge brand" style="margin-left:6px;font-size:10px">You</span>
+                                }
+                                <div class="faint small">@op.Email</div>
+                            </td>
+                            <td>
+                                @if (!op.IsActive)
+                                {
+                                    <span class="badge bad">Inactive</span>
+                                }
+                                else if (op.LockoutEnd > DateTimeOffset.UtcNow)
+                                {
+                                    <span class="badge warn">Locked</span>
+                                }
+                                else
+                                {
+                                    <span class="badge ok">Active</span>
+                                }
+                                @if (op.MustChangePassword)
+                                {
+                                    <span class="badge info">must change pwd</span>
+                                }
+                            </td>
+                            <td>@op.WorkspaceCount workspace(s)</td>
+                            <td class="right nowrap">
+                                <button class="btn btn-sm btn-danger"
+                                        type="button"
+                                        disabled="@(isSelf || isLastActive)"
+                                        title="@(isSelf ? "You cannot revoke your own SuperAdmin role" : isLastActive ? "Cannot revoke the last active SuperAdmin" : "Revoke SuperAdmin role")"
+                                        @onclick="() => confirmingRevoke = op">
+                                    Revoke SuperAdmin
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@if (showAddModal)
+{
+    <div class="modal-back">
+        <div class="modal" style="max-width:480px">
+            <div class="modal-head">
+                <h2>Add SuperAdmin Operator</h2>
+            </div>
+            <div class="modal-body">
+                <p class="small muted" style="margin-top:0">
+                    Enter an existing user email to promote them, or enter a new email to create a SuperAdmin account with a generated temporary password.
+                </p>
+                <div class="field">
+                    <label>Email *</label>
+                    <input type="email" @bind="newEmail" placeholder="operator@company.com" />
+                </div>
+                <div class="field">
+                    <label>Display name (optional, for new accounts)</label>
+                    <input type="text" @bind="newDisplayName" placeholder="Platform Operator" />
+                </div>
+            </div>
+            <div class="modal-foot">
+                <button class="btn" type="button" @onclick="() => showAddModal = false">Cancel</button>
+                <button class="btn btn-primary" type="button" disabled="@saving" @onclick="GrantAsync">
+                    @(saving ? "Saving..." : "Grant SuperAdmin")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<ConfirmDialog IsOpen="@(confirmingRevoke is not null)"
+               Title="@($"Revoke SuperAdmin for '{confirmingRevoke?.Email}'?")"
+               Message="@($"Are you sure you want to remove platform SuperAdmin privileges from {confirmingRevoke?.DisplayName ?? confirmingRevoke?.Email}?")"
+               Details="Their active sessions and refresh tokens will be invalidated. Existing workspace memberships are preserved."
+               ConfirmText="Revoke SuperAdmin"
+               IsDanger="true"
+               OnConfirm="ConfirmRevokeAsync"
+               OnCancel="() => confirmingRevoke = null" />
+
+@code {
+    private List<PlatformOperatorInfo> operators = [];
+    private int activeCount;
+    private bool ready, showAddModal, saving;
+    private string newEmail = "", newDisplayName = "", secretFor = "";
+    private string? generatedSecret;
+    private PlatformOperatorInfo? confirmingRevoke;
+
+    protected override async Task OnLoadAsync()
+    {
+        await LoadAsync();
+        ready = true;
+    }
+
+    private async Task LoadAsync()
+    {
+        operators = await PlatformAdmin.ListOperatorsAsync();
+        activeCount = operators.Count(o => o.IsActive);
+    }
+
+    private void OpenAddModal()
+    {
+        newEmail = "";
+        newDisplayName = "";
+        showAddModal = true;
+    }
+
+    private async Task GrantAsync()
+    {
+        saving = true;
+        try
+        {
+            var res = await PlatformAdmin.GrantSuperAdminAsync(Me, newEmail, newDisplayName);
+            Say(res, res.Value is null ? "Existing user promoted to SuperAdmin." : "SuperAdmin operator created.");
+            if (res.Ok)
+            {
+                if (!string.IsNullOrEmpty(res.Value))
+                {
+                    generatedSecret = res.Value;
+                    secretFor = newEmail.Trim();
+                }
+                showAddModal = false;
+                await LoadAsync();
+            }
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private async Task ConfirmRevokeAsync()
+    {
+        if (confirmingRevoke is null) return;
+        var target = confirmingRevoke;
+        confirmingRevoke = null;
+        var res = await PlatformAdmin.RevokeSuperAdminAsync(Me, target.UserId);
+        Say(res, $"SuperAdmin revoked for {target.Email}.");
+        if (res.Ok) await LoadAsync();
+    }
+}

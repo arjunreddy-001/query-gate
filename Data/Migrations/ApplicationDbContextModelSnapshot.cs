@@ -884,6 +884,12 @@ namespace DbAccessManager.Data.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
+                    b.Property<int?>("MaxDatabases")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("MaxUsers")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(128)

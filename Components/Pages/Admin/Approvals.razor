@@ -1,5 +1,5 @@
 @page "/admin/approvals"
-@attribute [Authorize(Roles = Roles.Admin)]
+@attribute [Authorize(Roles = Roles.AdminOrSuperAdmin)]
 @inherits PageBase
 @inject RequestService Requests
 @inject SqlGate Gate

@@ -67,6 +67,10 @@
             {
                 <div class="nav-section">Platform</div>
                 <NavLink class="nav-item" href="platform/tenants" rel="external"><Icon Name="grid" /><span class="lbl">Workspaces</span></NavLink>
+                <NavLink class="nav-item" href="platform/operators" rel="external"><Icon Name="shield" /><span class="lbl">Operators</span></NavLink>
+                <NavLink class="nav-item" href="platform/health" rel="external"><Icon Name="activity" /><span class="lbl">Platform health</span></NavLink>
+                <NavLink class="nav-item" href="platform/audit" rel="external"><Icon Name="list" /><span class="lbl">Platform audit</span></NavLink>
+                <NavLink class="nav-item" href="platform/settings" rel="external"><Icon Name="cog" /><span class="lbl">Platform settings</span></NavLink>
                 <NavLink class="nav-item" href="select-tenant" rel="external"><Icon Name="users" /><span class="lbl">Switch workspace</span></NavLink>
             }
         </nav>
@@ -166,8 +170,26 @@
             <div class="alert warn idle-alert">You will be signed out in about @idleMinutesLeft minute(s) due to inactivity. Move the mouse or press a key to stay signed in.</div>
         }
 
+        @if (maintenanceMode && isSuperAdmin)
+        {
+            <div class="alert warn" style="margin:12px 20px 0 20px">
+                <Icon Name="alert" /> <b>Maintenance Mode Active:</b> Only SuperAdmin accounts can access workspaces and run queries. <a href="/platform/settings" rel="external">Manage in Platform Settings</a>
+            </div>
+        }
+
         <main class="content">
-            @Body
+            @if (maintenanceMode && !isSuperAdmin)
+            {
+                <div class="card" style="max-width:560px;margin:48px auto;padding:32px;text-align:center">
+                    <div style="font-size:28px;color:var(--warn-ink);margin-bottom:12px"><Icon Name="alert" /></div>
+                    <h2 style="margin:0 0 8px 0">Scheduled Maintenance</h2>
+                    <p class="muted">@maintenanceMessage</p>
+                </div>
+            }
+            else
+            {
+                @Body
+            }
         </main>
     </div>
 </div>
@@ -189,8 +211,8 @@
 @code {
     private CommandPalette? paletteRef;
     private int unread;
-    private bool isAdmin, isAuditor, isSuperAdmin, canViewHealth, mobileNavOpen;
-    private string displayName = "", initials = "?", roleText = "";
+    private bool isAdmin, isAuditor, isSuperAdmin, canViewHealth, mobileNavOpen, maintenanceMode;
+    private string displayName = "", initials = "?", roleText = "", maintenanceMessage = "";
     private string? currentTenantName;
     private string? currentTenantSlug;
     private List<Tenant> userTenants = [];
@@ -215,8 +237,13 @@
 
         userId = user.FindFirstValue(ClaimTypes.NameIdentifier);
         isSuperAdmin = user.IsInRole(Roles.SuperAdmin);
-        isAdmin = user.IsInRole(Roles.Admin);
+        isAdmin = user.IsInRole(Roles.Admin) || isSuperAdmin;
         isAuditor = userId is not null && await AccessConfig.CanAuditAsync(userId);
+        maintenanceMode = await SettingsSvc.GetPlatformBoolAsync("Platform:MaintenanceMode");
+        if (maintenanceMode)
+        {
+            maintenanceMessage = await SettingsSvc.GetPlatformAsync("Platform:MaintenanceMessage");
+        }
         canViewHealth = isAdmin || isSuperAdmin;
         if (!canViewHealth && userId is not null)
         {

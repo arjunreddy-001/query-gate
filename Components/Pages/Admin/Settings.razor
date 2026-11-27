@@ -1,5 +1,5 @@
 @page "/admin/settings"
-@attribute [Authorize(Roles = Roles.Admin)]
+@attribute [Authorize(Roles = Roles.AdminOrSuperAdmin)]
 @inherits PageBase
 @inject SettingsService Cfg
 @inject AuditService AuditSvc

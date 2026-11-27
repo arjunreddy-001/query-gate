@@ -1,5 +1,5 @@
 @page "/admin/permissions"
-@attribute [Authorize(Roles = Roles.Admin)]
+@attribute [Authorize(Roles = Roles.AdminOrSuperAdmin)]
 @inherits PageBase
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject AuditService AuditSvc
@@ -571,13 +571,15 @@
     private async Task RefreshConfiguration()
     {
         await using var db = await DbFactory.CreateDbContextAsync();
-        roles = await db.Roles.AsNoTracking().OrderBy(r => r.Name).ToListAsync();
+        roles = await db.Roles.AsNoTracking().Where(r => r.Name != Roles.SuperAdmin).OrderBy(r => r.Name).ToListAsync();
         environments = await db.DatabaseEnvironments.AsNoTracking().OrderBy(e => e.Name).ToListAsync();
         auditRoleIds = (await db.RoleClaims.Where(c => c.ClaimType == AccessConfigurationService.CapabilityClaim && c.ClaimValue == AccessConfigurationService.AuditCapability).Select(c => c.RoleId).ToListAsync()).ToHashSet();
         dbs = await db.ManagedDatabases.AsNoTracking().OrderBy(d => d.Name).ToListAsync();
         if (!roles.Any(r => r.Id == roleId)) roleId = roles.FirstOrDefault()?.Id ?? "";
     }
-    private static bool IsAdminRole(Microsoft.AspNetCore.Identity.IdentityRole role) => string.Equals(role.Name, Roles.Admin, StringComparison.OrdinalIgnoreCase);
+    private static bool IsAdminRole(Microsoft.AspNetCore.Identity.IdentityRole role) =>
+        string.Equals(role.Name, Roles.Admin, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(role.Name, Roles.SuperAdmin, StringComparison.OrdinalIgnoreCase);
     private void EditRole(Microsoft.AspNetCore.Identity.IdentityRole role) { editingRole = role; editRoleName = role.Name ?? ""; editRoleAudit = auditRoleIds.Contains(role.Id); roleError = null; }
     private async Task SaveRole()
     {
