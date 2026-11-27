@@ -37,8 +37,10 @@ public static class DataMaskingService
     {
         public required List<MaskingRule> Rules { get; init; }
         public required bool Enabled { get; init; }
+        public required DateTimeOffset LoadedAt { get; init; }
     }
 
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(10);
     private static readonly ConcurrentDictionary<Guid, MaskingConfigCache> _tenantConfigCache = new();
 
     public enum MaskingStrategy
@@ -210,7 +212,11 @@ public static class DataMaskingService
     {
         await using var db = await factory.CreateDbContextAsync();
         var tenantId = db.CurrentTenantId ?? Guid.Empty;
-        if (_tenantConfigCache.TryGetValue(tenantId, out var cached)) return (cached.Rules, cached.Enabled);
+        if (_tenantConfigCache.TryGetValue(tenantId, out var cached) &&
+            DateTimeOffset.UtcNow - cached.LoadedAt < CacheTtl)
+        {
+            return (cached.Rules, cached.Enabled);
+        }
 
         var enabledSetting = await db.Settings.AsNoTracking().FirstOrDefaultAsync(s => s.Key == SettingsKeyEnabled);
         var enabled = enabledSetting is null || !bool.TryParse(enabledSetting.Value, out var en) || en;
@@ -248,7 +254,7 @@ public static class DataMaskingService
             rules = GetDefaultRules();
         }
 
-        _tenantConfigCache[tenantId] = new MaskingConfigCache { Rules = rules, Enabled = enabled };
+        _tenantConfigCache[tenantId] = new MaskingConfigCache { Rules = rules, Enabled = enabled, LoadedAt = DateTimeOffset.UtcNow };
         return (rules, enabled);
     }
 
@@ -302,7 +308,7 @@ public static class DataMaskingService
 
         await db.SaveChangesAsync();
         var tenantId = db.CurrentTenantId ?? Guid.Empty;
-        _tenantConfigCache[tenantId] = new MaskingConfigCache { Rules = rules, Enabled = enabled };
+        _tenantConfigCache[tenantId] = new MaskingConfigCache { Rules = rules, Enabled = enabled, LoadedAt = DateTimeOffset.UtcNow };
     }
 
     public static void ApplyMasking(ExecutionResult result, IReadOnlyList<MaskingRule>? rules = null)

@@ -298,6 +298,8 @@ public sealed class UserAdminService(
             }
 
             await transaction.CommitAsync();
+            userStatusCache?.Invalidate(user.Id);
+            permissions?.Invalidate(userId: user.Id);
             await audit.TryWriteAsync(actor, "UserAdmin", "CreateUser", "Success", $"{email} role={role}");
             return OpResult.Success(password ?? "Existing user was added to this workspace.");
         });

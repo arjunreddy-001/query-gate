@@ -135,6 +135,7 @@
         await Task.Delay(50); // allow container element DOM mount
         if (diagramData is not null && diagramData.Nodes.Count > 0)
         {
+            await JS.InvokeVoidAsync("dbam.ensureErDiagram");
             await JS.InvokeVoidAsync("dbamEr.render", containerId, diagramData, dotNetRef);
         }
     }

@@ -105,6 +105,14 @@ public static class ApiEndpoints
 
         secured.MapPost("/query/{runId:guid}/cancel", (Guid runId, HttpContext http, ExecutionService execution) =>
             execution.Cancel(runId, http.User.FindFirstValue(ClaimTypes.NameIdentifier)!, http.User.IsInRole(Roles.Admin)) ? Results.Accepted() : Results.NotFound());
+
+        app.MapGet("/api/internal/exports/{token}", (string token, HttpContext http, ExportDownloadCache exports) =>
+        {
+            var userId = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+            if (!exports.TryTake(token, userId, out var entry) || entry is null) return Results.NotFound();
+            return Results.File(entry.Bytes, entry.ContentType, entry.FileName);
+        }).RequireAuthorization();
     }
 
     private static void SetRefreshCookie(HttpContext http, string value) =>

@@ -19,7 +19,7 @@ public sealed class ClientInfo
 public sealed class CryptoService
 {
     private readonly byte[] _key;
-    private readonly ConcurrentDictionary<string, string> _decryptionCache = new();
+    private readonly MemoryCache _decryptionCache = new(new MemoryCacheOptions { SizeLimit = 2048 });
 
     public CryptoService(IConfiguration configuration, IHostEnvironment? environment = null)
     {
@@ -65,7 +65,7 @@ public sealed class CryptoService
 
     public string Decrypt(string payload)
     {
-        if (_decryptionCache.TryGetValue(payload, out var cached)) return cached;
+        if (_decryptionCache.TryGetValue(payload, out string? cached) && cached is not null) return cached;
         if (!payload.StartsWith("v1:", StringComparison.Ordinal)) throw new CryptographicException("Unknown payload format.");
         var raw = Convert.FromBase64String(payload[3..]);
         var nonce = raw[..12];
@@ -75,11 +75,15 @@ public sealed class CryptoService
         using var aes = new AesGcm(_key, 16);
         aes.Decrypt(nonce, cipher, tag, plain);
         var result = Encoding.UTF8.GetString(plain);
-        _decryptionCache[payload] = result;
+        _decryptionCache.Set(payload, result, new MemoryCacheEntryOptions
+        {
+            Size = 1,
+            SlidingExpiration = TimeSpan.FromHours(1)
+        });
         return result;
     }
 
-    public void ClearCache() => _decryptionCache.Clear();
+    public void ClearCache() => _decryptionCache.Compact(1.0);
 
     public static string Sha256(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 }

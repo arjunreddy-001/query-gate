@@ -1,7 +1,9 @@
+using System.Collections.Concurrent;
 using DbAccessManager.Data;
 using DbAccessManager.Security;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
 namespace DbAccessManager.Services;
@@ -12,20 +14,52 @@ public sealed class AccessConfigurationService(
     AuditService audit,
     ILogger<AccessConfigurationService>? logger = null,
     AppLogService? appLog = null,
-    PermissionService? permissionService = null)
+    PermissionService? permissionService = null,
+    IMemoryCache? cache = null)
 {
     public const string CapabilityClaim = "querygate:capability";
     public const string AuditCapability = "audit";
+    private readonly ConcurrentDictionary<string, byte> _auditCacheKeys = new(StringComparer.Ordinal);
 
     public async Task<bool> CanAuditAsync(string userId)
     {
+        var cacheKey = "perm:canaudit:" + userId;
+        if (cache != null && cache.TryGetValue(cacheKey, out bool cached))
+        {
+            return cached;
+        }
+
         await using var db = await factory.CreateDbContextAsync();
-        return await (from ur in db.UserRoles join r in db.Roles on ur.RoleId equals r.Id
+        var allowed = await (from ur in db.UserRoles join r in db.Roles on ur.RoleId equals r.Id
             join c in db.RoleClaims on r.Id equals c.RoleId into claims
             from c in claims.DefaultIfEmpty()
             where ur.UserId == userId && (r.NormalizedName == "ADMIN" ||
                 (c != null && c.ClaimType == CapabilityClaim && c.ClaimValue == AuditCapability))
             select ur.UserId).AnyAsync();
+
+        if (cache != null)
+        {
+            cache.Set(cacheKey, allowed, TimeSpan.FromMinutes(5));
+            _auditCacheKeys.TryAdd(cacheKey, 0);
+        }
+        return allowed;
+    }
+
+    public void InvalidateAuditCache(string? userId = null)
+    {
+        if (cache == null) return;
+        if (!string.IsNullOrEmpty(userId))
+        {
+            var key = "perm:canaudit:" + userId;
+            cache.Remove(key);
+            _auditCacheKeys.TryRemove(key, out _);
+            return;
+        }
+        foreach (var k in _auditCacheKeys.Keys.ToList())
+        {
+            cache.Remove(k);
+            _auditCacheKeys.TryRemove(k, out _);
+        }
     }
 
     public async Task<OpResult> SaveRoleAsync(Actor actor, string id, string name, bool canAudit)
@@ -66,6 +100,8 @@ public sealed class AccessConfigurationService(
                 await db.Users.Where(u => db.UserRoles.Any(ur => ur.RoleId == id && ur.UserId == u.Id))
                     .ExecuteUpdateAsync(s => s.SetProperty(u => u.SecurityStamp, securityStamp));
                 await tx.CommitAsync();
+                InvalidateAuditCache();
+                permissionService?.Invalidate();
                 await audit.TryWriteAsync(actor, "Permission", "RoleUpdated", "Success", $"{oldName} -> {name}; audit={canAudit}");
                 return OpResult.Success();
             });
@@ -102,6 +138,8 @@ public sealed class AccessConfigurationService(
                 var result = await manager.DeleteAsync(role);
                 if (!result.Succeeded) return OpResult.Fail(string.Join(" ", result.Errors.Select(e => e.Description)));
                 await tx.CommitAsync();
+                InvalidateAuditCache();
+                permissionService?.Invalidate();
                 await audit.TryWriteAsync(actor, "Permission", "RoleDeleted", "Success", role.Name);
                 return OpResult.Success();
             });

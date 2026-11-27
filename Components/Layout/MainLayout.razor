@@ -2,6 +2,7 @@
 @implements IDisposable
 @using System.Security.Claims
 @using Microsoft.EntityFrameworkCore
+@using Microsoft.Extensions.Caching.Memory
 @using DbAccessManager.Data
 @using DbAccessManager.Security
 @using DbAccessManager.Services
@@ -13,6 +14,7 @@
 @inject ITenantContext TenantContext
 @inject IJSRuntime JS
 @inject SettingsService SettingsSvc
+@inject IMemoryCache Cache
 
 <div class="shell" @onkeydown="HandleNavKey">
     <button class="mobile-nav-backdrop @(mobileNavOpen ? "mobile-open" : "")" type="button" aria-label="Close navigation" data-mobile-nav-close @onclick="CloseMobileNav"></button>
@@ -197,6 +199,8 @@
     private string? userId;
     private DotNetObjectReference<MainLayout>? self;
 
+    private sealed record CachedLayoutUser(string DisplayName, bool MustChangePassword, List<Tenant> Tenants);
+
     private void CloseMobileNav() => mobileNavOpen = false;
     private void HandleNavKey(KeyboardEventArgs args)
     {
@@ -225,10 +229,48 @@
         }
         roleText = string.Join(", ", user.FindAll(ClaimTypes.Role).Select(c => c.Value).DefaultIfEmpty("Member"));
         var email = user.Identity?.Name ?? "";
+        var layoutCacheKey = $"layout:user:{userId}:{isSuperAdmin}";
+        CachedLayoutUser? cachedLayout = null;
+        if (userId is not null && Cache.TryGetValue(layoutCacheKey, out CachedLayoutUser? hit) && hit is not null && !hit.MustChangePassword)
+        {
+            cachedLayout = hit;
+        }
 
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var record = await db.Users.AsNoTracking().Where(u => u.Id == userId).Select(u => new { u.DisplayName, u.MustChangePassword }).FirstOrDefaultAsync();
-        displayName = ResolveDisplayName(record?.DisplayName, email);
+        if (cachedLayout is null)
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var record = await db.Users.AsNoTracking().Where(u => u.Id == userId).Select(u => new { u.DisplayName, u.MustChangePassword }).FirstOrDefaultAsync();
+            var resolvedName = ResolveDisplayName(record?.DisplayName, email);
+            var mustChange = record?.MustChangePassword == true;
+
+            List<Tenant> tenants = [];
+            if (userId is not null)
+            {
+                if (isSuperAdmin)
+                {
+                    tenants = await db.Tenants.IgnoreQueryFilters().AsNoTracking().Where(t => t.IsActive).OrderBy(t => t.Name).ToListAsync();
+                }
+                else
+                {
+                    var tenantIds = await db.UserTenantMemberships.IgnoreQueryFilters().AsNoTracking()
+                        .Where(m => m.UserId == userId)
+                        .Select(m => m.TenantId)
+                        .ToListAsync();
+                    if (tenantIds.Count > 0)
+                    {
+                        tenants = await db.Tenants.IgnoreQueryFilters().AsNoTracking().Where(t => tenantIds.Contains(t.Id) && t.IsActive).OrderBy(t => t.Name).ToListAsync();
+                    }
+                }
+            }
+
+            cachedLayout = new CachedLayoutUser(resolvedName, mustChange, tenants);
+            if (userId is not null && !mustChange)
+            {
+                Cache.Set(layoutCacheKey, cachedLayout, TimeSpan.FromMinutes(1));
+            }
+        }
+
+        displayName = cachedLayout.DisplayName;
         initials = string.Concat(displayName.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpperInvariant(p[0])));
         if (initials.Length == 0) initials = "?";
 
@@ -241,25 +283,10 @@
             currentTenantSlug = TenantContextAccessor.FallbackDefaultTenant.Slug;
         }
 
-        if (userId is not null)
-        {
-            if (isSuperAdmin)
-            {
-                userTenants = await db.Tenants.IgnoreQueryFilters().Where(t => t.IsActive).OrderBy(t => t.Name).ToListAsync();
-            }
-            else
-            {
-                var memberships = await db.UserTenantMemberships.IgnoreQueryFilters().Where(m => m.UserId == userId).ToListAsync();
-                var tenantIds = memberships.Select(m => m.TenantId).ToList();
-                if (tenantIds.Count > 0)
-                {
-                    userTenants = await db.Tenants.IgnoreQueryFilters().Where(t => tenantIds.Contains(t.Id) && t.IsActive).OrderBy(t => t.Name).ToListAsync();
-                }
-            }
-        }
+        userTenants = cachedLayout.Tenants;
 
         var path = Nav.ToBaseRelativePath(Nav.Uri);
-        if (record?.MustChangePassword == true && !path.StartsWith("Account/Manage/ChangePassword", StringComparison.OrdinalIgnoreCase))
+        if (cachedLayout.MustChangePassword && !path.StartsWith("Account/Manage/ChangePassword", StringComparison.OrdinalIgnoreCase))
         {
             Nav.NavigateTo("Account/Manage/ChangePassword", forceLoad: true);
             return;

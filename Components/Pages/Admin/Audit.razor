@@ -58,9 +58,8 @@
                     </tr>
                 </thead>
                 <tbody>
-                @foreach (var a in rows)
-                {
-                    <tr class="audit-row" @onclick="() => viewLog = a" title="Click to view complete audit details">
+                <Virtualize Items="rows" Context="a" ItemSize="54" OverscanCount="8" SpacerElement="tr">
+                    <tr @key="a.Id" class="audit-row" @onclick="() => OpenDetailsAsync(a.Id)" title="Click to view complete audit details">
                         <td class="nowrap font-mono" style="font-size:0.75rem">@Local(a.Timestamp)</td>
                         <td class="audit-user-cell" title="@a.UserName">@a.UserName</td>
                         <td><span class="badge" style="font-size:10px;padding:1px 6px">@a.Category</span></td>
@@ -90,28 +89,28 @@
                         <td class="num font-mono">@(a.DurationMs?.ToString() ?? "—")</td>
                         <td class="audit-detail-cell">
                             <div class="audit-cell-content">
-                                @if (!string.IsNullOrEmpty(a.SqlText))
+                                @if (!string.IsNullOrEmpty(a.SqlPreview))
                                 {
-                                    <div class="audit-snippet" title="@a.SqlText">
+                                    <div class="audit-snippet" title="@a.SqlPreview">
                                         <Icon Name="terminal" Style="width:12px;height:12px;color:var(--brand);margin-right:3px" />
-                                        <code>@TruncateSnippet(a.SqlText, 70)</code>
+                                        <code>@TruncateSnippet(a.SqlPreview, 70)</code>
                                     </div>
                                 }
-                                @if (!string.IsNullOrEmpty(a.Details))
+                                @if (!string.IsNullOrEmpty(a.DetailsPreview))
                                 {
-                                    <div class="audit-snippet audit-snippet-text" title="@a.Details">
+                                    <div class="audit-snippet audit-snippet-text" title="@a.DetailsPreview">
                                         <Icon Name="activity" Style="width:12px;height:12px;opacity:0.7;margin-right:3px" />
-                                        @TruncateSnippet(a.Details, 80)
+                                        @TruncateSnippet(a.DetailsPreview, 80)
                                     </div>
                                 }
                                 <div class="audit-client-info">@a.ClientIp @(a.Executor is null ? "" : "· " + a.Executor)</div>
                             </div>
-                            <button class="btn btn-sm btn-ghost audit-open-btn" type="button" title="View complete audit record in dialog" @onclick:stopPropagation @onclick="() => viewLog = a">
+                            <button class="btn btn-sm btn-ghost audit-open-btn" type="button" title="View complete audit record in dialog" @onclick:stopPropagation @onclick="() => OpenDetailsAsync(a.Id)">
                                 <Icon Name="eye" />Details
                             </button>
                         </td>
                     </tr>
-                }
+                </Virtualize>
                 </tbody>
             </table></div>
         }
@@ -259,8 +258,26 @@
 }
 
 @code {
-    private List<AuditLog> rows = [];
-    private Dictionary<Guid, ManagedDatabase> dbLookup = [];
+    private sealed record AuditDbSummary(Guid Id, string Name, string Environment, DatabaseEngine Engine);
+    private sealed record AuditListRow(
+        long Id,
+        DateTimeOffset Timestamp,
+        string? UserName,
+        string Category,
+        string Action,
+        Guid? DatabaseId,
+        string? DatabaseName,
+        string Outcome,
+        long? RowsReturned,
+        long? RowsAffected,
+        long? DurationMs,
+        string? ClientIp,
+        string? Executor,
+        string? SqlPreview,
+        string? DetailsPreview);
+
+    private List<AuditListRow> rows = [];
+    private Dictionary<Guid, AuditDbSummary> dbLookup = [];
     private AuditLog? viewLog;
     private bool isMaximized;
     private bool sqlWrap;
@@ -312,10 +329,36 @@
         try
         {
             await using var db = await DbFactory.CreateDbContextAsync();
-            dbLookup = await db.ManagedDatabases.AsNoTracking().ToDictionaryAsync(d => d.Id);
-            rows = await Query(db).Take(500).ToListAsync();
+            dbLookup = await db.ManagedDatabases.AsNoTracking()
+                .Select(d => new AuditDbSummary(d.Id, d.Name, d.Environment, d.Engine))
+                .ToDictionaryAsync(d => d.Id);
+            rows = await Query(db)
+                .Take(500)
+                .Select(a => new AuditListRow(
+                    a.Id,
+                    a.Timestamp,
+                    a.UserName,
+                    a.Category,
+                    a.Action,
+                    a.DatabaseId,
+                    a.DatabaseName,
+                    a.Outcome,
+                    a.RowsReturned,
+                    a.RowsAffected,
+                    a.DurationMs,
+                    a.ClientIp,
+                    a.Executor,
+                    a.SqlText == null ? null : (a.SqlText.Length <= 160 ? a.SqlText : a.SqlText.Substring(0, 160)),
+                    a.Details == null ? null : (a.Details.Length <= 160 ? a.Details : a.Details.Substring(0, 160))))
+                .ToListAsync();
         }
         finally { loading = false; }
+    }
+
+    private async Task OpenDetailsAsync(long id)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        viewLog = await db.AuditLogs.AsNoTracking().FirstOrDefaultAsync(a => a.Id == id);
     }
 
     private async Task OnFilterKeyDown(KeyboardEventArgs args)
@@ -328,7 +371,9 @@
     private async Task<List<AuditLog>> GetDataForExportAsync()
     {
         await using var db = await DbFactory.CreateDbContextAsync();
-        dbLookup = await db.ManagedDatabases.AsNoTracking().ToDictionaryAsync(d => d.Id);
+        dbLookup = await db.ManagedDatabases.AsNoTracking()
+            .Select(d => new AuditDbSummary(d.Id, d.Name, d.Environment, d.Engine))
+            .ToDictionaryAsync(d => d.Id);
         return await Query(db).Take(10000).ToListAsync();
     }
 

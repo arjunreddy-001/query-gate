@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
@@ -14,6 +15,7 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -77,6 +79,14 @@ public class MinimalApiIntegrationTests : IAsyncLifetime
         services.AddSingleton<PermissionService>();
         services.AddSingleton<ExecutionService>();
         services.AddSingleton<DatabaseProviderFactory>();
+        services.AddSingleton<ExportDownloadCache>();
+        services.AddResponseCompression(options =>
+        {
+            options.EnableForHttps = true;
+            options.Providers.Add<BrotliCompressionProvider>();
+            options.Providers.Add<GzipCompressionProvider>();
+            options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(["application/json", "image/svg+xml"]);
+        });
         services.AddSingleton(sp => new TokenService(jwtKey, sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>()));
 
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -115,6 +125,7 @@ public class MinimalApiIntegrationTests : IAsyncLifetime
 
         _app = builder.Build();
 
+        _app.UseResponseCompression();
         _app.UseRateLimiter();
         _app.UseAuthentication();
         _app.UseAuthorization();
@@ -319,6 +330,44 @@ public class MinimalApiIntegrationTests : IAsyncLifetime
             sql = "SELECT 1"
         });
         Assert.Equal(HttpStatusCode.Forbidden, queryResp.StatusCode);
+    }
+
+    [Fact]
+    public async Task InternalExportEndpoint_StreamsFileForOwner_AndPrefersBrotliCompression()
+    {
+        var loginResp = await _client!.PostAsJsonAsync("/api/v1/auth/login", new
+        {
+            email = "apiuser@example.com",
+            password = "Password123!"
+        });
+        var content = await loginResp.Content.ReadFromJsonAsync<LoginResponse>();
+        Assert.NotNull(content);
+
+        var exports = _app!.Services.GetRequiredService<ExportDownloadCache>();
+        var payload = new byte[] { 0x50, 0x4B, 0x03, 0x04, 0x14, 0x00 };
+        var token = exports.Register(payload, ExportFormatters.XlsxMimeType, "report.xlsx", "test-user-id");
+
+        using var authedClient = new HttpClient { BaseAddress = new Uri(_baseUrl) };
+        authedClient.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", content!.AccessToken);
+
+        var exportResp = await authedClient.GetAsync($"/api/internal/exports/{token}");
+        Assert.Equal(HttpStatusCode.OK, exportResp.StatusCode);
+        Assert.Equal(payload, await exportResp.Content.ReadAsByteArrayAsync());
+        Assert.Equal("report.xlsx", exportResp.Content.Headers.ContentDisposition?.FileName?.Trim('"'));
+
+        // Token is single-use
+        var secondResp = await authedClient.GetAsync($"/api/internal/exports/{token}");
+        Assert.Equal(HttpStatusCode.NotFound, secondResp.StatusCode);
+
+        // Response compression prefers Brotli over Gzip when client accepts both
+        using var compReq = new HttpRequestMessage(HttpMethod.Get, "/api/v1/databases");
+        compReq.Headers.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", content.AccessToken);
+        compReq.Headers.Add("Accept-Encoding", "gzip, br");
+        var compResp = await authedClient.SendAsync(compReq);
+        Assert.Equal(HttpStatusCode.OK, compResp.StatusCode);
+        Assert.Contains("br", compResp.Content.Headers.ContentEncoding);
     }
 
     private sealed record LoginResponse(string AccessToken, int ExpiresInSeconds, bool MustChangePassword);

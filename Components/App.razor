@@ -14,11 +14,9 @@
     <HeadOutlet @rendermode="PageRenderMode" />
 </head>
 
-<body>
+<body data-js-sql-completion="/@Assets["js/sql-completion.js"]" data-js-er-diagram="/@Assets["js/er-diagram.js"]">
     <Routes @rendermode="PageRenderMode" />
     <ReconnectModal />
-    <script src="/@Assets["js/sql-completion.js"]"></script>
-    <script src="/@Assets["js/er-diagram.js"]"></script>
     <script src="/@Assets["js/app.js"]"></script>
     <script src="/@Assets["_framework/blazor.web.js"]"></script>
     <script src="/@Assets["Components/Account/Shared/PasskeySubmit.razor.js"]" type="module"></script>

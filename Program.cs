@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Security.Claims;
 using System.Threading.RateLimiting;
 using DbAccessManager.Components;
@@ -12,17 +13,38 @@ using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Server.Circuits;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    // Order defines fallback preference when client Accept-Encoding weights tie: Brotli first, then Gzip.
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(
+        ["application/json", "image/svg+xml"]);
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options => options.Level = CompressionLevel.Fastest);
+builder.Services.Configure<GzipCompressionProviderOptions>(options => options.Level = CompressionLevel.Fastest);
+
 builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents()
+    .AddInteractiveServerComponents(options =>
+    {
+        options.DisconnectedCircuitMaxRetained = 40;
+        options.DisconnectedCircuitRetentionPeriod = TimeSpan.FromMinutes(2);
+        options.JSInteropDefaultCallTimeout = TimeSpan.FromSeconds(30);
+    })
     .AddHubOptions(options =>
     {
         // Default 32 KB is exceeded by multi-hundred-line SQL scripts in JS interop and tab state.
         options.MaximumReceiveMessageSize = 32 * 1024 * 1024;
+        options.MaximumParallelInvocationsPerClient = 4;
+        options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
+        options.KeepAliveInterval = TimeSpan.FromSeconds(15);
     });
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddScoped<IdentityRedirectManager>();
@@ -153,6 +175,7 @@ builder.Services.AddScoped<DbAccessManager.Services.Ai.AiAssistantService>();
 builder.Services.AddScoped<DbAccessManager.Services.OidcService>();
 builder.Services.AddScoped<PiiDiscoveryService>();
 builder.Services.AddSingleton<DatabaseAdminService>();
+builder.Services.AddSingleton<ExportDownloadCache>();
 builder.Services.AddSingleton<UserAdminService>();
 builder.Services.AddSingleton<RequestService>();
 builder.Services.AddSingleton<WorkspaceService>();
@@ -217,6 +240,7 @@ else
 }
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 app.UseHttpsRedirection();
+app.UseResponseCompression();
 
 app.UseRateLimiter();
 app.UseMiddleware<TenantResolutionMiddleware>();

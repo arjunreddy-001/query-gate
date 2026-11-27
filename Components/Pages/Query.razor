@@ -15,6 +15,7 @@
 @inject DbAccessManager.Services.Ai.AiAssistantService AiAssistant
 @using System.Text
 @using System.Text.Json
+@using DbAccessManager.Components.Pages.QueryWorkspace
 @using Microsoft.SqlServer.TransactSql.ScriptDom
 
 <PageTitle>Query workspace · Query Gate</PageTitle>
@@ -30,173 +31,29 @@ else
     {
         <button type="button" class="ws-side-backdrop" aria-label="Close workspace panel" @onclick="ToggleSide"></button>
     }
-    <aside id="workspace-panel" class="card ws-side">
-        <div class="tabs" style="margin:0;padding:0 8px">
-            <button class="tab @(side == "explorer" ? "active" : "")" @onclick='() => side = "explorer"'>Objects</button>
-            <button class="tab @(side == "saved" ? "active" : "")" @onclick='() => SwitchSide("saved")'>Saved</button>
-            <button class="tab @(side == "history" ? "active" : "")" @onclick='() => SwitchSide("history")'>History</button>
-            <button class="mobile-panel-close icon-btn sm" type="button" aria-label="Close workspace panel" @onclick="ToggleSide"><Icon Name="x" /></button>
-        </div>
-        <div class="scroll">
-            @if (side == "explorer")
-            {
-                <div class="stack" style="margin-bottom:8px">
-                    <div class="row-inline">
-                        <input type="search" placeholder="Filter objects…" @bind="filter" @bind:event="oninput" />
-                        <label class="check small" title="Search columns as well"><input type="checkbox" @bind="searchColumns" />Cols</label>
-                        <label class="check small" title="Use typo-tolerant fuzzy search"><input type="checkbox" @bind="fuzzySearch" />Fuzzy</label>
-                        <button class="icon-btn sm @(groupBySchema ? "active" : "")" title="Group objects by database schema (e.g. dbo, sales)" aria-label="Group objects by schema" @onclick="() => groupBySchema = !groupBySchema" style="flex:none"><Icon Name="folder" /></button>
-                        <button class="icon-btn sm" title="Refresh" @onclick="() => LoadMetadata(true)" style="flex:none"><Icon Name="refresh" /></button>
-                        <button class="icon-btn sm" title="Entity-Relationship (ER) Diagram" @onclick="() => OpenErDiagram(null)" style="flex:none"><Icon Name="grid" /></button>
-                    </div>
-                    <div class="row-inline obj-filters">
-                        <button class="icon-btn sm obj-filter @(objectTypeFilter == "All" ? "active" : "")" title="All" @onclick='() => objectTypeFilter = "All"'><Icon Name="list" /></button>
-                        <button class="icon-btn sm obj-filter @(objectTypeFilter == "Table" ? "active" : "")" title="Tables" @onclick='() => objectTypeFilter = "Table"'><Icon Name="table" /></button>
-                        <button class="icon-btn sm obj-filter @(objectTypeFilter == "View" ? "active" : "")" title="Views" @onclick='() => objectTypeFilter = "View"'><Icon Name="eye" /></button>
-                        <button class="icon-btn sm obj-filter @(objectTypeFilter == "Procedure" ? "active" : "")" title="Procedures" @onclick='() => objectTypeFilter = "Procedure"'><Icon Name="code" /></button>
-                        <button class="icon-btn sm obj-filter @(objectTypeFilter == "Function" ? "active" : "")" title="Functions" @onclick='() => objectTypeFilter = "Function"'><Icon Name="function" /></button>
-                    </div>
-                </div>
-                @if (metaLoading) { <div class="stack"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div> }
-                else if (metaError is not null) { <div class="alert bad small">@metaError</div> }
-                else
-                {
-                    @if (groupBySchema)
-                    {
-                        var schemaGroups = FilteredObjects.GroupBy(o => o.Schema).OrderBy(g => g.Key);
-                        @foreach (var g in schemaGroups)
-                        {
-                            var schemaKey = "schema:" + g.Key;
-                            var isSchemaExpanded = expanded.Contains(schemaKey);
-                            <div class="tree-item" style="font-weight:700;background:var(--bg-sunken)" @onclick="() => Toggle(schemaKey)">
-                                <button class="tree-chevron-btn" @onclick:stopPropagation @onclick="() => Toggle(schemaKey)" title="Toggle schema">
-                                    <Icon Name="@(isSchemaExpanded ? "chevron-down" : "chevron-right")" />
-                                </button>
-                                <Icon Name="folder" />
-                                <span>@g.Key</span>
-                                <span class="faint small" style="margin-left:auto;font-size:10px">@g.Count()</span>
-                            </div>
-                            @if (isSchemaExpanded)
-                            {
-                                @foreach (var o in g)
-                                {
-                                    var key = o.Schema + "." + o.Name;
-                                    var isExpanded = expanded.Contains(key);
-                                    <div class="tree-item" style="padding-left:20px"
-                                         @onclick="() => InsertSelect(o)"
-                                         @ondblclick="() => Toggle(key)"
-                                         @ondblclick:stopPropagation
-                                         @oncontextmenu="e => OpenObjectContextMenu(e, o)"
-                                         @oncontextmenu:preventDefault
-                                         title="Click: SELECT TOP 100 · Right-click: Menu · Double-click: Columns">
-                                        <button class="tree-chevron-btn" @onclick:stopPropagation @onclick="() => Toggle(key)" title="Toggle columns">
-                                            <Icon Name="@(isExpanded ? "chevron-down" : "chevron-right")" />
-                                        </button>
-                                        <Icon Name="@GetObjectIcon(o.Type)" />
-                                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="@key">@o.Name</span>
-                                        <button type="button" class="icon-btn sm tree-touch-menu-btn" title="Object actions" aria-label="Object actions for @key" @onclick:stopPropagation @onclick="e => OpenObjectContextMenu(e, o)"><Icon Name="more-horizontal" /></button>
-                                    </div>
-                                    @if (isExpanded)
-                                    {
-                                        @foreach (var c in o.Columns)
-                                        {
-                                            <div class="tree-col" style="padding-left:34px;cursor:pointer" @onclick="() => CopyColumn(c)" title="Click to copy column name">
-                                                <span style="opacity:0.6;font-size:10px">●</span> @c
-                                            </div>
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    else
-                    {
-                        @foreach (var o in FilteredObjects)
-                        {
-                            var key = o.Schema + "." + o.Name;
-                            var isExpanded = expanded.Contains(key);
-                            <div class="tree-item"
-                                 @onclick="() => InsertSelect(o)"
-                                 @ondblclick="() => Toggle(key)"
-                                 @ondblclick:stopPropagation
-                                 @oncontextmenu="e => OpenObjectContextMenu(e, o)"
-                                 @oncontextmenu:preventDefault
-                                 title="Click: SELECT TOP 100 · Right-click: Menu · Double-click: Columns">
-                                <button class="tree-chevron-btn" @onclick:stopPropagation @onclick="() => Toggle(key)" title="Toggle columns">
-                                    <Icon Name="@(isExpanded ? "chevron-down" : "chevron-right")" />
-                                </button>
-                                <Icon Name="@GetObjectIcon(o.Type)" />
-                                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="@key">@key</span>
-                                <button type="button" class="icon-btn sm tree-touch-menu-btn" title="Object actions" aria-label="Object actions for @key" @onclick:stopPropagation @onclick="e => OpenObjectContextMenu(e, o)"><Icon Name="more-horizontal" /></button>
-                            </div>
-                            @if (isExpanded)
-                            {
-                                @foreach (var c in o.Columns)
-                                {
-                                    <div class="tree-col" @onclick="() => CopyColumn(c)" title="Click to copy column name" style="cursor:pointer">
-                                        <span style="opacity:0.6;font-size:10px">●</span> @c
-                                    </div>
-                                }
-                            }
-                        }
-                    }
-                    @if (FilteredObjects.Count == 0) { <div class="muted small" style="padding:8px">No objects.</div> }
-                }
-            }
-            else if (side == "saved")
-            {
-                <div class="row-inline" style="padding:4px 8px;gap:4px;margin-bottom:8px">
-                    <button class="btn btn-sm @(savedViewMode == "my" ? "btn-primary" : "")" style="flex:1" @onclick='() => savedViewMode = "my"'>My Queries (@saved.Count)</button>
-                    <button class="btn btn-sm @(savedViewMode == "team" ? "btn-primary" : "")" style="flex:1" @onclick='() => savedViewMode = "team"'>Team Library (@teamSaved.Count)</button>
-                </div>
-                @if (savedViewMode == "my")
-                {
-                    @foreach (var s in saved)
-                    {
-                        <div class="tree-item" @onclick="() => LoadSql(s.SqlText, s.Name)">
-                            <Icon Name="star" />
-                            <div style="min-width:0">
-                                <div>@s.Name</div>
-                                @if (!string.IsNullOrEmpty(s.Tags)) { <div class="faint small">@s.Tags</div> }
-                                @if (s.IsShared) { <span class="badge" style="font-size:9px">Shared</span> }
-                            </div>
-                            <button class="btn-ghost btn btn-sm" style="margin-left:auto" @onclick:stopPropagation @onclick="() => PromptDeleteSaved(s)" title="Delete saved query"><Icon Name="x" /></button>
-                        </div>
-                    }
-                    @if (saved.Count == 0) { <div class="muted small" style="padding:8px">Nothing saved for this database. Use Save (Ctrl+S).</div> }
-                }
-                else
-                {
-                    @foreach (var s in teamSaved)
-                    {
-                        <div class="tree-item" @onclick="() => LoadSql(s.SqlText, s.Name)">
-                            <Icon Name="users" />
-                            <div style="min-width:0">
-                                <div><b>@s.Name</b></div>
-                                <div class="faint small">@(s.CreatedByUserName ?? "Team member") @(string.IsNullOrEmpty(s.Category) ? "" : $"· {s.Category}")</div>
-                            </div>
-                            @if (IsAdmin || s.UserId == UserId)
-                            {
-                                <button class="btn-ghost btn btn-sm" style="margin-left:auto" @onclick:stopPropagation @onclick="() => PromptDeleteSaved(s)" title="Delete team query"><Icon Name="x" /></button>
-                            }
-                        </div>
-                    }
-                    @if (teamSaved.Count == 0) { <div class="muted small" style="padding:8px">No shared queries yet. Check "Share with Team" when saving.</div> }
-                }
-            }
-            else
-            {
-                @foreach (var h in history)
-                {
-                    <div class="tree-item" style="flex-direction:column;align-items:stretch" @onclick="() => LoadSql(h.SqlText, null)">
-                        <div class="row-inline"><span class="badge @OutcomeClass(h.Outcome)">@h.Outcome</span><span class="faint small">@Ago(h.ExecutedAt) · @h.DurationMs ms</span></div>
-                        <div class="cell-sql" style="max-width:100%">@h.SqlText</div>
-                    </div>
-                }
-                @if (history.Count == 0) { <div class="muted small" style="padding:8px">No history yet.</div> }
-            }
-        </div>
-    </aside>
+    <ObjectExplorerPanel Side="@side"
+                         OnSwitchSide="SwitchSide"
+                         OnToggleSide="ToggleSide"
+                         Objects="objects"
+                         MetaLoading="metaLoading"
+                         MetaError="@metaError"
+                         Expanded="expanded"
+                         ExpandVersion="expandVersion"
+                         OnToggleExpand="Toggle"
+                         Saved="saved"
+                         TeamSaved="teamSaved"
+                         History="history"
+                         IsAdmin="IsAdmin"
+                         UserId="@UserId"
+                         OnRefreshMetadata="() => LoadMetadata(true)"
+                         OnOpenErDiagram="OpenErDiagram"
+                         OnInsertSelect="InsertSelect"
+                         OnOpenObjectContextMenu="args => OpenObjectContextMenu(args.Args, args.Obj)"
+                         OnCopyColumn="CopyColumn"
+                         OnLoadSql="args => LoadSql(args.Sql, args.Name)"
+                         OnPromptDeleteSaved="PromptDeleteSaved"
+                         OutcomeClass="OutcomeClass"
+                         Ago="Ago" />
     <div class="ws-side-split" title="Drag to resize object panel"></div>
 
     <section class="ws-main">
@@ -559,429 +416,49 @@ else
 
             <div class="ws-split" title="Drag to resize · Double-click to hide result viewer"></div>
 
-            <div class="card results @(maximized ? "maximized" : "")" @onkeydown='e => { if (e.Key == "Escape") maximized = false; }' tabindex="-1">
-            <div class="card-head" style="padding:5px 10px">
-                @if (last is null)
-                {
-                    <span class="muted">Results appear here.</span>
-                    <div class="actions">
-                        <button class="icon-btn sm" type="button" title="Hide result viewer (Ctrl+`)" aria-label="Hide result viewer" @onclick="ToggleResults"><Icon Name="@(layoutSplitHorizontal ? "chevron-right" : "chevron-down")" /></button>
-                    </div>
-                }
-                else
-                {
-                    <span class="badge @OutcomeClass(last.Outcome)">@last.Outcome</span>
-                    <div class="actions">
-                        @for (var i = 0; i < last.ResultSets.Count; i++)
-                        {
-                            var idx = i;
-                            <button class="btn btn-sm @(activeResult == idx ? "btn-primary" : "")" @onclick="() => SelectResultTab(idx)">Result @(idx + 1)</button>
-                        }
-                        <button class="btn btn-sm @(activeResult == -1 ? "btn-primary" : "")" @onclick="() => { activeResult = -1; SaveTabResultState(Current); }">Messages</button>
-                        @if (activeResult == -1)
-                        {
-                            <button class="btn btn-sm" type="button" title="Copy messages to clipboard (single click)" @onclick="CopyMessages" disabled="@(last.Messages.Count == 0)"><Icon Name="copy" />Copy Messages</button>
-                        }
-                        @if (last.ExecutionPlan is not null)
-                        {
-                            <button class="btn btn-sm @(activeResult == -2 ? "btn-primary" : "")" @onclick="() => { activeResult = -2; SaveTabResultState(Current); }"><Icon Name="activity" />Execution Plan</button>
-                        }
-                        @if (last.ResultSets.Count > 0)
-                        {
-                            <button class="btn btn-sm @(activeResult == -3 ? "btn-primary" : "")" @onclick="() => { activeResult = -3; SaveTabResultState(Current); _ = InitChart(); }"><Icon Name="activity" />Visual Chart</button>
-                        }
-                        @if (last.ResultSets.Count > 0 && activeResult >= 0)
-                        {
-                            <input type="search" placeholder="Filter rows…" @bind="gridFilter" @bind:event="oninput" style="width:130px;height:24px;padding:2px 8px;font-size:12px;margin-right:2px" title="Filter displayed rows" />
-                            @if (!string.IsNullOrWhiteSpace(gridFilter))
-                            {
-                                var matchCount = GetProcessedRows(last.ResultSets[activeResult]).Count;
-                                <span class="badge" style="font-size:11px" title="Matching rows">@matchCount/@last.ResultSets[activeResult].Rows.Count</span>
-                            }
-                            <button class="btn btn-sm" type="button" title="Copy result script/data to clipboard (single click)" @onclick="CopyActiveResultText">
-                                <Icon Name="copy" />@(last.ResultSets[activeResult].Columns.Count == 1 ? "Copy Script" : "Copy Result")
-                            </button>
-                            @if (canExport)
-                            {
-                                <div class="export-dropdown">
-                                    <button class="btn btn-sm" type="button" title="Export results">
-                                        <Icon Name="download" />Export <span style="font-size:9px;margin-left:2px">▾</span>
-                                    </button>
-                                    <div class="export-dropdown-menu">
-                                        <button class="export-dropdown-item" type="button" @onclick="CopyActiveResultText">
-                                            <Icon Name="copy" />@(last.ResultSets[activeResult].Columns.Count == 1 ? "Copy Script (Raw Text)" : "Copy Result (TSV)")
-                                        </button>
-                                        <button class="export-dropdown-item" type="button" @onclick="ExportCsv">
-                                            <Icon Name="file" />CSV (.csv)
-                                        </button>
-                                        <button class="export-dropdown-item" type="button" @onclick="ExportXlsx">
-                                            <Icon Name="table" />Excel (.xlsx)
-                                        </button>
-                                        <button class="export-dropdown-item" type="button" @onclick="ExportXlsb">
-                                            <Icon Name="table" />Excel Binary (.xlsb)
-                                        </button>
-                                        <button class="export-dropdown-item" type="button" @onclick="ExportJson">
-                                            <Icon Name="code" />JSON (.json)
-                                        </button>
-                                        <hr class="export-dropdown-divider" />
-                                        <button class="export-dropdown-item" type="button" @onclick="CopyMarkdown">
-                                            <Icon Name="copy" />Copy Markdown
-                                        </button>
-                                        <button class="export-dropdown-item" type="button" @onclick="OpenSqlInsertDialog">
-                                            <Icon Name="code" />SQL INSERT…
-                                        </button>
-                                    </div>
-                                </div>
-                            }
-                        }
-                        <button class="btn btn-sm" title="@(maximized ? "Minimize (Esc)" : "Maximize results")" @onclick="() => maximized = !maximized"><Icon Name="@(maximized ? "minimize" : "maximize")" />@(maximized ? "Minimize" : "Maximize")</button>
-                        <button class="icon-btn sm" type="button" title="Hide result viewer (Ctrl+`)" aria-label="Hide result viewer" @onclick="ToggleResults"><Icon Name="@(layoutSplitHorizontal ? "chevron-right" : "chevron-down")" /></button>
-                    </div>
-                }
-            </div>
-            @if (last is not null)
-            {
-                @if (last.Error is not null)
-                {
-                    <div class="alert bad" style="margin:12px">
-                        <div class="row-inline" style="justify-content:space-between;align-items:flex-start">
-                            <div>
-                                <b>@last.Error</b>@if (last.ErrorLine is not null) { <span> (line @last.ErrorLine)</span> }
-                                @foreach (var d in last.Denials.Where(d => d != last.Error)) { <div class="small">@d</div> }
-                            </div>
-                            @if (aiConfigured)
-                            {
-                                <button class="btn btn-sm" type="button" @onclick="FixErrorWithAi" style="background:var(--bg-elev);color:var(--text);flex:none;margin-left:8px">
-                                    <Icon Name="sparkles" /> Fix with AI
-                                </button>
-                            }
-                        </div>
-                    </div>
-                }
-                @if (aiFixResult is not null)
-                {
-                    <div class="card" style="margin:12px;background:var(--bg-elev);border:1px solid var(--brand);box-shadow:0 4px 12px rgba(91,91,240,0.1)">
-                        <div class="card-head" style="background:var(--brand-soft);padding:8px 12px">
-                            <div class="row-inline" style="gap:6px">
-                                <Icon Name="sparkles" />
-                                <b>AI Query Diagnosis & Solution</b>
-                            </div>
-                            <button class="btn btn-sm icon-btn" type="button" @onclick="() => aiFixResult = null"><Icon Name="x" /></button>
-                        </div>
-                        <div class="card-pad stack" style="gap:10px">
-                            <div style="font-size:13px;line-height:1.6">@aiFixResult.Explanation</div>
-                            @if (!string.IsNullOrWhiteSpace(aiFixResult.FixedSql))
-                            {
-                                <div style="background:var(--bg-sunken);border:1px solid var(--line);border-radius:var(--radius-sm);padding:8px 10px">
-                                    <div class="row-inline" style="justify-content:space-between;margin-bottom:6px">
-                                        <span class="faint small"><b>Corrected SQL:</b></span>
-                                        <button class="btn btn-sm btn-primary" type="button" @onclick="ApplyFixedSqlToEditor">
-                                            <Icon Name="code" /> Apply Fix to Editor
-                                        </button>
-                                    </div>
-                                    <pre class="mono small" style="margin:0;padding:6px;background:var(--bg-elev);border-radius:4px;overflow-x:auto"><code>@aiFixResult.FixedSql</code></pre>
-                                </div>
-                            }
-                        </div>
-                    </div>
-                }
-                @if (activeResult >= 0 && activeResult < last.ResultSets.Count)
-                {
-                    var rs = last.ResultSets[activeResult];
-                    var rowsToDisplay = GetProcessedRows(rs);
-                    <div id="query-results-table" class="table-wrap">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th class="num">#</th>
-                                    @for (var cIdx = 0; cIdx < rs.Columns.Count; cIdx++)
-                                    {
-                                        var col = cIdx;
-                                        var colName = rs.Columns[col];
-                                        var isColMasked = rs.MaskedColumns.Contains(colName, StringComparer.OrdinalIgnoreCase);
-                                        <th class="sortable th-resizable" @onclick="() => ToggleSort(col)" title="Click to sort" style="cursor:pointer;user-select:none">
-                                            <span style="display:inline-flex;align-items:center;gap:4px">
-                                                @if (isColMasked)
-                                                {
-                                                    <span title="Sensitive data masked (no UNMASK permission)"><Icon Name="lock" /></span>
-                                                }
-                                                <span>@colName</span>
-                                            </span>
-                                            @if (sortCol == col)
-                                            {
-                                                <span class="sort-icon" style="margin-left:4px;font-size:10px;color:var(--brand)">@(sortAsc ? "▲" : "▼")</span>
-                                            }
-                                            <span class="th-resizer"></span>
-                                        </th>
-                                    }
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <Virtualize Items="rowsToDisplay" Context="entry" ItemSize="26" OverscanCount="12" SpacerElement="tr">
-                                    <tr @key="entry.RowNumber">
-                                        <td class="num faint">@entry.RowNumber</td>
-                                        @foreach (var v in entry.Values)
-                                        {
-                                            <td @ondblclick="() => OpenCellInspector(v)" title="Double-click to inspect cell content" style="cursor:pointer">
-                                                @if (v is null) { <span class="null">NULL</span> } else { @Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture) }
-                                            </td>
-                                        }
-                                    </tr>
-                                </Virtualize>
-                            </tbody>
-                        </table>
-                    </div>
-                    @if (rs.Truncated)
-                    {
-                        <div class="alert warn results-limit" role="status">Showing the first @rs.Rows.Count rows. The row limit for this database was reached.</div>
-                    }
-                }
-                else if (activeResult == -1)
-                {
-                    <div class="card-pad mono small">
-                        <div class="row-inline" style="justify-content:flex-end;margin-bottom:8px">
-                            <button class="btn btn-sm" type="button" @onclick="CopyMessages" disabled="@(last.Messages.Count == 0)"><Icon Name="copy" />Copy Messages</button>
-                        </div>
-                        @foreach (var m in last.Messages) { <div>@m</div> }
-                        @if (last.Messages.Count == 0)
-                        {
-                            @if (last.Outcome == "Success" && last.Error is null)
-                            {
-                                <span class="ok">Command(s) completed successfully.@(last.RowsAffected > 0 ? $" ({last.RowsAffected} row(s) affected.)" : "")</span>
-                            }
-                            else if (last.Error is not null)
-                            {
-                                <span class="muted">No additional messages.</span>
-                            }
-                            else
-                            {
-                                <span class="muted">No messages.</span>
-                            }
-                        }
-                    </div>
-                }
-                else if (activeResult == -2 && last.ExecutionPlan is not null)
-                {
-                    var plan = last.ExecutionPlan;
-                    <div class="plan-container" style="padding:14px;overflow-y:auto;max-height:100%">
-                        <div class="plan-summary-grid">
-                            <div class="plan-metric">
-                                <span class="plan-metric-label">Estimated Subtree Cost</span>
-                                <span class="plan-metric-value">@plan.TotalCost.ToString("F4")</span>
-                            </div>
-                            <div class="plan-metric">
-                                <span class="plan-metric-label">Optimization Level</span>
-                                <span class="plan-metric-value">@plan.OptimizationLevel</span>
-                            </div>
-                            <div class="plan-metric">
-                                <span class="plan-metric-label">Estimated Rows</span>
-                                <span class="plan-metric-value">@plan.EstimatedRows.ToString("N0")</span>
-                            </div>
-                            <div class="plan-metric">
-                                <span class="plan-metric-label">Operators</span>
-                                <span class="plan-metric-value">@plan.Operators.Count</span>
-                            </div>
-                            @if (plan.CompileTimeMs > 0)
-                            {
-                                <div class="plan-metric">
-                                    <span class="plan-metric-label">Compile Time</span>
-                                    <span class="plan-metric-value">@plan.CompileTimeMs ms</span>
-                                </div>
-                            }
-                        </div>
-
-                        @if (plan.MissingIndexes.Count > 0)
-                        {
-                            <div class="plan-card" style="margin-top:14px">
-                                <div class="row-inline" style="justify-content:space-between;margin-bottom:8px">
-                                    <div class="row-inline" style="gap:8px">
-                                        <span class="badge warn"><Icon Name="alert" />Missing Index Recommendation</span>
-                                        <span class="muted small">SQL Server optimizer identified index improvement</span>
-                                    </div>
-                                </div>
-                                @foreach (var mi in plan.MissingIndexes)
-                                {
-                                    <div style="background:var(--bg-sunken);border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:8px">
-                                        <div class="row-inline" style="justify-content:space-between;margin-bottom:6px">
-                                            <div>
-                                                <b>@mi.Table</b>
-                                                <span class="badge ok" style="margin-left:6px">+@mi.Impact% cost reduction</span>
-                                            </div>
-                                            <div class="row-inline" style="gap:6px">
-                                                <button class="btn btn-sm" type="button" @onclick="() => CopyMissingIndex(mi.CreateIndexStatement)"><Icon Name="copy" />Copy Index Script</button>
-                                                <button class="btn btn-sm btn-primary" type="button" @onclick="() => InsertMissingIndexToEditor(mi.CreateIndexStatement)"><Icon Name="code" />Add to Editor</button>
-                                            </div>
-                                        </div>
-                                        <pre class="mono small" style="margin:0;padding:8px;background:var(--bg-elev);border-radius:4px;overflow-x:auto"><code>@mi.CreateIndexStatement</code></pre>
-                                    </div>
-                                }
-                            </div>
-                        }
-
-                        <div class="plan-card" style="margin-top:14px">
-                            <div class="row-inline" style="justify-content:space-between;margin-bottom:8px">
-                                <div class="row-inline" style="gap:4px">
-                                    <button class="btn btn-sm @(planViewMode == "tree" ? "btn-primary" : "")" type="button" @onclick='() => planViewMode = "tree"'>
-                                        <Icon Name="git-commit" /> Tree (DAG)
-                                    </button>
-                                    <button class="btn btn-sm @(planViewMode == "table" ? "btn-primary" : "")" type="button" @onclick='() => planViewMode = "table"'>
-                                        <Icon Name="table" /> Operator Table
-                                    </button>
-                                    <button class="btn btn-sm @(planViewMode == "raw" ? "btn-primary" : "")" type="button" @onclick='() => planViewMode = "raw"'>
-                                        <Icon Name="code" /> Raw XML/JSON
-                                    </button>
-                                </div>
-                                <div class="row-inline" style="gap:6px">
-                                    @if (aiConfigured)
-                                    {
-                                        <button class="btn btn-sm" type="button" @onclick="ExplainPlanWithAi" disabled="@aiExplainingPlan">
-                                            <Icon Name="sparkles" /> @(aiExplainingPlan ? "Analyzing..." : "Explain Plan with AI")
-                                        </button>
-                                    }
-                                    <button class="btn btn-sm" type="button" @onclick="CopyPlanXml"><Icon Name="copy" />Copy Plan XML</button>
-                                </div>
-                            </div>
-
-                            @if (!string.IsNullOrEmpty(aiPlanExplanation))
-                            {
-                                <div class="alert note" style="margin-bottom:12px;background:var(--bg-elev);border:1px solid var(--brand);line-height:1.6">
-                                    <div class="row-inline" style="justify-content:space-between;margin-bottom:6px">
-                                        <div class="row-inline" style="gap:6px">
-                                            <Icon Name="sparkles" />
-                                            <b>AI Performance Analysis & Recommendations</b>
-                                        </div>
-                                        <button class="btn btn-sm icon-btn" type="button" @onclick="() => aiPlanExplanation = null"><Icon Name="x" /></button>
-                                    </div>
-                                    <div style="font-size:12px;white-space:pre-wrap">@aiPlanExplanation</div>
-                                </div>
-                            }
-
-                            @if (planViewMode == "raw")
-                            {
-                                <pre class="mono small" style="max-height:360px;overflow:auto;padding:10px;background:var(--bg-sunken);border:1px solid var(--line);border-radius:var(--radius-sm);margin-bottom:12px"><code>@plan.RawXml</code></pre>
-                            }
-                            else if (planViewMode == "tree")
-                            {
-                                <div class="plan-tree-wrap" style="padding:16px;background:var(--bg-sunken);border:1px solid var(--line);border-radius:var(--radius-sm);overflow:auto;max-height:450px">
-                                    <div class="row-inline" style="justify-content:space-between;margin-bottom:12px">
-                                        <span class="muted small">Interactive operator flowchart (data flows from right/bottom children up to the root operator)</span>
-                                        @if (GetBottleneckNode(plan) is { } bottleneck)
-                                        {
-                                            <button class="btn btn-sm" type="button" @onclick="() => selectedPlanNodeId = bottleneck.NodeId" style="font-size:11px">
-                                                <Icon Name="alert" /> Focus Bottleneck (Node #@bottleneck.NodeId: @bottleneck.CostPercentage%)
-                                            </button>
-                                        }
-                                    </div>
-
-                                    <div style="display:flex;flex-direction:column;gap:12px">
-                                        @foreach (var rootOp in GetRootOperators(plan))
-                                        {
-                                            @RenderPlanTreeNode(plan, rootOp)
-                                        }
-                                    </div>
-                                </div>
-                            }
-                            else
-                            {
-                                <div class="table-wrap">
-                                    <table>
-                                        <thead>
-                                            <tr>
-                                                <th style="width:40px">Node</th>
-                                                <th>Operator</th>
-                                                <th>Target Object</th>
-                                                <th class="num" style="width:90px">Est. Rows</th>
-                                                <th class="num" style="width:110px">Cost (% of Total)</th>
-                                                <th style="width:160px">% Subtree Cost</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            @foreach (var op in plan.Operators)
-                                            {
-                                                <tr>
-                                                    <td class="num faint">@op.NodeId</td>
-                                                    <td>
-                                                        <div class="row-inline" style="gap:6px">
-                                                            <b>@op.PhysicalOp</b>
-                                                            @if (op.LogicalOp != op.PhysicalOp && !string.IsNullOrEmpty(op.LogicalOp))
-                                                            {
-                                                                <span class="faint small">(@op.LogicalOp)</span>
-                                                            }
-                                                            @if (op.IsScan)
-                                                            {
-                                                                <span class="badge warn" style="font-size:10px;padding:1px 5px" title="Full scan: consider adding index or selective predicate">SCAN</span>
-                                                            }
-                                                            @if (op.IsWarning && !op.IsScan)
-                                                            {
-                                                                <span class="badge bad" style="font-size:10px;padding:1px 5px" title="@op.WarningMessage">WARNING</span>
-                                                            }
-                                                        </div>
-                                                    </td>
-                                                    <td>
-                                                        @if (!string.IsNullOrEmpty(op.TargetObject))
-                                                        {
-                                                            <code>@op.TargetObject</code>
-                                                        }
-                                                        else
-                                                        {
-                                                            <span class="faint small">-</span>
-                                                        }
-                                                    </td>
-                                                    <td class="num">@op.EstimatedRows.ToString("N0")</td>
-                                                    <td class="num">
-                                                        <span>@op.OperatorCost.ToString("F4")</span>
-                                                        <span class="faint small" style="margin-left:4px">(@op.CostPercentage%)</span>
-                                                    </td>
-                                                    <td>
-                                                        <div class="plan-cost-bar">
-                                                            <div class="plan-cost-fill @(op.CostPercentage >= 50 ? "cost-high" : op.CostPercentage >= 20 ? "cost-med" : "")" style="width:@(Math.Max(3, Math.Min(100, op.CostPercentage)))%"></div>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            }
-                                        </tbody>
-                                    </table>
-                                </div>
-                            }
-                        </div>
-                    </div>
-                }
-                else if (activeResult == -3 && last?.ResultSets.Count > 0)
-                {
-                    var rs = last.ResultSets[Math.Max(0, lastActiveResultIndex)];
-                    <div class="chart-container">
-                        <div class="chart-toolbar">
-                            <label class="small faint">Chart Type:</label>
-                            <select class="form-control" style="width:130px;height:28px;font-size:12px" @bind="chartType" @bind:after="RenderChartAsync">
-                                <option value="bar">Bar Chart</option>
-                                <option value="line">Line Chart</option>
-                                <option value="area">Area Chart</option>
-                                <option value="donut">Donut Chart</option>
-                            </select>
-
-                            <label class="small faint">Category (X-Axis):</label>
-                            <select class="form-control" style="width:150px;height:28px;font-size:12px" @bind="chartCatCol" @bind:after="RenderChartAsync">
-                                @for (var c = 0; c < rs.Columns.Count; c++)
-                                {
-                                    <option value="@c">@rs.Columns[c]</option>
-                                }
-                            </select>
-
-                            <label class="small faint">Values (Y-Axis):</label>
-                            <select class="form-control" style="width:150px;height:28px;font-size:12px" @bind="chartValCol" @bind:after="RenderChartAsync">
-                                @for (var c = 0; c < rs.Columns.Count; c++)
-                                {
-                                    <option value="@c">@rs.Columns[c]</option>
-                                }
-                            </select>
-
-                            <button class="btn btn-sm" type="button" @onclick="RenderChartAsync" style="margin-left:auto"><Icon Name="refresh" />Refresh Chart</button>
-                        </div>
-                        <div id="query-result-chart" class="chart-svg-wrap"></div>
-                    </div>
-                }
-            }
-        </div>
+            <ResultsGridPanel Last="last"
+                              ActiveResult="activeResult"
+                              OnSelectResult="SelectResultsView"
+                              SortCol="sortCol"
+                              SortAsc="sortAsc"
+                              OnToggleSort="ToggleSort"
+                              GridFilter="@gridFilter"
+                              OnGridFilterChanged="OnGridFilterChanged"
+                              Maximized="maximized"
+                              OnSetMaximized="v => maximized = v"
+                              LayoutSplitHorizontal="layoutSplitHorizontal"
+                              OnToggleResults="ToggleResults"
+                              CanExport="canExport"
+                              AiConfigured="aiConfigured"
+                              AiFixResult="aiFixResult"
+                              AiExplainingPlan="aiExplainingPlan"
+                              AiPlanExplanation="@aiPlanExplanation"
+                              ChartType="@chartType"
+                              OnChartTypeChanged="OnChartTypeChanged"
+                              ChartCatCol="chartCatCol"
+                              OnChartCatColChanged="OnChartCatColChanged"
+                              ChartValCol="chartValCol"
+                              OnChartValColChanged="OnChartValColChanged"
+                              LastActiveResultIndex="lastActiveResultIndex"
+                              OnCopyMessages="CopyMessages"
+                              OnCopyActiveResultText="CopyActiveResultText"
+                              OnExportCsv="ExportCsv"
+                              OnExportXlsx="ExportXlsx"
+                              OnExportXlsb="ExportXlsb"
+                              OnExportJson="ExportJson"
+                              OnCopyMarkdown="CopyMarkdown"
+                              OnOpenSqlInsertDialog="OpenSqlInsertDialog"
+                              OnFixErrorWithAi="FixErrorWithAi"
+                              OnApplyFixedSqlToEditor="ApplyFixedSqlToEditor"
+                              OnDismissAiFix="() => aiFixResult = null"
+                              OnExplainPlanWithAi="ExplainPlanWithAi"
+                              OnDismissAiPlan="() => aiPlanExplanation = null"
+                              OnCopyPlanXml="CopyPlanXml"
+                              OnCopyMissingIndex="CopyMissingIndex"
+                              OnInsertMissingIndexToEditor="InsertMissingIndexToEditor"
+                              OnOpenCellInspector="OpenCellInspector"
+                              OnRefreshChart="RenderChartAsync"
+                              OutcomeClass="OutcomeClass" />
     </div>
     @{
         var statusDb = Current is not null ? databases.FirstOrDefault(d => d.Id == Current.DatabaseId) : null;
@@ -1414,7 +891,7 @@ else
     <div class="context-menu-backdrop" @onclick="CloseContextMenu" @oncontextmenu="CloseContextMenu" @oncontextmenu:preventDefault></div>
     <div id="oe-context-menu" class="context-menu" style="left:@(contextMenuX)px;top:@(contextMenuY)px" @onclick:stopPropagation>
         <div class="context-menu-header">
-            <Icon Name="@GetObjectIcon(o.Type)" />
+            <Icon Name="@ObjectExplorerPanel.GetObjectIcon(o.Type)" />
             <span style="overflow:hidden;text-overflow:ellipsis">@key</span>
         </div>
         <div class="context-menu-divider"></div>
@@ -1587,17 +1064,16 @@ else
     private int activeResult;
     private Guid runId;
     private List<string>? confirm;
-    private string side = "explorer", filter = "", objectTypeFilter = "All";
-    private bool fuzzySearch = true;
+    private string side = "explorer";
     private bool showDisabledDatabases;
     private List<DbObjectInfo> objects = [];
     private HashSet<string> expanded = [];
+    private int expandVersion;
     private bool metaLoading;
     private string? metaError;
     private long metadataRequest;
     private List<SavedQuery> saved = [];
     private List<SavedQuery> teamSaved = [];
-    private string savedViewMode = "my";
     private List<QueryHistory> history = [];
     private string saveName = "", saveTags = "", saveDesc = "", saveCategory = "";
     private bool saveIsShared;
@@ -1617,8 +1093,6 @@ else
     private object? inspectingCellValue;
     private string inspectingCellFormatted = "";
     private bool inspectingCellIsJson;
-    private bool groupBySchema;
-    private bool searchColumns;
     private bool layoutSplitHorizontal;
     private bool resultsVisible = true;
     private bool? preFocusSideOpen;
@@ -1638,7 +1112,6 @@ else
     private sealed record EditorPreferences(bool AutomaticSuggestions, bool LiveDiagnostics, int FontSize);
     public sealed record SyntaxDiagnostic(int Line, int Column, string Message);
 
-    private IReadOnlyList<DbObjectInfo> FilteredObjects => GetFilteredObjects();
     private Guid _loadedMetadataDbId;
     private bool _hasLoadedMetadataForDb;
 
@@ -1932,13 +1405,17 @@ else
             Current.DatabaseId = databases[0].Id;
     }
 
+    private sealed record AutocompleteObjectDto(string Schema, string Name, string Type, List<string> Columns);
+
     private async Task LoadMetadata(bool refresh)
     {
         if (Current is null) return;
         var databaseId = Current.DatabaseId;
         var request = ++metadataRequest;
         objects = [];
-        await JS.InvokeVoidAsync("dbam.setMetadata", Array.Empty<DbObjectInfo>());
+        expanded.Clear();
+        expandVersion++;
+        await JS.InvokeVoidAsync("dbam.setMetadata", Array.Empty<AutocompleteObjectDto>());
         metaLoading = true; metaError = null; StateHasChanged();
         try
         {
@@ -1947,7 +1424,7 @@ else
             objects = loadedObjects;
             _loadedMetadataDbId = databaseId;
             _hasLoadedMetadataForDb = true;
-            await JS.InvokeVoidAsync("dbam.setMetadata", objects);
+            await JS.InvokeVoidAsync("dbam.setMetadata", objects.Select(o => new AutocompleteObjectDto(o.Schema, o.Name, o.Type, o.Columns)));
         }
         catch (Exception ex)
         {
@@ -2137,7 +1614,7 @@ else
         Say($"Copied column: {colName}");
     }
 
-    private void Toggle(string key) { if (!expanded.Remove(key)) expanded.Add(key); }
+    private void Toggle(string key) { if (!expanded.Remove(key)) expanded.Add(key); expandVersion++; }
 
     private string? editingTabId;
     private string editingTabName = "";
@@ -2625,7 +2102,42 @@ else
         SaveTabResultState(Current);
     }
 
-    private sealed record IndexedResultRow(int RowNumber, object?[] Values);
+    private void SelectResultsView(int view)
+    {
+        if (view >= 0)
+        {
+            SelectResultTab(view);
+            return;
+        }
+        activeResult = view;
+        SaveTabResultState(Current);
+        if (view == -3) _ = InitChart();
+    }
+
+    private void OnGridFilterChanged(string value)
+    {
+        gridFilter = value ?? "";
+        SaveTabResultState(Current);
+    }
+
+    private async Task OnChartTypeChanged(string value)
+    {
+        chartType = value;
+        await RenderChartAsync();
+    }
+
+    private async Task OnChartCatColChanged(int value)
+    {
+        chartCatCol = value;
+        await RenderChartAsync();
+    }
+
+    private async Task OnChartValColChanged(int value)
+    {
+        chartValCol = value;
+        await RenderChartAsync();
+    }
+
     private ResultSetDto? _cachedRowsSource;
     private string _cachedRowsFilter = "";
     private int? _cachedRowsSortCol;
@@ -2651,29 +2163,7 @@ else
             return _cachedProcessedRows;
         }
 
-        IEnumerable<object?[]> rows = rs.Rows;
-        if (!string.IsNullOrWhiteSpace(normalizedFilter))
-        {
-            var f = normalizedFilter.Trim();
-            rows = rows.Where(row => row.Any(cell => cell is not null &&
-                Convert.ToString(cell, System.Globalization.CultureInfo.InvariantCulture)?.Contains(f, StringComparison.OrdinalIgnoreCase) == true));
-        }
-
-        if (sortCol.HasValue && sortCol.Value < rs.Columns.Count)
-        {
-            var idx = sortCol.Value;
-            rows = sortAsc
-                ? rows.OrderBy(r => r[idx], CellComparer.Instance)
-                : rows.OrderByDescending(r => r[idx], CellComparer.Instance);
-        }
-
-        var result = new List<IndexedResultRow>();
-        var rowNum = 1;
-        foreach (var r in rows)
-        {
-            result.Add(new IndexedResultRow(rowNum++, r));
-        }
-
+        var result = QueryResultProcessor.ProcessRows(rs, normalizedFilter, sortCol, sortAsc);
         _cachedRowsSource = rs;
         _cachedRowsFilter = normalizedFilter;
         _cachedRowsSortCol = sortCol;
@@ -2888,156 +2378,10 @@ else
         Say($"Copied cell: {(str.Length > 40 ? str[..40] + "…" : str)}");
     }
 
-    private sealed class CellComparer : IComparer<object?>
-    {
-        public static readonly CellComparer Instance = new();
-        public int Compare(object? x, object? y)
-        {
-            if (x is null && y is null) return 0;
-            if (x is null) return -1;
-            if (y is null) return 1;
-
-            if (x is IComparable cx && y is IComparable cy && x.GetType() == y.GetType())
-            {
-                return cx.CompareTo(cy);
-            }
-
-            var sx = Convert.ToString(x, System.Globalization.CultureInfo.InvariantCulture);
-            var sy = Convert.ToString(y, System.Globalization.CultureInfo.InvariantCulture);
-
-            if (double.TryParse(sx, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var dx) &&
-                double.TryParse(sy, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var dy))
-            {
-                return dx.CompareTo(dy);
-            }
-
-            return string.Compare(sx, sy, StringComparison.OrdinalIgnoreCase);
-        }
-    }
-
     public async ValueTask DisposeAsync()
     {
         try { await JS.InvokeVoidAsync("dbam.editorDispose", "main"); } catch { }
         self?.Dispose();
-    }
-
-    private List<DbObjectInfo>? _cachedObjectsSource;
-    private string _cachedObjectsFilter = "";
-    private string _cachedObjectsType = "All";
-    private bool _cachedObjectsSearchCols;
-    private bool _cachedObjectsFuzzy = true;
-    private List<DbObjectInfo> _cachedFilteredObjects = [];
-
-    private IReadOnlyList<DbObjectInfo> GetFilteredObjects()
-    {
-        var normalizedFilter = filter ?? "";
-        if (ReferenceEquals(_cachedObjectsSource, objects) &&
-            string.Equals(_cachedObjectsFilter, normalizedFilter, StringComparison.Ordinal) &&
-            string.Equals(_cachedObjectsType, objectTypeFilter, StringComparison.Ordinal) &&
-            _cachedObjectsSearchCols == searchColumns &&
-            _cachedObjectsFuzzy == fuzzySearch)
-        {
-            return _cachedFilteredObjects;
-        }
-
-        var result = BuildFilteredObjects(normalizedFilter).ToList();
-        _cachedObjectsSource = objects;
-        _cachedObjectsFilter = normalizedFilter;
-        _cachedObjectsType = objectTypeFilter;
-        _cachedObjectsSearchCols = searchColumns;
-        _cachedObjectsFuzzy = fuzzySearch;
-        _cachedFilteredObjects = result;
-        return result;
-    }
-
-    private IEnumerable<DbObjectInfo> BuildFilteredObjects(string currentFilter)
-    {
-        var source = objects.AsEnumerable();
-        if (objectTypeFilter != "All") source = source.Where(o => o.Type == objectTypeFilter);
-
-        if (string.IsNullOrWhiteSpace(currentFilter)) return source.Take(300);
-        if (searchColumns)
-        {
-            return source.Where(o =>
-                (o.Schema + "." + o.Name).Contains(currentFilter, StringComparison.OrdinalIgnoreCase) ||
-                o.Columns.Any(c => c.Contains(currentFilter, StringComparison.OrdinalIgnoreCase))
-            ).Take(300);
-        }
-        if (!fuzzySearch)
-            return source.Where(o => (o.Schema + "." + o.Name).Contains(currentFilter, StringComparison.OrdinalIgnoreCase)).Take(300);
-
-        var query = Normalize(currentFilter);
-        if (query.Length == 0) return source.Take(300);
-
-        return source
-            .Select(o => new { Obj = o, Score = FuzzyScore(query, Normalize(o.Schema + "." + o.Name), Normalize(o.Name)) })
-            .Where(x => x.Score >= 0)
-            .OrderByDescending(x => x.Score)
-            .ThenBy(x => x.Obj.Schema)
-            .ThenBy(x => x.Obj.Name)
-            .Select(x => x.Obj)
-            .Take(300);
-    }
-
-    private static string GetObjectIcon(string type) => type switch
-    {
-        "Table" => "table",
-        "View" => "eye",
-        "Function" => "function",
-        _ => "code"
-    };
-
-    private static string Normalize(string value) => new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
-
-    private static int FuzzyScore(string query, string fullName, string name)
-    {
-        var containsName = name.IndexOf(query, StringComparison.Ordinal);
-        if (containsName >= 0) return 1000 - containsName;
-
-        var containsFull = fullName.IndexOf(query, StringComparison.Ordinal);
-        if (containsFull >= 0) return 900 - containsFull;
-
-        if (IsSubsequence(query, name)) return 700 - Math.Max(0, name.Length - query.Length);
-
-        var threshold = Math.Max(1, query.Length / 3);
-        if (Math.Abs(query.Length - name.Length) > threshold) return -1;
-        var distance = Levenshtein(query, name);
-        if (distance <= threshold) return 500 - (distance * 50);
-
-        return -1;
-    }
-
-    private static bool IsSubsequence(string query, string text)
-    {
-        var q = 0;
-        for (var i = 0; i < text.Length && q < query.Length; i++)
-            if (text[i] == query[q]) q++;
-        return q == query.Length;
-    }
-
-    private static int Levenshtein(string source, string target)
-    {
-        if (source.Length == 0) return target.Length;
-        if (target.Length == 0) return source.Length;
-
-        if (source.Length < target.Length) (source, target) = (target, source);
-
-        var row = new int[target.Length + 1];
-        for (var j = 0; j <= target.Length; j++) row[j] = j;
-
-        for (var i = 1; i <= source.Length; i++)
-        {
-            var prevDiag = row[0];
-            row[0] = i;
-            for (var j = 1; j <= target.Length; j++)
-            {
-                var oldDiag = row[j];
-                var cost = source[i - 1] == target[j - 1] ? 0 : 1;
-                row[j] = Math.Min(Math.Min(row[j] + 1, row[j - 1] + 1), prevDiag + cost);
-                prevDiag = oldDiag;
-            }
-        }
-        return row[target.Length];
     }
 
     // AI Assistant State & Methods
@@ -3055,82 +2399,6 @@ else
     // ER Diagram State & Methods
     private bool showErModal;
     private string? erFocusTable;
-
-    // Execution Plan Tree & View State
-    private string planViewMode = "tree";
-    private int? selectedPlanNodeId;
-
-    private PlanOperatorDto? GetBottleneckNode(ExecutionPlanDto plan)
-    {
-        return plan.Operators.OrderByDescending(o => o.CostPercentage).FirstOrDefault(o => o.CostPercentage >= 20.0);
-    }
-
-    private List<PlanOperatorDto> GetRootOperators(ExecutionPlanDto plan)
-    {
-        var roots = plan.Operators.Where(o => o.ParentNodeId == null || !plan.Operators.Any(p => p.NodeId == o.ParentNodeId)).ToList();
-        return roots.Count > 0 ? roots : plan.Operators.Take(1).ToList();
-    }
-
-    private RenderFragment RenderPlanTreeNode(ExecutionPlanDto plan, PlanOperatorDto node) => __builder =>
-    {
-        var isSelected = selectedPlanNodeId == node.NodeId;
-        var isHighCost = node.CostPercentage >= 35.0;
-        var children = plan.Operators.Where(c => c.ParentNodeId == node.NodeId || node.ChildrenNodeIds.Contains(c.NodeId)).ToList();
-
-        <div style="@(node.ParentNodeId.HasValue ? "padding-left:24px;border-left:2px dashed var(--line-strong);margin-left:12px;margin-top:6px;" : "margin-top:6px;")">
-            <div class="plan-node-card @(isSelected ? "selected" : "") @(isHighCost ? "bottleneck" : "")"
-                 @onclick="() => selectedPlanNodeId = (selectedPlanNodeId == node.NodeId ? null : node.NodeId)"
-                 style="display:inline-flex;align-items:center;justify-content:space-between;gap:12px;background:var(--bg-elev);border:1px solid @(isHighCost ? "var(--bad)" : isSelected ? "var(--brand)" : "var(--line)");border-radius:6px;padding:8px 12px;box-shadow:0 2px 6px rgba(0,0,0,0.04);cursor:pointer;max-width:700px">
-                <div class="row-inline" style="gap:8px">
-                    <span class="badge" style="font-family:monospace;font-size:10px">#@node.NodeId</span>
-                    <b>@node.PhysicalOp</b>
-                    @if (!string.IsNullOrEmpty(node.LogicalOp) && node.LogicalOp != node.PhysicalOp)
-                    {
-                        <span class="muted small">(@node.LogicalOp)</span>
-                    }
-                    @if (!string.IsNullOrEmpty(node.TargetObject))
-                    {
-                        <code style="font-size:11px">@node.TargetObject</code>
-                    }
-                </div>
-                <div class="row-inline" style="gap:6px">
-                    <span class="badge @(node.CostPercentage >= 35 ? "bad" : node.CostPercentage >= 15 ? "warn" : "ok")" style="font-size:10px;font-weight:600">
-                        @node.CostPercentage%
-                    </span>
-                    <span class="muted small">@node.EstimatedRows.ToString("N0") rows</span>
-                    @if (node.IsScan)
-                    {
-                        <span class="badge warn" style="font-size:10px" title="Table / Index Scan">SCAN</span>
-                    }
-                </div>
-            </div>
-
-            @if (isSelected)
-            {
-                <div style="background:var(--bg-elev);border:1px solid var(--line);border-radius:6px;padding:10px 14px;font-size:12px;max-width:700px;margin-top:4px">
-                    <div class="row-inline" style="justify-content:space-between;margin-bottom:6px">
-                        <b>Operator Details (Node #@node.NodeId)</b>
-                        <span class="badge @(node.CostPercentage >= 35 ? "bad" : "ok")">Cost: @node.OperatorCost.ToString("F4") (@node.CostPercentage%)</span>
-                    </div>
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-                        <div>Subtree Cost: <b>@node.SubtreeCost.ToString("F4")</b></div>
-                        <div>Estimated Rows: <b>@node.EstimatedRows.ToString("N0")</b></div>
-                        <div>Target Object: <b>@(node.TargetObject ?? "None")</b></div>
-                        <div>Has Scan: <b>@(node.IsScan ? "Yes (Sequential Scan)" : "No")</b></div>
-                    </div>
-                    @if (!string.IsNullOrEmpty(node.WarningMessage))
-                    {
-                        <div class="alert warn small" style="margin-top:6px">@node.WarningMessage</div>
-                    }
-                </div>
-            }
-
-            @foreach (var child in children)
-            {
-                @RenderPlanTreeNode(plan, child)
-            }
-        </div>
-    };
 
     private void ToggleAiPrompt()
     {

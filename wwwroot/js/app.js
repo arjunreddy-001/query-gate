@@ -2,6 +2,8 @@ window.dbam = (function () {
   const MONACO_BASE = "/_content/BlazorMonaco/lib/monaco-editor/min/vs";
   const SIDE_WIDTH_KEY = "dbam-ws-side-w";
   let monacoPromise = null;
+  let sqlCompletionPromise = null;
+  let erDiagramPromise = null;
   let metadata = [];
   let providerRegistered = false;
   let sideResizeBound = false;
@@ -18,6 +20,22 @@ window.dbam = (function () {
       s.onerror = reject;
       document.head.appendChild(s);
     });
+  }
+
+  function loadSqlCompletion() {
+    if (window.queryGateCompletion) return Promise.resolve(window.queryGateCompletion);
+    if (sqlCompletionPromise) return sqlCompletionPromise;
+    const src = document.body?.dataset?.jsSqlCompletion || "/js/sql-completion.js";
+    sqlCompletionPromise = loadScript(src).then(() => window.queryGateCompletion);
+    return sqlCompletionPromise;
+  }
+
+  function loadErDiagram() {
+    if (window.dbamEr) return Promise.resolve(window.dbamEr);
+    if (erDiagramPromise) return erDiagramPromise;
+    const src = document.body?.dataset?.jsErDiagram || "/js/er-diagram.js";
+    erDiagramPromise = loadScript(src).then(() => window.dbamEr);
+    return erDiagramPromise;
   }
 
   function loadMonaco() {
@@ -568,6 +586,16 @@ window.dbam = (function () {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     },
+    downloadUrl: function (url, name) {
+      const a = document.createElement("a");
+      a.href = url;
+      if (name) a.download = name;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    },
+    ensureErDiagram: () => loadErDiagram(),
     scrollHighlightedOption: function (target, index) {
       try {
         const menu =
@@ -760,7 +788,7 @@ window.dbam = (function () {
       if (!el) return false;
       try {
         metadata = [];
-        const monaco = await loadMonaco();
+        const [monaco] = await Promise.all([loadMonaco(), loadSqlCompletion()]);
         registerProvider(monaco);
         el.innerHTML = "";
         const editor = monaco.editor.create(el, {

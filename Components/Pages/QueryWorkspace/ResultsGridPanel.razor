@@ -1,0 +1,623 @@
+@using DbAccessManager.Services
+@using DbAccessManager.Services.Ai
+@implements IDisposable
+
+<div class="card results @(Maximized ? "maximized" : "")" @onkeydown="HandleKeyDown" tabindex="-1">
+    <div class="card-head" style="padding:5px 10px">
+        @if (Last is null)
+        {
+            <span class="muted">Results appear here.</span>
+            <div class="actions">
+                <button class="icon-btn sm" type="button" title="Hide result viewer (Ctrl+`)" aria-label="Hide result viewer" @onclick="OnToggleResults"><Icon Name="@(LayoutSplitHorizontal ? "chevron-right" : "chevron-down")" /></button>
+            </div>
+        }
+        else
+        {
+            <span class="badge @OutcomeClass(Last.Outcome)">@Last.Outcome</span>
+            <div class="actions">
+                @for (var i = 0; i < Last.ResultSets.Count; i++)
+                {
+                    var idx = i;
+                    <button class="btn btn-sm @(ActiveResult == idx ? "btn-primary" : "")" @onclick="() => OnSelectResult.InvokeAsync(idx)">Result @(idx + 1)</button>
+                }
+                <button class="btn btn-sm @(ActiveResult == -1 ? "btn-primary" : "")" @onclick="() => OnSelectResult.InvokeAsync(-1)">Messages</button>
+                @if (ActiveResult == -1)
+                {
+                    <button class="btn btn-sm" type="button" title="Copy messages to clipboard (single click)" @onclick="OnCopyMessages" disabled="@(Last.Messages.Count == 0)"><Icon Name="copy" />Copy Messages</button>
+                }
+                @if (Last.ExecutionPlan is not null)
+                {
+                    <button class="btn btn-sm @(ActiveResult == -2 ? "btn-primary" : "")" @onclick="() => OnSelectResult.InvokeAsync(-2)"><Icon Name="activity" />Execution Plan</button>
+                }
+                @if (Last.ResultSets.Count > 0)
+                {
+                    <button class="btn btn-sm @(ActiveResult == -3 ? "btn-primary" : "")" @onclick="() => OnSelectResult.InvokeAsync(-3)"><Icon Name="activity" />Visual Chart</button>
+                }
+                @if (Last.ResultSets.Count > 0 && ActiveResult >= 0 && ActiveResult < Last.ResultSets.Count)
+                {
+                    var activeRs = Last.ResultSets[ActiveResult];
+                    <input type="search" placeholder="Filter rows…" value="@gridFilterInput" @oninput="OnGridFilterInput" style="width:130px;height:24px;padding:2px 8px;font-size:12px;margin-right:2px" title="Filter displayed rows" />
+                    @if (!string.IsNullOrWhiteSpace(debouncedFilter))
+                    {
+                        var matchCount = GetProcessedRows(activeRs).Count;
+                        <span class="badge" style="font-size:11px" title="Matching rows">@matchCount/@activeRs.Rows.Count</span>
+                    }
+                    <button class="btn btn-sm" type="button" title="Copy result script/data to clipboard (single click)" @onclick="OnCopyActiveResultText">
+                        <Icon Name="copy" />@(activeRs.Columns.Count == 1 ? "Copy Script" : "Copy Result")
+                    </button>
+                    @if (CanExport)
+                    {
+                        <div class="export-dropdown">
+                            <button class="btn btn-sm" type="button" title="Export results">
+                                <Icon Name="download" />Export <span style="font-size:9px;margin-left:2px">▾</span>
+                            </button>
+                            <div class="export-dropdown-menu">
+                                <button class="export-dropdown-item" type="button" @onclick="OnCopyActiveResultText">
+                                    <Icon Name="copy" />@(activeRs.Columns.Count == 1 ? "Copy Script (Raw Text)" : "Copy Result (TSV)")
+                                </button>
+                                <button class="export-dropdown-item" type="button" @onclick="OnExportCsv">
+                                    <Icon Name="file" />CSV (.csv)
+                                </button>
+                                <button class="export-dropdown-item" type="button" @onclick="OnExportXlsx">
+                                    <Icon Name="table" />Excel (.xlsx)
+                                </button>
+                                <button class="export-dropdown-item" type="button" @onclick="OnExportXlsb">
+                                    <Icon Name="table" />Excel Binary (.xlsb)
+                                </button>
+                                <button class="export-dropdown-item" type="button" @onclick="OnExportJson">
+                                    <Icon Name="code" />JSON (.json)
+                                </button>
+                                <hr class="export-dropdown-divider" />
+                                <button class="export-dropdown-item" type="button" @onclick="OnCopyMarkdown">
+                                    <Icon Name="copy" />Copy Markdown
+                                </button>
+                                <button class="export-dropdown-item" type="button" @onclick="OnOpenSqlInsertDialog">
+                                    <Icon Name="code" />SQL INSERT…
+                                </button>
+                            </div>
+                        </div>
+                    }
+                }
+                <button class="btn btn-sm" title="@(Maximized ? "Minimize (Esc)" : "Maximize results")" @onclick="() => OnSetMaximized.InvokeAsync(!Maximized)"><Icon Name="@(Maximized ? "minimize" : "maximize")" />@(Maximized ? "Minimize" : "Maximize")</button>
+                <button class="icon-btn sm" type="button" title="Hide result viewer (Ctrl+`)" aria-label="Hide result viewer" @onclick="OnToggleResults"><Icon Name="@(LayoutSplitHorizontal ? "chevron-right" : "chevron-down")" /></button>
+            </div>
+        }
+    </div>
+    @if (Last is not null)
+    {
+        @if (Last.Error is not null)
+        {
+            <div class="alert bad" style="margin:12px">
+                <div class="row-inline" style="justify-content:space-between;align-items:flex-start">
+                    <div>
+                        <b>@Last.Error</b>@if (Last.ErrorLine is not null) { <span> (line @Last.ErrorLine)</span> }
+                        @foreach (var d in Last.Denials.Where(d => d != Last.Error)) { <div class="small">@d</div> }
+                    </div>
+                    @if (AiConfigured)
+                    {
+                        <button class="btn btn-sm" type="button" @onclick="OnFixErrorWithAi" style="background:var(--bg-elev);color:var(--text);flex:none;margin-left:8px">
+                            <Icon Name="sparkles" /> Fix with AI
+                        </button>
+                    }
+                </div>
+            </div>
+        }
+        @if (AiFixResult is not null)
+        {
+            <div class="card" style="margin:12px;background:var(--bg-elev);border:1px solid var(--brand);box-shadow:0 4px 12px rgba(91,91,240,0.1)">
+                <div class="card-head" style="background:var(--brand-soft);padding:8px 12px">
+                    <div class="row-inline" style="gap:6px">
+                        <Icon Name="sparkles" />
+                        <b>AI Query Diagnosis & Solution</b>
+                    </div>
+                    <button class="btn btn-sm icon-btn" type="button" @onclick="OnDismissAiFix"><Icon Name="x" /></button>
+                </div>
+                <div class="card-pad stack" style="gap:10px">
+                    <div style="font-size:13px;line-height:1.6">@AiFixResult.Explanation</div>
+                    @if (!string.IsNullOrWhiteSpace(AiFixResult.FixedSql))
+                    {
+                        <div style="background:var(--bg-sunken);border:1px solid var(--line);border-radius:var(--radius-sm);padding:8px 10px">
+                            <div class="row-inline" style="justify-content:space-between;margin-bottom:6px">
+                                <span class="faint small"><b>Corrected SQL:</b></span>
+                                <button class="btn btn-sm btn-primary" type="button" @onclick="OnApplyFixedSqlToEditor">
+                                    <Icon Name="code" /> Apply Fix to Editor
+                                </button>
+                            </div>
+                            <pre class="mono small" style="margin:0;padding:6px;background:var(--bg-elev);border-radius:4px;overflow-x:auto"><code>@AiFixResult.FixedSql</code></pre>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+        @if (ActiveResult >= 0 && ActiveResult < Last.ResultSets.Count)
+        {
+            var rs = Last.ResultSets[ActiveResult];
+            var rowsToDisplay = GetProcessedRows(rs);
+            <div id="query-results-table" class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="num">#</th>
+                            @for (var cIdx = 0; cIdx < rs.Columns.Count; cIdx++)
+                            {
+                                var col = cIdx;
+                                var colName = rs.Columns[col];
+                                var isColMasked = rs.MaskedColumns.Contains(colName, StringComparer.OrdinalIgnoreCase);
+                                <th class="sortable th-resizable" @onclick="() => OnToggleSort.InvokeAsync(col)" title="Click to sort" style="cursor:pointer;user-select:none">
+                                    <span style="display:inline-flex;align-items:center;gap:4px">
+                                        @if (isColMasked)
+                                        {
+                                            <span title="Sensitive data masked (no UNMASK permission)"><Icon Name="lock" /></span>
+                                        }
+                                        <span>@colName</span>
+                                    </span>
+                                    @if (SortCol == col)
+                                    {
+                                        <span class="sort-icon" style="margin-left:4px;font-size:10px;color:var(--brand)">@(SortAsc ? "▲" : "▼")</span>
+                                    }
+                                    <span class="th-resizer"></span>
+                                </th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <Virtualize Items="rowsToDisplay" Context="entry" ItemSize="26" OverscanCount="12" SpacerElement="tr">
+                            <tr @key="entry.RowNumber">
+                                <td class="num faint">@entry.RowNumber</td>
+                                @foreach (var v in entry.Values)
+                                {
+                                    <td @ondblclick="() => OnOpenCellInspector.InvokeAsync(v)" title="Double-click to inspect cell content" style="cursor:pointer">
+                                        @if (v is null) { <span class="null">NULL</span> } else { @Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture) }
+                                    </td>
+                                }
+                            </tr>
+                        </Virtualize>
+                    </tbody>
+                </table>
+            </div>
+            @if (rs.Truncated)
+            {
+                <div class="alert warn results-limit" role="status">Showing the first @rs.Rows.Count rows. The row limit for this database was reached.</div>
+            }
+        }
+        else if (ActiveResult == -1)
+        {
+            <div class="card-pad mono small">
+                <div class="row-inline" style="justify-content:flex-end;margin-bottom:8px">
+                    <button class="btn btn-sm" type="button" @onclick="OnCopyMessages" disabled="@(Last.Messages.Count == 0)"><Icon Name="copy" />Copy Messages</button>
+                </div>
+                @foreach (var m in Last.Messages) { <div>@m</div> }
+                @if (Last.Messages.Count == 0)
+                {
+                    @if (Last.Outcome == "Success" && Last.Error is null)
+                    {
+                        <span class="ok">Command(s) completed successfully.@(Last.RowsAffected > 0 ? $" ({Last.RowsAffected} row(s) affected.)" : "")</span>
+                    }
+                    else if (Last.Error is not null)
+                    {
+                        <span class="muted">No additional messages.</span>
+                    }
+                    else
+                    {
+                        <span class="muted">No messages.</span>
+                    }
+                }
+            </div>
+        }
+        else if (ActiveResult == -2 && Last.ExecutionPlan is not null)
+        {
+            var plan = Last.ExecutionPlan;
+            <div class="plan-container" style="padding:14px;overflow-y:auto;max-height:100%">
+                <div class="plan-summary-grid">
+                    <div class="plan-metric">
+                        <span class="plan-metric-label">Estimated Subtree Cost</span>
+                        <span class="plan-metric-value">@plan.TotalCost.ToString("F4")</span>
+                    </div>
+                    <div class="plan-metric">
+                        <span class="plan-metric-label">Optimization Level</span>
+                        <span class="plan-metric-value">@plan.OptimizationLevel</span>
+                    </div>
+                    <div class="plan-metric">
+                        <span class="plan-metric-label">Estimated Rows</span>
+                        <span class="plan-metric-value">@plan.EstimatedRows.ToString("N0")</span>
+                    </div>
+                    <div class="plan-metric">
+                        <span class="plan-metric-label">Operators</span>
+                        <span class="plan-metric-value">@plan.Operators.Count</span>
+                    </div>
+                    @if (plan.CompileTimeMs > 0)
+                    {
+                        <div class="plan-metric">
+                            <span class="plan-metric-label">Compile Time</span>
+                            <span class="plan-metric-value">@plan.CompileTimeMs ms</span>
+                        </div>
+                    }
+                </div>
+
+                @if (plan.MissingIndexes.Count > 0)
+                {
+                    <div class="plan-card" style="margin-top:14px">
+                        <div class="row-inline" style="justify-content:space-between;margin-bottom:8px">
+                            <div class="row-inline" style="gap:8px">
+                                <span class="badge warn"><Icon Name="alert" />Missing Index Recommendation</span>
+                                <span class="muted small">SQL Server optimizer identified index improvement</span>
+                            </div>
+                        </div>
+                        @foreach (var mi in plan.MissingIndexes)
+                        {
+                            <div style="background:var(--bg-sunken);border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:8px">
+                                <div class="row-inline" style="justify-content:space-between;margin-bottom:6px">
+                                    <div>
+                                        <b>@mi.Table</b>
+                                        <span class="badge ok" style="margin-left:6px">+@mi.Impact% cost reduction</span>
+                                    </div>
+                                    <div class="row-inline" style="gap:6px">
+                                        <button class="btn btn-sm" type="button" @onclick="() => OnCopyMissingIndex.InvokeAsync(mi.CreateIndexStatement)"><Icon Name="copy" />Copy Index Script</button>
+                                        <button class="btn btn-sm btn-primary" type="button" @onclick="() => OnInsertMissingIndexToEditor.InvokeAsync(mi.CreateIndexStatement)"><Icon Name="code" />Add to Editor</button>
+                                    </div>
+                                </div>
+                                <pre class="mono small" style="margin:0;padding:8px;background:var(--bg-elev);border-radius:4px;overflow-x:auto"><code>@mi.CreateIndexStatement</code></pre>
+                            </div>
+                        }
+                    </div>
+                }
+
+                <div class="plan-card" style="margin-top:14px">
+                    <div class="row-inline" style="justify-content:space-between;margin-bottom:8px">
+                        <div class="row-inline" style="gap:4px">
+                            <button class="btn btn-sm @(planViewMode == "tree" ? "btn-primary" : "")" type="button" @onclick='() => planViewMode = "tree"'>
+                                <Icon Name="git-commit" /> Tree (DAG)
+                            </button>
+                            <button class="btn btn-sm @(planViewMode == "table" ? "btn-primary" : "")" type="button" @onclick='() => planViewMode = "table"'>
+                                <Icon Name="table" /> Operator Table
+                            </button>
+                            <button class="btn btn-sm @(planViewMode == "raw" ? "btn-primary" : "")" type="button" @onclick='() => planViewMode = "raw"'>
+                                <Icon Name="code" /> Raw XML/JSON
+                            </button>
+                        </div>
+                        <div class="row-inline" style="gap:6px">
+                            @if (AiConfigured)
+                            {
+                                <button class="btn btn-sm" type="button" @onclick="OnExplainPlanWithAi" disabled="@AiExplainingPlan">
+                                    <Icon Name="sparkles" /> @(AiExplainingPlan ? "Analyzing..." : "Explain Plan with AI")
+                                </button>
+                            }
+                            <button class="btn btn-sm" type="button" @onclick="OnCopyPlanXml"><Icon Name="copy" />Copy Plan XML</button>
+                        </div>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(AiPlanExplanation))
+                    {
+                        <div class="alert note" style="margin-bottom:12px;background:var(--bg-elev);border:1px solid var(--brand);line-height:1.6">
+                            <div class="row-inline" style="justify-content:space-between;margin-bottom:6px">
+                                <div class="row-inline" style="gap:6px">
+                                    <Icon Name="sparkles" />
+                                    <b>AI Performance Analysis & Recommendations</b>
+                                </div>
+                                <button class="btn btn-sm icon-btn" type="button" @onclick="OnDismissAiPlan"><Icon Name="x" /></button>
+                            </div>
+                            <div style="font-size:12px;white-space:pre-wrap">@AiPlanExplanation</div>
+                        </div>
+                    }
+
+                    @if (planViewMode == "raw")
+                    {
+                        <pre class="mono small" style="max-height:360px;overflow:auto;padding:10px;background:var(--bg-sunken);border:1px solid var(--line);border-radius:var(--radius-sm);margin-bottom:12px"><code>@plan.RawXml</code></pre>
+                    }
+                    else if (planViewMode == "tree")
+                    {
+                        <div class="plan-tree-wrap" style="padding:16px;background:var(--bg-sunken);border:1px solid var(--line);border-radius:var(--radius-sm);overflow:auto;max-height:450px">
+                            <div class="row-inline" style="justify-content:space-between;margin-bottom:12px">
+                                <span class="muted small">Interactive operator flowchart (data flows from right/bottom children up to the root operator)</span>
+                                @if (GetBottleneckNode(plan) is { } bottleneck)
+                                {
+                                    <button class="btn btn-sm" type="button" @onclick="() => selectedPlanNodeId = bottleneck.NodeId" style="font-size:11px">
+                                        <Icon Name="alert" /> Focus Bottleneck (Node #@bottleneck.NodeId: @bottleneck.CostPercentage%)
+                                    </button>
+                                }
+                            </div>
+
+                            <div style="display:flex;flex-direction:column;gap:12px">
+                                @foreach (var rootOp in GetRootOperators(plan))
+                                {
+                                    @RenderPlanTreeNode(plan, rootOp)
+                                }
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="table-wrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th style="width:40px">Node</th>
+                                        <th>Operator</th>
+                                        <th>Target Object</th>
+                                        <th class="num" style="width:90px">Est. Rows</th>
+                                        <th class="num" style="width:110px">Cost (% of Total)</th>
+                                        <th style="width:160px">% Subtree Cost</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var op in plan.Operators)
+                                    {
+                                        <tr>
+                                            <td class="num faint">@op.NodeId</td>
+                                            <td>
+                                                <div class="row-inline" style="gap:6px">
+                                                    <b>@op.PhysicalOp</b>
+                                                    @if (op.LogicalOp != op.PhysicalOp && !string.IsNullOrEmpty(op.LogicalOp))
+                                                    {
+                                                        <span class="faint small">(@op.LogicalOp)</span>
+                                                    }
+                                                    @if (op.IsScan)
+                                                    {
+                                                        <span class="badge warn" style="font-size:10px;padding:1px 5px" title="Full scan: consider adding index or selective predicate">SCAN</span>
+                                                    }
+                                                    @if (op.IsWarning && !op.IsScan)
+                                                    {
+                                                        <span class="badge bad" style="font-size:10px;padding:1px 5px" title="@op.WarningMessage">WARNING</span>
+                                                    }
+                                                </div>
+                                            </td>
+                                            <td>
+                                                @if (!string.IsNullOrEmpty(op.TargetObject))
+                                                {
+                                                    <code>@op.TargetObject</code>
+                                                }
+                                                else
+                                                {
+                                                    <span class="faint small">-</span>
+                                                }
+                                            </td>
+                                            <td class="num">@op.EstimatedRows.ToString("N0")</td>
+                                            <td class="num">
+                                                <span>@op.OperatorCost.ToString("F4")</span>
+                                                <span class="faint small" style="margin-left:4px">(@op.CostPercentage%)</span>
+                                            </td>
+                                            <td>
+                                                <div class="plan-cost-bar">
+                                                    <div class="plan-cost-fill @(op.CostPercentage >= 50 ? "cost-high" : op.CostPercentage >= 20 ? "cost-med" : "")" style="width:@(Math.Max(3, Math.Min(100, op.CostPercentage)))%"></div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+        else if (ActiveResult == -3 && Last.ResultSets.Count > 0)
+        {
+            var rs = Last.ResultSets[Math.Max(0, LastActiveResultIndex)];
+            <div class="chart-container">
+                <div class="chart-toolbar">
+                    <label class="small faint">Chart Type:</label>
+                    <select class="form-control" style="width:130px;height:28px;font-size:12px" value="@ChartType" @onchange="e => OnChartTypeChanged.InvokeAsync(e.Value?.ToString() ?? ChartType)">
+                        <option value="bar">Bar Chart</option>
+                        <option value="line">Line Chart</option>
+                        <option value="area">Area Chart</option>
+                        <option value="donut">Donut Chart</option>
+                    </select>
+
+                    <label class="small faint">Category (X-Axis):</label>
+                    <select class="form-control" style="width:150px;height:28px;font-size:12px" value="@ChartCatCol" @onchange="e => { if (int.TryParse(e.Value?.ToString(), out var c)) return OnChartCatColChanged.InvokeAsync(c); return Task.CompletedTask; }">
+                        @for (var c = 0; c < rs.Columns.Count; c++)
+                        {
+                            <option value="@c">@rs.Columns[c]</option>
+                        }
+                    </select>
+
+                    <label class="small faint">Values (Y-Axis):</label>
+                    <select class="form-control" style="width:150px;height:28px;font-size:12px" value="@ChartValCol" @onchange="e => { if (int.TryParse(e.Value?.ToString(), out var v)) return OnChartValColChanged.InvokeAsync(v); return Task.CompletedTask; }">
+                        @for (var c = 0; c < rs.Columns.Count; c++)
+                        {
+                            <option value="@c">@rs.Columns[c]</option>
+                        }
+                    </select>
+
+                    <button class="btn btn-sm" type="button" @onclick="OnRefreshChart" style="margin-left:auto"><Icon Name="refresh" />Refresh Chart</button>
+                </div>
+                <div id="query-result-chart" class="chart-svg-wrap"></div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public ExecutionResult? Last { get; set; }
+    [Parameter] public int ActiveResult { get; set; }
+    [Parameter] public EventCallback<int> OnSelectResult { get; set; }
+    [Parameter] public int? SortCol { get; set; }
+    [Parameter] public bool SortAsc { get; set; } = true;
+    [Parameter] public EventCallback<int> OnToggleSort { get; set; }
+    [Parameter] public string GridFilter { get; set; } = "";
+    [Parameter] public EventCallback<string> OnGridFilterChanged { get; set; }
+    [Parameter] public bool Maximized { get; set; }
+    [Parameter] public EventCallback<bool> OnSetMaximized { get; set; }
+    [Parameter] public bool LayoutSplitHorizontal { get; set; }
+    [Parameter] public EventCallback OnToggleResults { get; set; }
+    [Parameter] public bool CanExport { get; set; }
+    [Parameter] public bool AiConfigured { get; set; }
+    [Parameter] public AiFixResult? AiFixResult { get; set; }
+    [Parameter] public bool AiExplainingPlan { get; set; }
+    [Parameter] public string? AiPlanExplanation { get; set; }
+    [Parameter] public string ChartType { get; set; } = "bar";
+    [Parameter] public EventCallback<string> OnChartTypeChanged { get; set; }
+    [Parameter] public int ChartCatCol { get; set; }
+    [Parameter] public EventCallback<int> OnChartCatColChanged { get; set; }
+    [Parameter] public int ChartValCol { get; set; } = 1;
+    [Parameter] public EventCallback<int> OnChartValColChanged { get; set; }
+    [Parameter] public int LastActiveResultIndex { get; set; }
+
+    [Parameter] public EventCallback OnCopyMessages { get; set; }
+    [Parameter] public EventCallback OnCopyActiveResultText { get; set; }
+    [Parameter] public EventCallback OnExportCsv { get; set; }
+    [Parameter] public EventCallback OnExportXlsx { get; set; }
+    [Parameter] public EventCallback OnExportXlsb { get; set; }
+    [Parameter] public EventCallback OnExportJson { get; set; }
+    [Parameter] public EventCallback OnCopyMarkdown { get; set; }
+    [Parameter] public EventCallback OnOpenSqlInsertDialog { get; set; }
+    [Parameter] public EventCallback OnFixErrorWithAi { get; set; }
+    [Parameter] public EventCallback OnApplyFixedSqlToEditor { get; set; }
+    [Parameter] public EventCallback OnDismissAiFix { get; set; }
+    [Parameter] public EventCallback OnExplainPlanWithAi { get; set; }
+    [Parameter] public EventCallback OnDismissAiPlan { get; set; }
+    [Parameter] public EventCallback OnCopyPlanXml { get; set; }
+    [Parameter] public EventCallback<string> OnCopyMissingIndex { get; set; }
+    [Parameter] public EventCallback<string> OnInsertMissingIndexToEditor { get; set; }
+    [Parameter] public EventCallback<object?> OnOpenCellInspector { get; set; }
+    [Parameter] public EventCallback OnRefreshChart { get; set; }
+    [Parameter] public Func<string, string> OutcomeClass { get; set; } = _ => "";
+
+    private string gridFilterInput = "";
+    private string debouncedFilter = "";
+    private string _lastSyncedFilter = "";
+    private CancellationTokenSource? _debounceCts;
+
+    private string planViewMode = "tree";
+    private int? selectedPlanNodeId;
+
+    private ResultSetDto? _cachedRowsSource;
+    private string _cachedRowsFilter = "";
+    private int? _cachedRowsSortCol;
+    private bool _cachedRowsSortAsc = true;
+    private List<IndexedResultRow> _cachedProcessedRows = [];
+
+    protected override void OnParametersSet()
+    {
+        var incoming = GridFilter ?? "";
+        if (!string.Equals(_lastSyncedFilter, incoming, StringComparison.Ordinal))
+        {
+            _lastSyncedFilter = incoming;
+            gridFilterInput = incoming;
+            debouncedFilter = incoming;
+        }
+    }
+
+    private async Task OnGridFilterInput(ChangeEventArgs e)
+    {
+        gridFilterInput = e.Value?.ToString() ?? "";
+        _debounceCts?.Cancel();
+        _debounceCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _debounceCts = cts;
+        try
+        {
+            await Task.Delay(200, cts.Token);
+            debouncedFilter = gridFilterInput;
+            _lastSyncedFilter = debouncedFilter;
+            await OnGridFilterChanged.InvokeAsync(debouncedFilter);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape" && Maximized)
+        {
+            return OnSetMaximized.InvokeAsync(false);
+        }
+        return Task.CompletedTask;
+    }
+
+    private List<IndexedResultRow> GetProcessedRows(ResultSetDto rs)
+    {
+        var normalizedFilter = debouncedFilter ?? "";
+        if (ReferenceEquals(_cachedRowsSource, rs) &&
+            string.Equals(_cachedRowsFilter, normalizedFilter, StringComparison.Ordinal) &&
+            _cachedRowsSortCol == SortCol &&
+            _cachedRowsSortAsc == SortAsc)
+        {
+            return _cachedProcessedRows;
+        }
+
+        var result = QueryResultProcessor.ProcessRows(rs, normalizedFilter, SortCol, SortAsc);
+        _cachedRowsSource = rs;
+        _cachedRowsFilter = normalizedFilter;
+        _cachedRowsSortCol = SortCol;
+        _cachedRowsSortAsc = SortAsc;
+        _cachedProcessedRows = result;
+        return result;
+    }
+
+    private static PlanOperatorDto? GetBottleneckNode(ExecutionPlanDto plan) =>
+        plan.Operators.OrderByDescending(o => o.CostPercentage).FirstOrDefault(o => o.CostPercentage >= 20.0);
+
+    private static List<PlanOperatorDto> GetRootOperators(ExecutionPlanDto plan)
+    {
+        var roots = plan.Operators.Where(o => o.ParentNodeId == null || !plan.Operators.Any(p => p.NodeId == o.ParentNodeId)).ToList();
+        return roots.Count > 0 ? roots : plan.Operators.Take(1).ToList();
+    }
+
+    private RenderFragment RenderPlanTreeNode(ExecutionPlanDto plan, PlanOperatorDto node) => __builder =>
+    {
+        var isSelected = selectedPlanNodeId == node.NodeId;
+        var isHighCost = node.CostPercentage >= 35.0;
+        var children = plan.Operators.Where(c => c.ParentNodeId == node.NodeId || node.ChildrenNodeIds.Contains(c.NodeId)).ToList();
+
+        <div style="@(node.ParentNodeId.HasValue ? "padding-left:24px;border-left:2px dashed var(--line-strong);margin-left:12px;margin-top:6px;" : "margin-top:6px;")">
+            <div class="plan-node-card @(isSelected ? "selected" : "") @(isHighCost ? "bottleneck" : "")"
+                 @onclick="() => selectedPlanNodeId = (selectedPlanNodeId == node.NodeId ? null : node.NodeId)"
+                 style="display:inline-flex;align-items:center;justify-content:space-between;gap:12px;background:var(--bg-elev);border:1px solid @(isHighCost ? "var(--bad)" : isSelected ? "var(--brand)" : "var(--line)");border-radius:6px;padding:8px 12px;box-shadow:0 2px 6px rgba(0,0,0,0.04);cursor:pointer;max-width:700px">
+                <div class="row-inline" style="gap:8px">
+                    <span class="badge" style="font-family:monospace;font-size:10px">#@node.NodeId</span>
+                    <b>@node.PhysicalOp</b>
+                    @if (!string.IsNullOrEmpty(node.LogicalOp) && node.LogicalOp != node.PhysicalOp)
+                    {
+                        <span class="muted small">(@node.LogicalOp)</span>
+                    }
+                    @if (!string.IsNullOrEmpty(node.TargetObject))
+                    {
+                        <code style="font-size:11px">@node.TargetObject</code>
+                    }
+                </div>
+                <div class="row-inline" style="gap:6px">
+                    <span class="badge @(node.CostPercentage >= 35 ? "bad" : node.CostPercentage >= 15 ? "warn" : "ok")" style="font-size:10px;font-weight:600">
+                        @node.CostPercentage%
+                    </span>
+                    <span class="muted small">@node.EstimatedRows.ToString("N0") rows</span>
+                    @if (node.IsScan)
+                    {
+                        <span class="badge warn" style="font-size:10px" title="Table / Index Scan">SCAN</span>
+                    }
+                </div>
+            </div>
+
+            @if (isSelected)
+            {
+                <div style="background:var(--bg-elev);border:1px solid var(--line);border-radius:6px;padding:10px 14px;font-size:12px;max-width:700px;margin-top:4px">
+                    <div class="row-inline" style="justify-content:space-between;margin-bottom:6px">
+                        <b>Operator Details (Node #@node.NodeId)</b>
+                        <span class="badge @(node.CostPercentage >= 35 ? "bad" : "ok")">Cost: @node.OperatorCost.ToString("F4") (@node.CostPercentage%)</span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+                        <div>Subtree Cost: <b>@node.SubtreeCost.ToString("F4")</b></div>
+                        <div>Estimated Rows: <b>@node.EstimatedRows.ToString("N0")</b></div>
+                        <div>Target Object: <b>@(node.TargetObject ?? "None")</b></div>
+                        <div>Has Scan: <b>@(node.IsScan ? "Yes (Sequential Scan)" : "No")</b></div>
+                    </div>
+                    @if (!string.IsNullOrEmpty(node.WarningMessage))
+                    {
+                        <div class="alert warn small" style="margin-top:6px">@node.WarningMessage</div>
+                    }
+                </div>
+            }
+
+            @foreach (var child in children)
+            {
+                @RenderPlanTreeNode(plan, child)
+            }
+        </div>
+    };
+
+    public void Dispose()
+    {
+        _debounceCts?.Cancel();
+        _debounceCts?.Dispose();
+    }
+}

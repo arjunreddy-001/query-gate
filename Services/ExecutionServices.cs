@@ -19,6 +19,59 @@ public sealed class PermissionService(
 {
     private readonly PermissionResolver _resolver = new();
     private readonly ConcurrentDictionary<string, byte> _trackedKeys = new();
+    private readonly ConcurrentDictionary<string, byte> _trackedRoleKeys = new();
+    private readonly ConcurrentDictionary<string, byte> _trackedScopeKeys = new();
+
+    private sealed record CachedUserRoles(List<string> RoleIds, Dictionary<string, string> RoleNames);
+
+    public async Task<(IReadOnlyList<string> RoleIds, IReadOnlyDictionary<string, string> RoleNames)> GetUserRolesAsync(
+        ApplicationDbContext db, string userId)
+    {
+        var cacheKey = $"perm:userroles:{userId}";
+        if (cache != null && cache.TryGetValue(cacheKey, out CachedUserRoles? cached) && cached != null)
+        {
+            return (cached.RoleIds, cached.RoleNames);
+        }
+
+        var roleIds = await db.UserRoles.Where(r => r.UserId == userId).Select(r => r.RoleId).ToListAsync();
+        var roleNames = roleIds.Count == 0
+            ? new Dictionary<string, string>()
+            : await db.Roles.Where(r => roleIds.Contains(r.Id)).ToDictionaryAsync(r => r.Id, r => r.Name ?? "");
+
+        if (cache != null)
+        {
+            cache.Set(cacheKey, new CachedUserRoles(roleIds, roleNames), TimeSpan.FromMinutes(10));
+            _trackedRoleKeys.TryAdd(cacheKey, 0);
+        }
+
+        return (roleIds, roleNames);
+    }
+
+    public async Task<List<DatabaseRoleScopeRule>> GetRoleScopeRulesAsync(
+        ApplicationDbContext db, Guid databaseId, IReadOnlyCollection<string> roleIds)
+    {
+        if (roleIds.Count == 0) return [];
+
+        var tenantId = db.CurrentTenantId ?? Guid.Empty;
+        var cacheKey = $"perm:scopes:{tenantId}:{databaseId}";
+        List<DatabaseRoleScopeRule>? allForDb;
+        if (cache == null || !cache.TryGetValue(cacheKey, out allForDb) || allForDb == null)
+        {
+            allForDb = await db.DatabaseRoleScopeRules.AsNoTracking()
+                .Where(r => r.DatabaseId == databaseId)
+                .ToListAsync();
+
+            if (cache != null)
+            {
+                cache.Set(cacheKey, allForDb, TimeSpan.FromMinutes(10));
+                _trackedScopeKeys.TryAdd(cacheKey, 0);
+            }
+        }
+
+        if (allForDb.Count == 0) return [];
+        var roleSet = roleIds as HashSet<string> ?? new HashSet<string>(roleIds, StringComparer.Ordinal);
+        return allForDb.Where(r => roleSet.Contains(r.RoleId)).ToList();
+    }
 
     public async Task<List<PermissionRule>> GetRulesAsync(ApplicationDbContext db, string userId, Guid databaseId)
     {
@@ -29,21 +82,36 @@ public sealed class PermissionService(
             return cached;
         }
 
-        var roleIds = await db.UserRoles.Where(r => r.UserId == userId).Select(r => r.RoleId).ToListAsync();
-        var roleNames = await db.Roles.Where(r => roleIds.Contains(r.Id)).ToDictionaryAsync(r => r.Id, r => r.Name ?? "");
+        var (roleIds, roleNames) = await GetUserRolesAsync(db, userId);
         var grants = await db.PermissionGrants.AsNoTracking()
             .Where(g => g.DatabaseId == databaseId && (g.UserId == userId || (g.RoleId != null && roleIds.Contains(g.RoleId))))
             .ToListAsync();
+        var roleScopeRules = await GetRoleScopeRulesAsync(db, databaseId, roleIds);
+        var database = await db.ManagedDatabases.AsNoTracking().FirstOrDefaultAsync(d => d.Id == databaseId);
+
+        var rules = BuildRules(database?.ExcludedObjects, grants, roleScopeRules, roleNames);
+
+        if (cache != null)
+        {
+            cache.Set(cacheKey, rules, TimeSpan.FromMinutes(10));
+            _trackedKeys.TryAdd(cacheKey, 0);
+        }
+
+        return rules;
+    }
+
+    private static List<PermissionRule> BuildRules(
+        string? databaseExcludedObjects,
+        IEnumerable<PermissionGrant> grants,
+        IEnumerable<DatabaseRoleScopeRule> roleScopeRules,
+        IReadOnlyDictionary<string, string> roleNames)
+    {
         var rules = grants.Select(g => new PermissionRule(
             g.PermissionCode, g.UserId != null, g.Effect == PermissionEffect.Allow,
             g.RoleId is null ? null : roleNames.GetValueOrDefault(g.RoleId), g.StartsAt, g.EndsAt,
             g.Schema, g.ObjectName)).ToList();
 
         // 1. Role-level exclusion rules on this database
-        var roleScopeRules = await db.DatabaseRoleScopeRules.AsNoTracking()
-            .Where(r => r.DatabaseId == databaseId && roleIds.Contains(r.RoleId))
-            .ToListAsync();
-
         foreach (var rsr in roleScopeRules)
         {
             if (!string.IsNullOrWhiteSpace(rsr.ExcludedObjects))
@@ -61,10 +129,9 @@ public sealed class PermissionService(
         }
 
         // 2. Database-level exclusion rules (override deny across all roles and users)
-        var database = await db.ManagedDatabases.AsNoTracking().FirstOrDefaultAsync(d => d.Id == databaseId);
-        if (database != null && !string.IsNullOrWhiteSpace(database.ExcludedObjects))
+        if (!string.IsNullOrWhiteSpace(databaseExcludedObjects))
         {
-            foreach (var exc in ObjectScope.ParseList(database.ExcludedObjects))
+            foreach (var exc in ObjectScope.ParseList(databaseExcludedObjects))
             {
                 var (s, o) = ObjectScope.Parse(exc);
                 foreach (var code in Perm.Catalog)
@@ -72,12 +139,6 @@ public sealed class PermissionService(
                     rules.Add(new PermissionRule(code, true, false, "DatabasePolicy", Schema: s, ObjectName: o));
                 }
             }
-        }
-
-        if (cache != null)
-        {
-            cache.Set(cacheKey, rules, TimeSpan.FromMinutes(10));
-            _trackedKeys.TryAdd(cacheKey, 0);
         }
 
         return rules;
@@ -106,6 +167,38 @@ public sealed class PermissionService(
                 }
             }
         }
+
+        if (databaseId == null && tenantId == null)
+        {
+            foreach (var k in _trackedRoleKeys.Keys.ToList())
+            {
+                var kUser = k["perm:userroles:".Length..];
+                if (userId == null || string.Equals(kUser, userId, StringComparison.OrdinalIgnoreCase))
+                {
+                    cache.Remove(k);
+                    _trackedRoleKeys.TryRemove(k, out _);
+                }
+            }
+        }
+
+        if (userId == null)
+        {
+            var scopePrefix = tenantId.HasValue ? $"perm:scopes:{tenantId.Value}:" : "perm:scopes:";
+            foreach (var k in _trackedScopeKeys.Keys.ToList())
+            {
+                if (!k.StartsWith(scopePrefix, StringComparison.Ordinal)) continue;
+                var parts = k.Split(':');
+                if (parts.Length >= 4)
+                {
+                    var kDb = parts[3];
+                    if (databaseId == null || string.Equals(kDb, databaseId.ToString(), StringComparison.OrdinalIgnoreCase))
+                    {
+                        cache.Remove(k);
+                        _trackedScopeKeys.TryRemove(k, out _);
+                    }
+                }
+            }
+        }
     }
 
     public async Task<List<EffectivePermission>> GetEffectiveAsync(string userId, Guid databaseId)
@@ -129,12 +222,66 @@ public sealed class PermissionService(
     {
         await using var db = await factory.CreateDbContextAsync();
         var all = await db.ManagedDatabases.AsNoTracking().OrderBy(d => d.Name).ToListAsync();
-        var result = new List<ManagedDatabase>();
-        foreach (var d in all)
+        var candidates = includeDisabled ? all : all.Where(d => d.IsActive).ToList();
+        if (candidates.Count == 0) return [];
+
+        var tenantId = db.CurrentTenantId ?? Guid.Empty;
+        var rulesByDb = new Dictionary<Guid, List<PermissionRule>>(candidates.Count);
+        var missingIds = new List<Guid>();
+
+        foreach (var d in candidates)
         {
-            if (!includeDisabled && !d.IsActive) continue;
-            var rules = await GetRulesAsync(db, userId, d.Id);
-            if (Perm.Catalog.Any(c => _resolver.Resolve(c, rules, DateTimeOffset.UtcNow).IsAllowed)) result.Add(d);
+            var cacheKey = $"perm:rules:{tenantId}:{userId}:{d.Id}";
+            if (cache != null && cache.TryGetValue(cacheKey, out List<PermissionRule>? cached) && cached != null)
+            {
+                rulesByDb[d.Id] = cached;
+            }
+            else
+            {
+                missingIds.Add(d.Id);
+            }
+        }
+
+        if (missingIds.Count > 0)
+        {
+            var (roleIds, roleNames) = await GetUserRolesAsync(db, userId);
+            var grants = await db.PermissionGrants.AsNoTracking()
+                .Where(g => missingIds.Contains(g.DatabaseId) && (g.UserId == userId || (g.RoleId != null && roleIds.Contains(g.RoleId))))
+                .ToListAsync();
+            var roleScopeRules = roleIds.Count == 0
+                ? []
+                : await db.DatabaseRoleScopeRules.AsNoTracking()
+                    .Where(r => missingIds.Contains(r.DatabaseId) && roleIds.Contains(r.RoleId))
+                    .ToListAsync();
+
+            var grantsByDb = grants.GroupBy(g => g.DatabaseId).ToDictionary(g => g.Key, g => g.ToList());
+            var scopesByDb = roleScopeRules.GroupBy(r => r.DatabaseId).ToDictionary(g => g.Key, g => g.ToList());
+
+            foreach (var d in candidates.Where(c => !rulesByDb.ContainsKey(c.Id)))
+            {
+                var dbGrants = grantsByDb.GetValueOrDefault(d.Id) ?? [];
+                var dbScopes = scopesByDb.GetValueOrDefault(d.Id) ?? [];
+                var rules = BuildRules(d.ExcludedObjects, dbGrants, dbScopes, roleNames);
+                rulesByDb[d.Id] = rules;
+
+                if (cache != null)
+                {
+                    var cacheKey = $"perm:rules:{tenantId}:{userId}:{d.Id}";
+                    cache.Set(cacheKey, rules, TimeSpan.FromMinutes(10));
+                    _trackedKeys.TryAdd(cacheKey, 0);
+                }
+            }
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var result = new List<ManagedDatabase>();
+        foreach (var d in candidates)
+        {
+            if (rulesByDb.TryGetValue(d.Id, out var rules) &&
+                Perm.Catalog.Any(c => _resolver.Resolve(c, rules, now).IsAllowed))
+            {
+                result.Add(d);
+            }
         }
         return result;
     }
@@ -228,6 +375,7 @@ public sealed class ExecutionService(
     private readonly ConcurrentDictionary<Guid, (string UserId, Guid DatabaseId, CancellationTokenSource Cts)> _running = new();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _userSlots = new();
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _dbSlots = new();
+    private readonly ConcurrentDictionary<string, int> _historyWriteCounts = new();
 
     public int GetInFlightQueryCount(Guid databaseId) => _running.Values.Count(r => r.DatabaseId == databaseId);
 
@@ -397,10 +545,8 @@ public sealed class ExecutionService(
         // Role-level inclusion and exclusion guardrails per database
         if (!isSystem)
         {
-            var roleIds = await db.UserRoles.Where(r => r.UserId == actor.UserId).Select(r => r.RoleId).ToListAsync();
-            var roleRules = await db.DatabaseRoleScopeRules.AsNoTracking()
-                .Where(r => r.DatabaseId == database.Id && roleIds.Contains(r.RoleId))
-                .ToListAsync();
+            var (roleIds, _) = await permissions.GetUserRolesAsync(db, actor.UserId);
+            var roleRules = await permissions.GetRoleScopeRulesAsync(db, database.Id, roleIds);
 
             if (roleRules.Count > 0)
             {
@@ -543,17 +689,30 @@ public sealed class ExecutionService(
             try
             {
                 await using var db2 = await factory.CreateDbContextAsync();
-                var row = await db2.AuditLogs.FindAsync(auditId);
-                if (row is not null)
+                var details = result.Error is null
+                    ? (result.IsMasked ? $"[Masked: {string.Join(", ", result.MaskedColumns)}]" : null)
+                    : AuditService.Truncate(result.Error, 2000);
+                if (db2.Database.IsRelational())
                 {
-                    row.Outcome = result.Outcome;
-                    row.DurationMs = result.DurationMs;
-                    row.RowsAffected = result.RowsAffected;
-                    row.RowsReturned = result.RowsReturned;
-                    row.Details = result.Error is null
-                        ? (result.IsMasked ? $"[Masked: {string.Join(", ", result.MaskedColumns)}]" : null)
-                        : AuditService.Truncate(result.Error, 2000);
-                    await db2.SaveChangesAsync();
+                    await db2.AuditLogs.Where(a => a.Id == auditId).ExecuteUpdateAsync(s => s
+                        .SetProperty(a => a.Outcome, result.Outcome)
+                        .SetProperty(a => a.DurationMs, result.DurationMs)
+                        .SetProperty(a => a.RowsAffected, result.RowsAffected)
+                        .SetProperty(a => a.RowsReturned, result.RowsReturned)
+                        .SetProperty(a => a.Details, details));
+                }
+                else
+                {
+                    var row = await db2.AuditLogs.FindAsync(auditId);
+                    if (row is not null)
+                    {
+                        row.Outcome = result.Outcome;
+                        row.DurationMs = result.DurationMs;
+                        row.RowsAffected = result.RowsAffected;
+                        row.RowsReturned = result.RowsReturned;
+                        row.Details = details;
+                        await db2.SaveChangesAsync();
+                    }
                 }
                 if (!isSystem)
                 {
@@ -564,11 +723,15 @@ public sealed class ExecutionService(
                     });
                     await db2.SaveChangesAsync();
                     var limit = await settings.GetIntAsync("HistoryLimit");
-                    var stale = await db2.QueryHistory.Where(h => h.UserId == actor.UserId)
-                        .OrderByDescending(h => h.Id).Skip(limit).Select(h => h.Id).ToListAsync();
-                    if (stale.Count > 0)
+                    var writeCount = _historyWriteCounts.AddOrUpdate(actor.UserId, 1, (_, c) => c + 1);
+                    if (limit <= 10 || writeCount % 10 == 0)
                     {
-                        await db2.QueryHistory.Where(h => stale.Contains(h.Id)).ExecuteDeleteAsync();
+                        var stale = await db2.QueryHistory.Where(h => h.UserId == actor.UserId)
+                            .OrderByDescending(h => h.Id).Skip(limit).Select(h => h.Id).ToListAsync();
+                        if (stale.Count > 0)
+                        {
+                            await db2.QueryHistory.Where(h => stale.Contains(h.Id)).ExecuteDeleteAsync();
+                        }
                     }
                 }
             }

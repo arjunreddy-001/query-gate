@@ -3,6 +3,7 @@ using DbAccessManager.Security;
 using DbAccessManager.Services;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
 
 namespace DbAccessManager.Components.Shared;
@@ -16,6 +17,7 @@ public abstract class PageBase : ComponentBase
     [Inject] protected ToastService Toast { get; set; } = default!;
     [Inject] protected ITenantContext TenantCtx { get; set; } = default!;
     [Inject] protected ITenantContextAccessor TenantAccessor { get; set; } = default!;
+    [Inject] protected IServiceProvider ServiceProvider { get; set; } = default!;
 
     protected string UserId { get; private set; } = "";
     protected string UserName { get; private set; } = "";
@@ -94,6 +96,14 @@ public abstract class PageBase : ComponentBase
 
     protected async Task DownloadBinaryAsync(string filename, byte[] bytes, string mimeType = "application/octet-stream")
     {
+        var exports = ServiceProvider.GetService<ExportDownloadCache>();
+        if (exports is not null && !string.IsNullOrEmpty(UserId))
+        {
+            var token = exports.Register(bytes, mimeType, filename, UserId);
+            await JS.InvokeVoidAsync("dbam.downloadUrl", $"/api/internal/exports/{token}", filename);
+            return;
+        }
+
         var base64 = Convert.ToBase64String(bytes);
         await JS.InvokeVoidAsync("dbam.downloadBase64", filename, base64, mimeType);
     }

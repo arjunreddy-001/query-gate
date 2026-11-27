@@ -1,16 +1,53 @@
 using System.Data.Common;
 using System.Text.Json;
 using DbAccessManager.Data;
+using Microsoft.Extensions.Caching.Memory;
 using Npgsql;
 
 namespace DbAccessManager.Services.Providers;
 
-public sealed class PostgreSqlDatabaseProvider : IDatabaseProvider
+public sealed class PostgreSqlDatabaseProvider : IDatabaseProvider, IDisposable
 {
+    private readonly MemoryCache _dataSources = new(new MemoryCacheOptions { SizeLimit = 64 });
+    private readonly object _dsLock = new();
+
     public DatabaseEngine Engine => DatabaseEngine.PostgreSql;
     public string DisplayName => "PostgreSQL";
 
-    public DbConnection CreateConnection(string connectionString) => new NpgsqlConnection(connectionString);
+    private NpgsqlDataSource GetOrCreateDataSource(string connectionString)
+    {
+        if (_dataSources.TryGetValue(connectionString, out NpgsqlDataSource? existing) && existing is not null)
+        {
+            return existing;
+        }
+
+        lock (_dsLock)
+        {
+            if (_dataSources.TryGetValue(connectionString, out existing) && existing is not null)
+            {
+                return existing;
+            }
+
+            var created = NpgsqlDataSource.Create(connectionString);
+            var options = new MemoryCacheEntryOptions()
+                .SetSize(1)
+                .SetSlidingExpiration(TimeSpan.FromMinutes(15))
+                .RegisterPostEvictionCallback((_, value, _, _) =>
+                {
+                    if (value is NpgsqlDataSource ds)
+                    {
+                        try { ds.Dispose(); } catch { }
+                    }
+                });
+            _dataSources.Set(connectionString, created, options);
+            return created;
+        }
+    }
+
+    public DbConnection CreateConnection(string connectionString) =>
+        GetOrCreateDataSource(connectionString).CreateConnection();
+
+    public void Dispose() => _dataSources.Dispose();
 
     public (bool Valid, string? Error) ValidateConnectionString(string connectionString)
     {
@@ -137,7 +174,7 @@ public sealed class PostgreSqlDatabaseProvider : IDatabaseProvider
 
     public async Task<List<DbObjectInfo>> LoadMetadataAsync(string connectionString, CancellationToken ct = default)
     {
-        await using var conn = new NpgsqlConnection(connectionString);
+        await using var conn = GetOrCreateDataSource(connectionString).CreateConnection();
         await conn.OpenAsync(ct);
         var objects = new Dictionary<(string, string), DbObjectInfo>();
 
@@ -256,7 +293,7 @@ public sealed class PostgreSqlDatabaseProvider : IDatabaseProvider
 
     public async Task<ExecutionPlanDto?> ExplainPlanAsync(string connectionString, string sql, int timeoutSeconds, CancellationToken ct = default)
     {
-        await using var connection = new NpgsqlConnection(connectionString);
+        await using var connection = GetOrCreateDataSource(connectionString).CreateConnection();
         await connection.OpenAsync(ct);
 
         var planJson = string.Empty;

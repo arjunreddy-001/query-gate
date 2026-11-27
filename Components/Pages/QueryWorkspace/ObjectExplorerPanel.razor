@@ -1,0 +1,396 @@
+@using DbAccessManager.Data
+@using DbAccessManager.Services
+@implements IDisposable
+
+<aside id="workspace-panel" class="card ws-side">
+    <div class="tabs" style="margin:0;padding:0 8px">
+        <button class="tab @(Side == "explorer" ? "active" : "")" @onclick='() => OnSwitchSide.InvokeAsync("explorer")'>Objects</button>
+        <button class="tab @(Side == "saved" ? "active" : "")" @onclick='() => OnSwitchSide.InvokeAsync("saved")'>Saved</button>
+        <button class="tab @(Side == "history" ? "active" : "")" @onclick='() => OnSwitchSide.InvokeAsync("history")'>History</button>
+        <button class="mobile-panel-close icon-btn sm" type="button" aria-label="Close workspace panel" @onclick="OnToggleSide"><Icon Name="x" /></button>
+    </div>
+    <div class="scroll">
+        @if (Side == "explorer")
+        {
+            <div class="stack" style="margin-bottom:8px">
+                <div class="row-inline">
+                    <input type="search" placeholder="Filter objects…" value="@filterInput" @oninput="OnFilterInput" />
+                    <label class="check small" title="Search columns as well"><input type="checkbox" @bind="searchColumns" />Cols</label>
+                    <label class="check small" title="Use typo-tolerant fuzzy search"><input type="checkbox" @bind="fuzzySearch" />Fuzzy</label>
+                    <button class="icon-btn sm @(groupBySchema ? "active" : "")" title="Group objects by database schema (e.g. dbo, sales)" aria-label="Group objects by schema" @onclick="() => groupBySchema = !groupBySchema" style="flex:none"><Icon Name="folder" /></button>
+                    <button class="icon-btn sm" title="Refresh" @onclick="OnRefreshMetadata" style="flex:none"><Icon Name="refresh" /></button>
+                    <button class="icon-btn sm" title="Entity-Relationship (ER) Diagram" @onclick="() => OnOpenErDiagram.InvokeAsync(null)" style="flex:none"><Icon Name="grid" /></button>
+                </div>
+                <div class="row-inline obj-filters">
+                    <button class="icon-btn sm obj-filter @(objectTypeFilter == "All" ? "active" : "")" title="All" @onclick='() => objectTypeFilter = "All"'><Icon Name="list" /></button>
+                    <button class="icon-btn sm obj-filter @(objectTypeFilter == "Table" ? "active" : "")" title="Tables" @onclick='() => objectTypeFilter = "Table"'><Icon Name="table" /></button>
+                    <button class="icon-btn sm obj-filter @(objectTypeFilter == "View" ? "active" : "")" title="Views" @onclick='() => objectTypeFilter = "View"'><Icon Name="eye" /></button>
+                    <button class="icon-btn sm obj-filter @(objectTypeFilter == "Procedure" ? "active" : "")" title="Procedures" @onclick='() => objectTypeFilter = "Procedure"'><Icon Name="code" /></button>
+                    <button class="icon-btn sm obj-filter @(objectTypeFilter == "Function" ? "active" : "")" title="Functions" @onclick='() => objectTypeFilter = "Function"'><Icon Name="function" /></button>
+                </div>
+            </div>
+            @if (MetaLoading)
+            {
+                <div class="stack"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>
+            }
+            else if (MetaError is not null)
+            {
+                <div class="alert bad small">@MetaError</div>
+            }
+            else
+            {
+                var rows = GetExplorerRows();
+                if (rows.Count == 0)
+                {
+                    <div class="muted small" style="padding:8px">No objects.</div>
+                }
+                else
+                {
+                    <Virtualize Items="rows" Context="row" ItemSize="26" OverscanCount="10">
+                        @if (row.Kind == ExplorerRowKind.SchemaHeader)
+                        {
+                            var schemaKey = row.Key;
+                            <div @key="schemaKey" class="tree-item" style="font-weight:700;background:var(--bg-sunken)" @onclick="() => OnToggleExpand.InvokeAsync(schemaKey)">
+                                <button class="tree-chevron-btn" @onclick:stopPropagation @onclick="() => OnToggleExpand.InvokeAsync(schemaKey)" title="Toggle schema">
+                                    <Icon Name="@(row.IsExpanded ? "chevron-down" : "chevron-right")" />
+                                </button>
+                                <Icon Name="folder" />
+                                <span>@row.Label</span>
+                                <span class="faint small" style="margin-left:auto;font-size:10px">@row.ChildCount</span>
+                            </div>
+                        }
+                        else if (row.Kind == ExplorerRowKind.ObjectItem && row.Object is not null)
+                        {
+                            var o = row.Object;
+                            var key = row.Key;
+                            <div @key="key"
+                                 class="tree-item"
+                                 style="@(row.Indented ? "padding-left:20px" : "")"
+                                 @onclick="() => OnInsertSelect.InvokeAsync(o)"
+                                 @ondblclick="() => OnToggleExpand.InvokeAsync(key)"
+                                 @ondblclick:stopPropagation
+                                 @oncontextmenu="e => OnOpenObjectContextMenu.InvokeAsync((e, o))"
+                                 @oncontextmenu:preventDefault
+                                 title="Click: SELECT TOP 100 · Right-click: Menu · Double-click: Columns">
+                                <button class="tree-chevron-btn" @onclick:stopPropagation @onclick="() => OnToggleExpand.InvokeAsync(key)" title="Toggle columns">
+                                    <Icon Name="@(row.IsExpanded ? "chevron-down" : "chevron-right")" />
+                                </button>
+                                <Icon Name="@GetObjectIcon(o.Type)" />
+                                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="@key">@row.Label</span>
+                                <button type="button" class="icon-btn sm tree-touch-menu-btn" title="Object actions" aria-label="Object actions for @key" @onclick:stopPropagation @onclick="e => OnOpenObjectContextMenu.InvokeAsync((e, o))"><Icon Name="more-horizontal" /></button>
+                            </div>
+                        }
+                        else
+                        {
+                            var colName = row.Label;
+                            <div @key="row.Key"
+                                 class="tree-col"
+                                 style="@(row.Indented ? "padding-left:34px;cursor:pointer" : "cursor:pointer")"
+                                 @onclick="() => OnCopyColumn.InvokeAsync(colName)"
+                                 title="Click to copy column name">
+                                <span style="opacity:0.6;font-size:10px">●</span> @colName
+                            </div>
+                        }
+                    </Virtualize>
+                }
+            }
+        }
+        else if (Side == "saved")
+        {
+            <div class="row-inline" style="padding:4px 8px;gap:4px;margin-bottom:8px">
+                <button class="btn btn-sm @(savedViewMode == "my" ? "btn-primary" : "")" style="flex:1" @onclick='() => savedViewMode = "my"'>My Queries (@Saved.Count)</button>
+                <button class="btn btn-sm @(savedViewMode == "team" ? "btn-primary" : "")" style="flex:1" @onclick='() => savedViewMode = "team"'>Team Library (@TeamSaved.Count)</button>
+            </div>
+            @if (savedViewMode == "my")
+            {
+                @foreach (var s in Saved)
+                {
+                    <div class="tree-item" @onclick="() => OnLoadSql.InvokeAsync((s.SqlText, s.Name))">
+                        <Icon Name="star" />
+                        <div style="min-width:0">
+                            <div>@s.Name</div>
+                            @if (!string.IsNullOrEmpty(s.Tags)) { <div class="faint small">@s.Tags</div> }
+                            @if (s.IsShared) { <span class="badge" style="font-size:9px">Shared</span> }
+                        </div>
+                        <button class="btn-ghost btn btn-sm" style="margin-left:auto" @onclick:stopPropagation @onclick="() => OnPromptDeleteSaved.InvokeAsync(s)" title="Delete saved query"><Icon Name="x" /></button>
+                    </div>
+                }
+                @if (Saved.Count == 0) { <div class="muted small" style="padding:8px">Nothing saved for this database. Use Save (Ctrl+S).</div> }
+            }
+            else
+            {
+                @foreach (var s in TeamSaved)
+                {
+                    <div class="tree-item" @onclick="() => OnLoadSql.InvokeAsync((s.SqlText, s.Name))">
+                        <Icon Name="users" />
+                        <div style="min-width:0">
+                            <div><b>@s.Name</b></div>
+                            <div class="faint small">@(s.CreatedByUserName ?? "Team member") @(string.IsNullOrEmpty(s.Category) ? "" : $"· {s.Category}")</div>
+                        </div>
+                        @if (IsAdmin || s.UserId == UserId)
+                        {
+                            <button class="btn-ghost btn btn-sm" style="margin-left:auto" @onclick:stopPropagation @onclick="() => OnPromptDeleteSaved.InvokeAsync(s)" title="Delete team query"><Icon Name="x" /></button>
+                        }
+                    </div>
+                }
+                @if (TeamSaved.Count == 0) { <div class="muted small" style="padding:8px">No shared queries yet. Check "Share with Team" when saving.</div> }
+            }
+        }
+        else
+        {
+            @foreach (var h in History)
+            {
+                <div class="tree-item" style="flex-direction:column;align-items:stretch" @onclick="() => OnLoadSql.InvokeAsync((h.SqlText, null))">
+                    <div class="row-inline"><span class="badge @OutcomeClass(h.Outcome)">@h.Outcome</span><span class="faint small">@Ago(h.ExecutedAt) · @h.DurationMs ms</span></div>
+                    <div class="cell-sql" style="max-width:100%">@h.SqlText</div>
+                </div>
+            }
+            @if (History.Count == 0) { <div class="muted small" style="padding:8px">No history yet.</div> }
+        }
+    </div>
+</aside>
+
+@code {
+    [Parameter] public string Side { get; set; } = "explorer";
+    [Parameter] public EventCallback<string> OnSwitchSide { get; set; }
+    [Parameter] public EventCallback OnToggleSide { get; set; }
+    [Parameter] public IReadOnlyList<DbObjectInfo> Objects { get; set; } = [];
+    [Parameter] public bool MetaLoading { get; set; }
+    [Parameter] public string? MetaError { get; set; }
+    [Parameter] public IReadOnlySet<string> Expanded { get; set; } = new HashSet<string>();
+    [Parameter] public int ExpandVersion { get; set; }
+    [Parameter] public EventCallback<string> OnToggleExpand { get; set; }
+    [Parameter] public IReadOnlyList<SavedQuery> Saved { get; set; } = [];
+    [Parameter] public IReadOnlyList<SavedQuery> TeamSaved { get; set; } = [];
+    [Parameter] public IReadOnlyList<QueryHistory> History { get; set; } = [];
+    [Parameter] public bool IsAdmin { get; set; }
+    [Parameter] public string UserId { get; set; } = "";
+    [Parameter] public EventCallback OnRefreshMetadata { get; set; }
+    [Parameter] public EventCallback<string?> OnOpenErDiagram { get; set; }
+    [Parameter] public EventCallback<DbObjectInfo> OnInsertSelect { get; set; }
+    [Parameter] public EventCallback<(MouseEventArgs Args, DbObjectInfo Obj)> OnOpenObjectContextMenu { get; set; }
+    [Parameter] public EventCallback<string> OnCopyColumn { get; set; }
+    [Parameter] public EventCallback<(string Sql, string? Name)> OnLoadSql { get; set; }
+    [Parameter] public EventCallback<SavedQuery> OnPromptDeleteSaved { get; set; }
+    [Parameter] public Func<string, string> OutcomeClass { get; set; } = _ => "";
+    [Parameter] public Func<DateTimeOffset, string> Ago { get; set; } = _ => "";
+
+    private enum ExplorerRowKind { SchemaHeader, ObjectItem, ColumnItem }
+    private sealed record ExplorerRow(
+        ExplorerRowKind Kind,
+        string Key,
+        string Label,
+        DbObjectInfo? Object,
+        bool IsExpanded,
+        bool Indented,
+        int ChildCount);
+
+    private string filterInput = "";
+    private string debouncedFilter = "";
+    private CancellationTokenSource? _filterDebounceCts;
+    private string objectTypeFilter = "All";
+    private bool fuzzySearch = true;
+    private bool searchColumns;
+    private bool groupBySchema;
+    private string savedViewMode = "my";
+
+    private IReadOnlyList<DbObjectInfo>? _cachedObjectsSource;
+    private string _cachedObjectsFilter = "";
+    private string _cachedObjectsType = "All";
+    private bool _cachedObjectsSearchCols;
+    private bool _cachedObjectsFuzzy = true;
+    private List<DbObjectInfo> _cachedFilteredObjects = [];
+
+    private List<DbObjectInfo>? _cachedRowsFilteredRef;
+    private bool _cachedRowsGrouped;
+    private int _cachedRowsExpandVersion = -1;
+    private List<ExplorerRow> _cachedExplorerRows = [];
+
+    private async Task OnFilterInput(ChangeEventArgs e)
+    {
+        filterInput = e.Value?.ToString() ?? "";
+        _filterDebounceCts?.Cancel();
+        _filterDebounceCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _filterDebounceCts = cts;
+        try
+        {
+            await Task.Delay(200, cts.Token);
+            debouncedFilter = filterInput;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private List<ExplorerRow> GetExplorerRows()
+    {
+        var filtered = GetFilteredObjects();
+        if (ReferenceEquals(_cachedRowsFilteredRef, filtered) &&
+            _cachedRowsGrouped == groupBySchema &&
+            _cachedRowsExpandVersion == ExpandVersion)
+        {
+            return _cachedExplorerRows;
+        }
+
+        var rows = new List<ExplorerRow>(filtered.Count);
+        if (groupBySchema)
+        {
+            foreach (var g in filtered.GroupBy(o => o.Schema).OrderBy(g => g.Key))
+            {
+                var schemaKey = "schema:" + g.Key;
+                var schemaExpanded = Expanded.Contains(schemaKey);
+                var count = g.Count();
+                rows.Add(new ExplorerRow(ExplorerRowKind.SchemaHeader, schemaKey, g.Key, null, schemaExpanded, false, count));
+                if (!schemaExpanded) continue;
+                foreach (var o in g)
+                {
+                    AddObjectRows(rows, o, o.Name, indented: true);
+                }
+            }
+        }
+        else
+        {
+            foreach (var o in filtered)
+            {
+                AddObjectRows(rows, o, o.Schema + "." + o.Name, indented: false);
+            }
+        }
+
+        _cachedRowsFilteredRef = filtered;
+        _cachedRowsGrouped = groupBySchema;
+        _cachedRowsExpandVersion = ExpandVersion;
+        _cachedExplorerRows = rows;
+        return rows;
+    }
+
+    private void AddObjectRows(List<ExplorerRow> rows, DbObjectInfo o, string label, bool indented)
+    {
+        var key = o.Schema + "." + o.Name;
+        var isExpanded = Expanded.Contains(key);
+        rows.Add(new ExplorerRow(ExplorerRowKind.ObjectItem, key, label, o, isExpanded, indented, 0));
+        if (!isExpanded) return;
+        for (var i = 0; i < o.Columns.Count; i++)
+        {
+            var col = o.Columns[i];
+            rows.Add(new ExplorerRow(ExplorerRowKind.ColumnItem, $"{key}:col:{i}:{col}", col, null, false, indented, 0));
+        }
+    }
+
+    private List<DbObjectInfo> GetFilteredObjects()
+    {
+        var normalizedFilter = debouncedFilter ?? "";
+        if (ReferenceEquals(_cachedObjectsSource, Objects) &&
+            string.Equals(_cachedObjectsFilter, normalizedFilter, StringComparison.Ordinal) &&
+            string.Equals(_cachedObjectsType, objectTypeFilter, StringComparison.Ordinal) &&
+            _cachedObjectsSearchCols == searchColumns &&
+            _cachedObjectsFuzzy == fuzzySearch)
+        {
+            return _cachedFilteredObjects;
+        }
+
+        var result = BuildFilteredObjects(normalizedFilter).ToList();
+        _cachedObjectsSource = Objects;
+        _cachedObjectsFilter = normalizedFilter;
+        _cachedObjectsType = objectTypeFilter;
+        _cachedObjectsSearchCols = searchColumns;
+        _cachedObjectsFuzzy = fuzzySearch;
+        _cachedFilteredObjects = result;
+        return result;
+    }
+
+    private IEnumerable<DbObjectInfo> BuildFilteredObjects(string currentFilter)
+    {
+        var source = Objects.AsEnumerable();
+        if (objectTypeFilter != "All") source = source.Where(o => o.Type == objectTypeFilter);
+
+        if (string.IsNullOrWhiteSpace(currentFilter)) return source.Take(300);
+        if (searchColumns)
+        {
+            return source.Where(o =>
+                (o.Schema + "." + o.Name).Contains(currentFilter, StringComparison.OrdinalIgnoreCase) ||
+                o.Columns.Any(c => c.Contains(currentFilter, StringComparison.OrdinalIgnoreCase))
+            ).Take(300);
+        }
+        if (!fuzzySearch)
+            return source.Where(o => (o.Schema + "." + o.Name).Contains(currentFilter, StringComparison.OrdinalIgnoreCase)).Take(300);
+
+        var query = Normalize(currentFilter);
+        if (query.Length == 0) return source.Take(300);
+
+        return source
+            .Select(o => new { Obj = o, Score = FuzzyScore(query, Normalize(o.Schema + "." + o.Name), Normalize(o.Name)) })
+            .Where(x => x.Score >= 0)
+            .OrderByDescending(x => x.Score)
+            .ThenBy(x => x.Obj.Schema)
+            .ThenBy(x => x.Obj.Name)
+            .Select(x => x.Obj)
+            .Take(300);
+    }
+
+    public static string GetObjectIcon(string type) => type switch
+    {
+        "Table" => "table",
+        "View" => "eye",
+        "Function" => "function",
+        _ => "code"
+    };
+
+    private static string Normalize(string value) => new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    private static int FuzzyScore(string query, string fullName, string name)
+    {
+        var containsName = name.IndexOf(query, StringComparison.Ordinal);
+        if (containsName >= 0) return 1000 - containsName;
+
+        var containsFull = fullName.IndexOf(query, StringComparison.Ordinal);
+        if (containsFull >= 0) return 900 - containsFull;
+
+        if (IsSubsequence(query, name)) return 700 - Math.Max(0, name.Length - query.Length);
+
+        var threshold = Math.Max(1, query.Length / 3);
+        if (Math.Abs(query.Length - name.Length) > threshold) return -1;
+        var distance = Levenshtein(query, name);
+        if (distance <= threshold) return 500 - (distance * 50);
+
+        return -1;
+    }
+
+    private static bool IsSubsequence(string query, string text)
+    {
+        var q = 0;
+        for (var i = 0; i < text.Length && q < query.Length; i++)
+            if (text[i] == query[q]) q++;
+        return q == query.Length;
+    }
+
+    private static int Levenshtein(string source, string target)
+    {
+        if (source.Length == 0) return target.Length;
+        if (target.Length == 0) return source.Length;
+
+        if (source.Length < target.Length) (source, target) = (target, source);
+
+        var row = new int[target.Length + 1];
+        for (var j = 0; j <= target.Length; j++) row[j] = j;
+
+        for (var i = 1; i <= source.Length; i++)
+        {
+            var prevDiag = row[0];
+            row[0] = i;
+            for (var j = 1; j <= target.Length; j++)
+            {
+                var oldDiag = row[j];
+                var cost = source[i - 1] == target[j - 1] ? 0 : 1;
+                row[j] = Math.Min(Math.Min(row[j] + 1, row[j - 1] + 1), prevDiag + cost);
+                prevDiag = oldDiag;
+            }
+        }
+        return row[target.Length];
+    }
+
+    public void Dispose()
+    {
+        _filterDebounceCts?.Cancel();
+        _filterDebounceCts?.Dispose();
+    }
+}

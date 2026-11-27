@@ -256,6 +256,7 @@ public sealed class MetadataService(
     IDatabaseCache? databaseCache = null)
 {
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, MetadataCacheEntry> entries = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, SemaphoreSlim> _loadLocks = new();
     private CancellationTokenSource resetToken = new();
 
     private static string Key(Guid id) => "meta:" + id;
@@ -281,36 +282,47 @@ public sealed class MetadataService(
         var key = Key(databaseId);
         if (enabled && !refresh && cache.TryGetValue(key, out List<DbObjectInfo>? cached) && cached is not null) return cached;
 
-        DatabaseEngine engine;
-        string connStr;
-        CachedDatabaseDescriptor? dbDesc = databaseCache != null ? await databaseCache.GetAsync(databaseId) : null;
-        if (dbDesc is not null)
+        var gate = _loadLocks.GetOrAdd(databaseId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync();
+        try
         {
-            if (!dbDesc.IsActive) throw new InvalidOperationException("Database not found.");
-            engine = dbDesc.Engine;
-            connStr = dbDesc.DecryptedConnectionString;
-        }
-        else
-        {
-            await using var db = await factory.CreateDbContextAsync();
-            var database = await db.ManagedDatabases.AsNoTracking().FirstOrDefaultAsync(d => d.Id == databaseId && d.IsActive)
-                ?? throw new InvalidOperationException("Database not found.");
-            engine = database.Engine;
-            connStr = crypto.Decrypt(database.EncryptedConnectionString);
-        }
+            if (enabled && !refresh && cache.TryGetValue(key, out cached) && cached is not null) return cached;
 
-        var provider = providers.GetProvider(engine);
-        var list = await provider.LoadMetadataAsync(connStr);
+            DatabaseEngine engine;
+            string connStr;
+            CachedDatabaseDescriptor? dbDesc = databaseCache != null ? await databaseCache.GetAsync(databaseId) : null;
+            if (dbDesc is not null)
+            {
+                if (!dbDesc.IsActive) throw new InvalidOperationException("Database not found.");
+                engine = dbDesc.Engine;
+                connStr = dbDesc.DecryptedConnectionString;
+            }
+            else
+            {
+                await using var db = await factory.CreateDbContextAsync();
+                var database = await db.ManagedDatabases.AsNoTracking().FirstOrDefaultAsync(d => d.Id == databaseId && d.IsActive)
+                    ?? throw new InvalidOperationException("Database not found.");
+                engine = database.Engine;
+                connStr = crypto.Decrypt(database.EncryptedConnectionString);
+            }
 
-        if (enabled)
-        {
-            var options = new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(Math.Max(1, await settings.GetIntAsync("MetadataTtlMinutes"))) }
-                .AddExpirationToken(new Microsoft.Extensions.Primitives.CancellationChangeToken(resetToken.Token));
-            cache.Set(key, list, options);
-            entries[databaseId] = new MetadataCacheEntry(databaseId, list.Count, DateTimeOffset.UtcNow);
+            var provider = providers.GetProvider(engine);
+            var list = await provider.LoadMetadataAsync(connStr);
+
+            if (enabled)
+            {
+                var options = new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(Math.Max(1, await settings.GetIntAsync("MetadataTtlMinutes"))) }
+                    .AddExpirationToken(new Microsoft.Extensions.Primitives.CancellationChangeToken(resetToken.Token));
+                cache.Set(key, list, options);
+                entries[databaseId] = new MetadataCacheEntry(databaseId, list.Count, DateTimeOffset.UtcNow);
+            }
+            else entries.TryRemove(databaseId, out _);
+            return list;
         }
-        else entries.TryRemove(databaseId, out _);
-        return list;
+        finally
+        {
+            gate.Release();
+        }
     }
 
     public async Task<ErDiagramData> GetErDiagramDataAsync(Guid databaseId, string? focusTable = null, int hops = 1, bool fullSchema = false)
